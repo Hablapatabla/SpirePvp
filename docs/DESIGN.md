@@ -138,8 +138,12 @@ so the mechanism is proven; Model B just changes the release condition. Keep the
 behind a single policy object (`IDuelTurnModel` with `ShouldDeferAction` / `OnLockIn` /
 `ResolutionOrder`) rather than scattering `if (blitz)` through the patches.
 
-**Model B's real design question is resolution order**, and it is a genuine game-design
-choice, not a technical one:
+**Resolution order is deferred to M9 — do not let it block M8.** Decided 2026-08-05: get the
+lock-in loop working first with the cheapest possible order (submission order — flush both
+players' buffered queues in the sequence they were queued, which is what blitz already does,
+merely batched). That requires no new concepts and no per-character data. Tuning which order
+makes the *best game* is a question worth asking only once the mode is playable, because the
+answer depends on how it feels. The options, for when we come back to it:
 - *Cost order* — cheaper cards resolve first. Readable, makes energy a tempo currency.
 - *Alternating priority* — like a card game's initiative, swapping each round. Symmetric
   and easy to reason about.
@@ -336,9 +340,13 @@ mechanic. Note `HittableEnemies` is **not** patchable — it has no acting-playe
   (§9); Workshop packaging; spectator/obs support (stretch).
 - **M8 — Simultaneous turn-based duel** (§3.1b model B). Introduce `IDuelTurnModel`, move the
   existing behaviour behind a `BlitzTurnModel` unchanged, then add the lock-in model beside
-  it. Carry the choice on `DuelStartMessage`. Best done after a real blitz duel has been
-  played end to end, so the comparison is against something known rather than imagined.
+  it. Carry the choice on `DuelStartMessage`. **Use submission order and do not tune it** —
+  resolution order is M9's problem. Best done after a real blitz duel has been played end to
+  end, so the comparison is against something known rather than imagined.
   *Accept: the same duel is playable under both models, chosen at duel start.*
+- **M9 — Turn-model tuning.** Revisit resolution order (§3.1b) now that both modes are
+  playable and can be compared by feel rather than argument; per-round planning timer for
+  model B; decide whether one model ships or both do as a lobby option.
 
 ## 8. Dev workflow
 
