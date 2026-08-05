@@ -478,7 +478,35 @@ mechanic. Note `HittableEnemies` is **not** patchable — it has no acting-playe
   location buffer rather than hard barriers, so they are likely to tolerate divergence better
   than map traversal does.
 
-- **I4 (M5)** — **RESOLVED. It is a one-line change.**
+- **I4 (M5)** — **CONFIRMED STILL NEEDED, measured 2026-08-05.** Playtesting appeared to show
+  the two players already receiving identical card rewards, which would have made this
+  unnecessary. It was a false signal, and the reason matters for all future testing.
+
+  Measured on two clients (`race on` prints this; see `RaceCoordinator.LogSeedDiagnostics`):
+
+  ```
+  run seed 'MXQEJSBZUFNH'          (identical on both — random, not fixed)
+  netId=1    slot=0  playerRngSeed=6094536868692103799
+  netId=1001 slot=1  playerRngSeed=6094536868692103800
+  ```
+
+  Slot ordering is consistent across clients, and the per-player seeds differ by exactly 1,
+  precisely as `InitializeSeed` implies. **The RNGs are not mirrored.**
+
+  The identical rewards came from `RewardsSet.TryGenerateTutorialRewards`, which **bypasses
+  RNG entirely** when `UnlockState.NumberOfRuns == 0 && EpochUnlockCount() == 0 && Character
+  is Ironclad`, and hands out hardcoded cards, potions and relics (literally `Bludgeon, Pyre,
+  EvilEye`, a `Vajra`, and so on) for roughly the first seven monster rooms and the first two
+  elites.
+
+  **Testing caveat, and it is a trap:** both dev profiles are permanently first-run unless a
+  run is actually completed on them, so *every race test so far has observed scripted tutorial
+  content rather than real reward generation*. To exercise the real path, either finish a run
+  on each profile, or simply **pick a non-Ironclad character** — the tutorial branch requires
+  Ironclad, so any other character bypasses it immediately. Do this before concluding anything
+  about reward parity.
+
+  The fix itself is still the one-line change described below.
   `Player.InitializeSeed(string seed)` (`Core/Entities/Players/Player.cs:328`) does:
   ```
   PlayerRng = new PlayerRngSet(GetDeterministicHashCode(seed) + (ulong)_runState.GetPlayerSlotIndex(this));
