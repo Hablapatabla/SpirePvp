@@ -40,7 +40,73 @@ public static class RaceCoordinator
         // constantly. Re-enabled for the duel, which is fully coupled again.
         run.ChecksumTracker.IsEnabled = false;
 
+        DeactivateRemotePlayerHooks(run);
+
         Log.Warn("[SpirePvp] race mode ON — combat state sync and checksums disabled");
+    }
+
+    /// <summary>
+    /// Stops the opponent's relics, cards and potions firing inside *our* run — blocker 5,
+    /// and the cause of a black screen entering the first combat after a Neow bonus.
+    ///
+    /// Room and run hooks iterate at the *run* level: `RunState.IterateHookListeners` walks
+    /// every player's deck, relics and potions, not just the ones in the current combat. So
+    /// `Hook.AfterRoomEntered` fired the *absent opponent's* Divine Right, which called
+    /// `PlayerCmd.GainStars(..., base.Owner)` for a player whose `Creature.CombatState` is
+    /// null — they were never enrolled in this combat (RaceSoloCombatPatch) — and the null
+    /// combat state NREd inside the hook iterator. The throw escaped through StartCombat, so
+    /// the room never finished loading.
+    ///
+    /// Patching Divine Right specifically would be whack-a-mole: *any* relic or card hook
+    /// belonging to the absent player has the same problem, and we would meet them one crash
+    /// at a time.
+    ///
+    /// Vanilla already has the exact concept — `IsActiveForHooks`, which it clears via
+    /// `DeactivateHooks()` when a player dies, meaning "still in the run, but must not
+    /// participate in hooks". Every iterator checks it first. Applying it to remote players
+    /// for the duration of the race fixes the whole family at once.
+    ///
+    /// Each client deactivates only its *remote* players, so both players' own relics keep
+    /// working normally in their own run.
+    ///
+    /// Self-healing for the duel: `SyncWithSerializedPlayer` — which
+    /// `CombatStateSynchronizer.WaitForSync` runs on duel entry — restores
+    /// `IsActiveForHooks = Creature.IsAlive`. EndRace restores it explicitly anyway rather
+    /// than relying on that.
+    /// </summary>
+    private static void DeactivateRemotePlayerHooks(RunManager run)
+    {
+        RunState? state = run.State;
+        if (state == null)
+        {
+            return;
+        }
+
+        foreach (Player player in state.Players)
+        {
+            if (!LocalContext.IsMe(player))
+            {
+                player.DeactivateHooks();
+                Log.Info($"[SpirePvp] race: hooks deactivated for remote player {player.NetId}");
+            }
+        }
+    }
+
+    private static void ReactivateAllPlayerHooks(RunManager run)
+    {
+        RunState? state = run.State;
+        if (state == null)
+        {
+            return;
+        }
+
+        foreach (Player player in state.Players)
+        {
+            if (player.Creature.IsAlive)
+            {
+                player.ActivateHooks();
+            }
+        }
     }
 
     /// <summary>
@@ -79,6 +145,7 @@ public static class RaceCoordinator
         RunManager run = RunManager.Instance;
         run.CombatStateSynchronizer.IsDisabled = _combatSyncWasDisabled;
         run.ChecksumTracker.IsEnabled = _checksumsWereEnabled;
-        Log.Warn("[SpirePvp] race mode OFF — state sync restored");
+        ReactivateAllPlayerHooks(run);
+        Log.Warn("[SpirePvp] race mode OFF — state sync and player hooks restored");
     }
 }
