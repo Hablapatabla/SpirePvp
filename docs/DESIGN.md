@@ -110,6 +110,52 @@ that's the "first strike" mechanic, no code needed. Note the latency asymmetry: 
 own requests don't cross the network, so the host has an inherent edge (~½ RTT). Acceptable
 for friendly play; mitigation ideas in §9 (design knobs).
 
+### 3.1b Duel turn models — build for two, ship whichever plays better
+
+**Decision 2026-08-05: the duel's turn model is a first-class, swappable option, not a
+constant.** Real-time blitz is what M1–M4 built and what we playtest first, but it is an
+open question whether reflex-driven play or deliberate simultaneous planning makes the better
+game. That question is answerable only by playing both, so the code should not assume either.
+
+| | **A. Real-time blitz** (built) | **B. Simultaneous turn-based** ("competitive Pokémon") |
+|---|---|---|
+| Within a round | Both act freely and concurrently | Both plan privately, then lock in |
+| What decides outcomes | Order the host receives actions — reflex and speed | A deterministic resolution rule — prediction and sequencing |
+| Skill tested | Execution speed under pressure | Reading the opponent, ordering your own plays |
+| Clock role | Core mechanic: the clock *is* the pressure | Safety net: stops stalling, does not create tension |
+| Engine support | Free — this is vanilla co-op's player phase | Needs a lock-in gate plus a resolution order |
+
+**Why both are cheap to support:** the difference is *when* actions execute, never *what*
+they do. Retargeting, the win condition, powers and DoT are identical in both. Model B is
+therefore not a rewrite — it is a gate in front of the same action stream.
+
+**The seam.** Model A lets `RequestEnqueue` flow straight through, so host-arrival order
+decides everything. Model B buffers each player's actions locally until both have locked in,
+then submits them in a deterministic order. Vanilla already does exactly this kind of
+deferral — `ActionQueueSynchronizer._requestedActionsWaitingForPlayerTurn` holds
+play-phase-only actions queued during the enemy turn and flushes them at player-turn start —
+so the mechanism is proven; Model B just changes the release condition. Keep the choice
+behind a single policy object (`IDuelTurnModel` with `ShouldDeferAction` / `OnLockIn` /
+`ResolutionOrder`) rather than scattering `if (blitz)` through the patches.
+
+**Model B's real design question is resolution order**, and it is a genuine game-design
+choice, not a technical one:
+- *Cost order* — cheaper cards resolve first. Readable, makes energy a tempo currency.
+- *Alternating priority* — like a card game's initiative, swapping each round. Symmetric
+  and easy to reason about.
+- *Speed stat* — a new per-character attribute. Most Pokémon-like, most new content.
+- *Submission order* — resolves in the order each player queued their own plays, interleaved.
+  Preserves some of blitz's "sequence your combo correctly" texture without the reflex.
+
+**Interaction with the chess clock.** Under A the clock is load-bearing and per-player running
+time is the whole tension. Under B the natural analogue is a per-round planning timer (with
+the bank as a reserve, like real chess increments). `DuelClock` is already pure logic with
+start/pause/tick, so it serves both; only the *policy* for when it runs changes.
+
+**Both players must run the same model.** It rides on `DuelStartMessage` alongside `clockMs`
+and `suddenDeath`, so the host's choice is authoritative for the duel — same reasoning as
+every other duel parameter.
+
 ### 3.2 Chess clock
 
 - `DuelClock` is pure logic (per-player time bank, running/paused, flag event) — unit-testable
@@ -288,6 +334,11 @@ mechanic. Note `HittableEnemies` is **not** patchable — it has no acting-playe
   one.
 - **M7 — Polish/knobs.** Config UI (BaseLib) for clock settings & flag rule; balance knobs
   (§9); Workshop packaging; spectator/obs support (stretch).
+- **M8 — Simultaneous turn-based duel** (§3.1b model B). Introduce `IDuelTurnModel`, move the
+  existing behaviour behind a `BlitzTurnModel` unchanged, then add the lock-in model beside
+  it. Carry the choice on `DuelStartMessage`. Best done after a real blitz duel has been
+  played end to end, so the comparison is against something known rather than imagined.
+  *Accept: the same duel is playable under both models, chosen at duel start.*
 
 ## 8. Dev workflow
 
@@ -331,8 +382,12 @@ mechanic. Note `HittableEnemies` is **not** patchable — it has no acting-playe
 - **Host advantage**: host resolves ~½ RTT faster. Options: accept it; input-delay
   equalization (delay host's own enqueues by measured RTT/2); alternate hosting across a
   match series. Defer; measure first.
-- **First-strike depth**: pure arrival order, or small windup (0.5s) per card so a fast
-  block can answer a seen attack? Playtest question.
+- **First-strike depth** (model A only): pure arrival order, or small windup (0.5s) per card
+  so a fast block can answer a seen attack? Playtest question.
+- **Which turn model ships** — genuinely open, see §3.1b. Real-time blitz is built and gets
+  playtested first; simultaneous turn-based is a supported alternative to be built and tried
+  rather than a fallback. Decide from play, not from argument. If both hold up, ship both as
+  a lobby option — they are different games and people will want different ones.
 - **Co-op-only cards** (ally-targeting) in the duel pool: probably ban at draft/reward
   level during the race; harmless mechanically.
 - **Potions, powers that reference "monsters"**: audit pass in M2 for mechanics that
