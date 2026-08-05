@@ -1,0 +1,14 @@
+{
+  "DUEL_BLITZ.title": "1v1 Duel: Real-Time",
+  "DUEL_BLITZ.description": "Two players race the same map, then duel. Both act at once - actions resolve in the order they are made, so speed decides trades.",
+  "DUEL_TURN_BASED.title": "1v1 Duel: Turn-Based",
+  "DUEL_TURN_BASED.description": "Two players race the same map, then duel. Both plan in secret and lock in, then the turn resolves at once.",
+  "DUEL_CLOCK_THREE.title": "Duel Clock: 3 min",
+  "DUEL_CLOCK_THREE.description": "Each player has a 3 minute bank for the run. Run out and you lose.",
+  "DUEL_CLOCK_FIVE.title": "Duel Clock: 5 min",
+  "DUEL_CLOCK_FIVE.description": "Each player has a 5 minute bank for the run. Run out and you lose.",
+  "DUEL_CLOCK_TEN.title": "Duel Clock: 10 min",
+  "DUEL_CLOCK_TEN.description": "Each player has a 10 minute bank for the run. Run out and you lose.",
+  "DUEL_CLOCK_NONE.title": "Duel Clock: Off",
+  "DUEL_CLOCK_NONE.description": "No time limit. Nobody can lose on time."
+}

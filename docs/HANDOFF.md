@@ -158,6 +158,28 @@ apart.
 
 ---
 
+## Starting a PvP match
+
+Configured in the lobby, before the run exists (DESIGN §5b) — not by a console command.
+
+Host: **Multiplayer → host → Custom run**, then tick one turn model and one clock in the
+modifier list:
+
+- `1v1 Duel: Real-Time` **or** `1v1 Duel: Turn-Based` — picking either marks the run as PvP
+- `Duel Clock: 3 / 5 / 10 min` **or** `Off`
+
+Both groups are mutually exclusive (radio-button behaviour, via vanilla's
+`MutuallyExclusiveModifiers`), and the joining player sees the choices in the lobby before
+starting. Custom mode also exposes the seed field, which is useful for rematches on a known
+seed. `--fastmp=host_custom` boots straight into a custom multiplayer host.
+
+Custom runs are gated behind `CustomAndSeedsEpoch`; `unlock all` clears it on a dev profile.
+
+**If the modifiers show up as raw keys like `DUEL_BLITZ.title`, the `.pck` is stale.** Names
+come from `SpirePvp/localization/en/modifiers.json`, which ships in the pack, not the DLL.
+`host.ps1` re-exports the pack when anything under `SpirePvp/` is newer, but a manual
+`dotnet build` alone will not.
+
 ## Console commands
 
 The dev console opens with **backtick** (also `'`, `*`, `^`, or Shift+8). **Running any mod
@@ -172,7 +194,7 @@ Mod commands:
 | `duel now` | Skips the entry screen, straight into the arena. Debug shortcut. |
 | `duel clock <minutes>` | Sets the time bank. `0` disables the clock entirely (the default). |
 | `duel on` / `duel off` | Converts the combat you are already in into a duel, and back. Legacy path from M1; `duel start` is the real flow. |
-| `race on` / `race off` | **M5 spike, untested in game.** Decouples the clients so each traverses the shared map alone: disables pre-combat state sync and checksums, travels locally instead of voting, and enrols only the local player into combats. `off` restores party movement. |
+| `race on` / `race off` | **Debug shortcut only.** A real match is configured in the lobby (below); this forces race mode onto an already-running co-op run, which is useful for exercising the patches but leaves Neow and pre-existing seeds un-mirrored. |
 
 Useful vanilla ones for testing:
 

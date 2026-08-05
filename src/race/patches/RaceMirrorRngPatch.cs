@@ -3,6 +3,7 @@ using MegaCrit.Sts2.Core.Entities.Players;
 using MegaCrit.Sts2.Core.Helpers;
 using MegaCrit.Sts2.Core.Odds;
 using MegaCrit.Sts2.Core.Random;
+using SpirePvp.Duel;
 
 namespace SpirePvp.Race.Patches;
 
@@ -20,22 +21,24 @@ namespace SpirePvp.Race.Patches;
 ///
 /// Dropping the offset seeds both players from the run seed alone.
 ///
-/// **Unconditional by design, and harmless outside PvP.** In singleplayer the local player is
-/// always slot 0, so the offset is already zero and this changes nothing at all. It only has
-/// an effect with two or more players — which, for a mod that cannot even join an unmodded
-/// lobby (see HANDOFF), means a SpirePvp match.
+/// **Scoped to PvP runs.** `RunState.CreateForNewRun` installs modifiers before the
+/// `InitializeSeed` loop, so by the time seeding happens the run already knows whether it is
+/// a match — which is exactly why match setup moved into the lobby (DESIGN §5b). A normal run
+/// keeps vanilla's per-player offsets.
 ///
-/// Applied at seeding time, which happens once at run creation. A run already under way when
-/// race mode is switched on has therefore already drawn its Neow options from the old seeds;
-/// `RaceCoordinator.MirrorExistingRun` re-seeds in that case so mid-run `race on` still
-/// mirrors everything from that point. Once M6 starts the race automatically at run start,
-/// only this patch will matter.
+/// Seeding runs once at run creation, so with the modifier present Neow is drawn from
+/// mirrored seeds too, and nothing has to be re-seeded after the fact.
 /// </summary>
 [HarmonyPatch(typeof(Player), "InitializeSeed")]
 public static class RaceMirrorRngPatch
 {
     public static bool Prefix(Player __instance, string seed)
     {
+        if (!DuelMatch.IsPvpRun(__instance.RunState))
+        {
+            return true;
+        }
+
         __instance.PlayerRng = new PlayerRngSet(StringHelper.GetDeterministicHashCode(seed));
         __instance.PlayerOdds = new PlayerOddsSet(__instance.PlayerRng);
         return false;

@@ -40,6 +40,28 @@ if (-not $NoBuild) {
     Write-Host "Building..." -ForegroundColor Cyan
     dotnet build "$PSScriptRoot\..\SpirePvp.csproj" --nologo -v minimal
     if ($LASTEXITCODE -ne 0) { throw "Build failed - not launching." }
+
+    # Godot assets (localization JSON, images) live in the .pck, which dotnet does not
+    # produce. Re-export when anything under SpirePvp/ is newer than the installed pack -
+    # a stale .pck shows modifier names as raw loc keys rather than failing loudly.
+    $pck = Join-Path (Get-Sts2Path) "mods\SpirePvp\SpirePvp.pck"
+    $assets = Get-ChildItem "$PSScriptRoot\..\SpirePvp" -Recurse -File -ErrorAction SilentlyContinue |
+              Sort-Object LastWriteTime -Descending | Select-Object -First 1
+    $needsPck = (-not (Test-Path $pck)) -or ($assets -and $assets.LastWriteTime -gt (Get-Item $pck).LastWriteTime)
+
+    if ($needsPck) {
+        $godot = "C:\Users\lucas\Tools\Godot\Godot_v4.5.1-stable_mono_win64\Godot_v4.5.1-stable_mono_win64_console.exe"
+        if (Test-Path $godot) {
+            Write-Host "Assets changed - re-exporting .pck..." -ForegroundColor Cyan
+            Push-Location "$PSScriptRoot\.."
+            & $godot --headless --import 2>&1 | Out-Null
+            & $godot --headless --export-pack "Windows Desktop" $pck 2>&1 | Select-String -Pattern "ERROR|error" | ForEach-Object { Write-Host $_ -ForegroundColor Red }
+            Pop-Location
+        }
+        else {
+            Write-Host "Godot not found - .pck may be stale (modifier names will show as loc keys)." -ForegroundColor Yellow
+        }
+    }
 }
 
 if (-not $Fullscreen) { [void](Set-Sts2DevProfile -ClientId 1 -Role host -Width $Width) }
