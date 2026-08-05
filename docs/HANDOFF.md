@@ -91,6 +91,10 @@ build, the windowing and the mod-consent gate (below). Tab 1 then tab 2:
 .\scripts\host.ps1
 .\scripts\client.ps1
 ```
+Run them in **PowerShell 7 (`pwsh`)**, not Windows PowerShell 5.1. The two keep separate
+execution policies, and 5.1 commonly defaults to `Restricted`, which refuses the scripts with
+"running scripts is disabled on this system" — nothing to do with the scripts themselves.
+Either switch shells, or `Set-ExecutionPolicy -Scope CurrentUser RemoteSigned` for 5.1.
 `host.ps1` builds first and aborts the launch if the build fails; `client.ps1` never builds,
 because two concurrent builds fight over the same output files. Flags: `-NoBuild`,
 `-Fullscreen`, `-Width <px>`, `-ClientId <n>`. Verify the run with `.\scripts\check-log.ps1`.
