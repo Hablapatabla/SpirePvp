@@ -79,6 +79,31 @@ public static class DuelTargetingPatch
 }
 
 /// <summary>
+/// Same rule for potions. PotionModel.IsValidTarget is a separate method from CardModel's —
+/// the game explicitly warns against unifying them, because potions pass a target for
+/// TargetType.Self and cards do not — but the AnyEnemy branch is the identical
+/// `target.Side != Owner.Creature.Side` check, and fails for the same reason.
+/// </summary>
+[HarmonyPatch(typeof(PotionModel), nameof(PotionModel.IsValidTarget))]
+public static class DuelPotionTargetingPatch
+{
+    public static void Postfix(PotionModel __instance, Creature? target, ref bool __result)
+    {
+        if (__result || !DuelSession.IsDuelActive)
+        {
+            return;
+        }
+
+        if (__instance.TargetType != TargetType.AnyEnemy)
+        {
+            return;
+        }
+
+        __result = DuelTargetingPatch.IsOpponentOf(__instance.Owner, target);
+    }
+}
+
+/// <summary>
 /// The second half of duel retargeting, and the one that actually blocks play.
 ///
 /// Targeting is validated twice, independently. CardModel.IsValidTarget governs the rules
