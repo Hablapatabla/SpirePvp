@@ -44,6 +44,14 @@ public static class DuelClockHudPatch
         if (DuelClockService.Enabled && DuelClockService.Local != null)
         {
             __instance.Visible = true;
+
+            // Vanilla repaints about once a second, which is fine for a run timer and too
+            // coarse for a chess clock — the last few seconds visibly lag. The clock itself
+            // is wall-clock based, so this only changes how often the label is redrawn.
+            if (__instance._timer != null)
+            {
+                __instance._timer.WaitTime = 0.1;
+            }
         }
     }
 }
