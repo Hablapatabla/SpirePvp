@@ -187,6 +187,7 @@ For M1 the entry is just a dev-console command / hotkey both players press.
 | `ClockHud` | **Done, and deliberately not a component.** Both clocks share the vanilla run-timer label in the top bar (`NRunTimer`, postfixed), rendered as `YOU 2:31 · OPP 1:47` in a stable `m:ss`. A separate two-element HUD was considered and dropped — one label reads fine and costs no scene work. Local prediction + host `ClockSyncMessage` at 2/sec. "Turns red < 30s" still unimplemented. |
 | `RaceProgressHud` | Opponent's map position, HP, deck count. Driven by `RaceProgressMessage`. |
 | `DuelResultScreen` | Winner, per-round damage stats, rematch button. |
+| Entry-screen confirm feedback | *Wanted, not built.* A large green check on screen once **you** have confirmed, and a small portrait of the opponent on the confirm button once **they** have — so you can see their state without asking. Model it on the per-player icons the group-choice random events already show. |
 
 BaseLib (Workshop id 3737335127, NuGet `Alchyr.Sts2.BaseLib`) provides node factories and
 config UI — study how Minty Spire 2 builds UI (`scratchpad clone or github: erasels/Minty-Spire-2`)

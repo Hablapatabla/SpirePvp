@@ -62,9 +62,16 @@ public static class DuelEntryScreenPatch
         return BeforePreviewSelection(__instance);
     }
 
+    /// <summary>
+    /// Label the confirm once the overlay is up. Deliberately hooks AfterOverlayShown, which
+    /// NDeckCardSelectScreen declares itself: ConnectSignalsAndInitGrid lives on the base
+    /// NCardGridSelectionScreen, and Harmony resolves [HarmonyPatch(typeof(X))] against
+    /// methods declared on X only — naming an inherited method throws "Undefined target
+    /// method" at PatchAll, which aborts the remaining patches in the assembly.
+    /// </summary>
     [HarmonyPostfix]
-    [HarmonyPatch("ConnectSignalsAndInitGrid")]
-    public static void AfterInit(NDeckCardSelectScreen __instance)
+    [HarmonyPatch("AfterOverlayShown")]
+    public static void AfterShown(NDeckCardSelectScreen __instance)
     {
         if (DuelEntry.IsChoosing)
         {
