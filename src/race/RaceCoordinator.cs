@@ -41,6 +41,7 @@ public static class RaceCoordinator
         run.ChecksumTracker.IsEnabled = false;
 
         DeactivateRemotePlayerHooks(run);
+        MirrorExistingRun(run);
 
         Log.Warn("[SpirePvp] race mode ON — combat state sync and checksums disabled");
     }
@@ -90,6 +91,37 @@ public static class RaceCoordinator
                 Log.Info($"[SpirePvp] race: hooks deactivated for remote player {player.NetId}");
             }
         }
+    }
+
+    /// <summary>
+    /// Re-seeds every player so a run that is already under way becomes a mirror match.
+    ///
+    /// `RaceMirrorRngPatch` removes the per-player seed offset, but seeding happens once at
+    /// run creation — long before anyone types `race on`. Without this, switching race mode on
+    /// mid-run leaves the players on their original divergent seeds, which is exactly how the
+    /// differing Neow bonuses showed up in testing.
+    ///
+    /// Re-running `InitializeSeed` goes through the patch, so both players land on the run
+    /// seed alone. Anything already drawn (Neow, rewards taken before this point) stays as it
+    /// was — this fixes the future, not the past.
+    ///
+    /// M6 starts the race at run start and will not need this.
+    /// </summary>
+    private static void MirrorExistingRun(RunManager run)
+    {
+        RunState? state = run.State;
+        if (state == null)
+        {
+            return;
+        }
+
+        foreach (Player player in state.Players)
+        {
+            player.InitializeSeed(state.Rng.StringSeed);
+        }
+
+        Log.Warn($"[SpirePvp] race: re-seeded {state.Players.Count} players from run seed " +
+                 $"'{state.Rng.StringSeed}' — rewards and events mirror from here on");
     }
 
     private static void ReactivateAllPlayerHooks(RunManager run)
