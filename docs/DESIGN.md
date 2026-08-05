@@ -229,6 +229,76 @@ divergent race states authoritatively. Duel patches key off `DuelSession.IsDuelA
 
 For M1 the entry is just a dev-console command / hotkey both players press.
 
+## 5b. Match setup: a PvP run is configured in the lobby, before it starts
+
+*Designed 2026-08-05, replacing the console-driven entry.*
+
+**The problem with `race on`.** Race mode currently activates by typing a console command
+partway through an already-running co-op run. That ordering causes every awkward thing in the
+current implementation: the run has already been seeded, so `RaceCoordinator.MirrorExistingRun`
+has to re-seed both players after the fact; Neow has already been drawn, so it stays
+un-mirrored; and `RaceMirrorRngPatch` has to be unconditional because at seeding time nothing
+knows this is a PvP match. All of it is compensation for deciding too late.
+
+**The fix is to decide before the run exists.** A PvP match should be a property of the run,
+chosen in the lobby, present at creation.
+
+### The vehicle: a custom `ModifierModel`
+
+The engine already has a first-class concept for "this run is played under special rules",
+used for daily and custom runs — and it fits our needs exactly:
+
+- `ModifierModel` is an `AbstractModel`, so a mod can add one with **no BaseLib dependency**
+  (same auto-registration by mod-assembly scan that `DuelEncounter` already relies on).
+- Modifiers are **chosen in the lobby** by the host (`NCustomRunModifiersList`) and **synced
+  to clients automatically** via the vanilla `LobbyModifiersChangedMessage`. No custom lobby
+  netcode.
+- `RunState.CreateForNewRun` takes modifiers and installs them via `CreateShared` **before**
+  the `player.InitializeSeed(seed)` loop. So the modifier is queryable at seeding time.
+- `ModifierModel.AfterRunCreated(RunState)` is a virtual hook — the natural place to put the
+  run into race mode.
+- Modifiers are serialized with the run, so a saved PvP run reloads as a PvP run for free.
+
+### What this deletes
+
+| Today | After |
+|---|---|
+| `race on` typed mid-run | Modifier chosen in lobby; race active from creation |
+| `MirrorExistingRun` re-seeds after the fact | Never needed — seeding happens once, already mirrored |
+| Neow drawn before mirroring, so divergent | Neow drawn under mirrored seeds |
+| `RaceMirrorRngPatch` unconditional | Scoped: mirror only when the run carries the modifier |
+| Race state is client-local and hand-synced | Carried by the run itself, on both clients |
+
+The `race` console command stays, demoted to a debug shortcut for exercising the patches
+outside a properly configured match.
+
+### Host flow
+
+Multiplayer → host → **Custom** run → tick **1v1 Duel** in the modifier list → friend joins →
+start. Custom mode also exposes the seed field, which is a bonus: identical seeds are the
+premise of a fair mirror match, and players may want to rematch on a known seed.
+
+Two constraints to know: Custom mode is gated behind `CustomAndSeedsEpoch` being revealed
+(`unlock all` clears it on dev profiles), and `--fastmp=host_custom` is the vanilla dev flag
+that boots straight into a custom multiplayer host — so the two-client scripts can drive this
+without menu clicking.
+
+### Duel parameters (clock, turn model) do *not* belong on the modifier
+
+The modifier answers one question — "is this a PvP match?" — and the modifier list UI is a
+set of on/off toggles, so it cannot carry a clock duration or a turn model. Those stay where
+§3.2 and §3.1b already put them: host-side config, broadcast on `DuelStartMessage` when the
+duel begins. That also keeps them adjustable after the run has started, which a run-creation
+property could not be.
+
+### Open question for implementation
+
+Whether to piggyback the vanilla custom-run modifier list (zero custom UI, slightly buried:
+the player must know to pick Custom) or add a dedicated lobby entry point (clearer, but needs
+menu work and a BaseLib dependency for the UI). **Recommendation: piggyback first.** It is
+days cheaper, exercises the whole flow end to end, and the dedicated entry point is a
+presentation change that can land in M7 without touching any of the mechanism.
+
 ## 6. UI components (Godot side, via BaseLib node factories + our .pck)
 
 | Component | Notes |
@@ -302,6 +372,12 @@ mechanic. Note `HittableEnemies` is **not** patchable — it has no acting-playe
   complete playable product and M1–M4 are unaffected.
 - **M6 — Full loop.** Lobby → Neow → race Act 1 → boss + rare card → duel → result screen →
   rematch. Duel entry automatic once both ready.
+
+  **M6 starts with match setup (§5b), not the map node.** Adding the `PvpDuelModifier` is the
+  cheapest item and it deletes the mid-run re-seed, the unconditional mirroring patch and the
+  console-driven entry in one go — so everything after it is built on a run that knows what it
+  is from the moment it is created. Order: modifier → map node → progress HUD → ready
+  handshake.
 
   ### M6's first task: the duel as a real map node (researched 2026-08-05)
 
