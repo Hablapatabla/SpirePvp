@@ -1,9 +1,11 @@
 using HarmonyLib;
 using MegaCrit.Sts2.Core.Combat;
+using MegaCrit.Sts2.Core.Context;
 using MegaCrit.Sts2.Core.Entities.Cards;
 using MegaCrit.Sts2.Core.Entities.Creatures;
 using MegaCrit.Sts2.Core.Entities.Players;
 using MegaCrit.Sts2.Core.Models;
+using MegaCrit.Sts2.Core.Nodes.Combat;
 
 namespace SpirePvp.Duel.Patches;
 
@@ -62,6 +64,57 @@ public static class DuelTargetingPatch
     }
 
     /// <summary>The duel-mode target set for an acting player: exactly the opponent's creature.</summary>
+    public static IReadOnlyList<Creature> OpponentCreatureOf(Player actor, ICombatState combat)
+    {
+        List<Creature> result = new List<Creature>(1);
+        foreach (Creature c in combat.PlayerCreatures)
+        {
+            if (c.Player != actor && c.IsHittable)
+            {
+                result.Add(c);
+            }
+        }
+        return result;
+    }
+}
+
+/// <summary>
+/// The second half of duel retargeting, and the one that actually blocks play.
+///
+/// Targeting is validated twice, independently. CardModel.IsValidTarget governs the rules
+/// and the synchronised action — but the mouse never gets that far: NMouseCardPlay resolves
+/// its target from NTargetManager's hover signals, and NTargetManager.AllowedToTargetCreature
+/// requires `creature.Side == CombatSide.Enemy` for TargetType.AnyEnemy. A player-side
+/// creature is refused as a hover candidate, so _target stays null and TryPlayCard cancels
+/// the play. Symptom: the card simply will not go anywhere.
+///
+/// So the rules patch alone is not enough; the UI needs the same permission.
+/// </summary>
+[HarmonyPatch(typeof(NTargetManager), "AllowedToTargetCreature")]
+public static class DuelHoverTargetingPatch
+{
+    public static void Postfix(NTargetManager __instance, Creature creature, ref bool __result)
+    {
+        if (__result || !DuelSession.IsDuelActive)
+        {
+            return;
+        }
+
+        // Reachable via Krafs.Publicizer (see csproj) — no reflection needed.
+        if (__instance._validTargetsType != TargetType.AnyEnemy)
+        {
+            return;
+        }
+
+        // The opponent is a live player creature that isn't us. Self-targeting stays illegal,
+        // matching how vanilla AnyAlly excludes the local player.
+        __result = creature.IsPlayer && !creature.IsDead && !LocalContext.IsMe(creature.Player);
+    }
+}
+
+/// <summary>Kept for AOE work in M2 (see DuelTargetingPatch's note on HittableEnemies).</summary>
+internal static class DuelTargetSets
+{
     public static IReadOnlyList<Creature> OpponentCreatureOf(Player actor, ICombatState combat)
     {
         List<Creature> result = new List<Creature>(1);
