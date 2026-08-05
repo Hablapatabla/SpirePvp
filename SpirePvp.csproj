@@ -9,11 +9,40 @@
         <NoWarn>$(NoWarn);MSB3270</NoWarn>
     </PropertyGroup>
 
+    <!-- Cross-platform game path discovery. Override with -p:Sts2Path=... if Steam lives elsewhere. -->
     <PropertyGroup>
-        <Sts2Path Condition="'$(Sts2Path)' == ''">D:/SteamLibrary/steamapps/common/Slay the Spire 2</Sts2Path>
+        <IsOSX Condition="$([MSBuild]::IsOSPlatform('OSX'))">true</IsOSX>
+        <IsLinux Condition="$([MSBuild]::IsOSPlatform('Linux'))">true</IsLinux>
+    </PropertyGroup>
+
+    <!-- Windows -->
+    <PropertyGroup Condition="'$(IsOSX)' != 'true' and '$(IsLinux)' != 'true'">
+        <Sts2Path Condition="'$(Sts2Path)' == '' and Exists('D:/SteamLibrary/steamapps/common/Slay the Spire 2')">D:/SteamLibrary/steamapps/common/Slay the Spire 2</Sts2Path>
+        <Sts2Path Condition="'$(Sts2Path)' == ''">C:/Program Files (x86)/Steam/steamapps/common/Slay the Spire 2</Sts2Path>
         <Sts2DataDir>$(Sts2Path)/data_sts2_windows_x86_64</Sts2DataDir>
         <ModsPath>$(Sts2Path)/mods/</ModsPath>
     </PropertyGroup>
+
+    <!-- macOS: data dir lives inside the .app bundle; arch varies (arm64 on Apple Silicon) -->
+    <PropertyGroup Condition="'$(IsOSX)' == 'true'">
+        <Sts2Path Condition="'$(Sts2Path)' == ''">$(HOME)/Library/Application Support/Steam/steamapps/common/Slay the Spire 2</Sts2Path>
+        <Sts2Resources>$(Sts2Path)/SlayTheSpire2.app/Contents/Resources</Sts2Resources>
+        <Sts2DataDir Condition="Exists('$(Sts2Resources)/data_sts2_macos_arm64')">$(Sts2Resources)/data_sts2_macos_arm64</Sts2DataDir>
+        <Sts2DataDir Condition="'$(Sts2DataDir)' == ''">$(Sts2Resources)/data_sts2_macos_x86_64</Sts2DataDir>
+        <ModsPath>$(Sts2Path)/SlayTheSpire2.app/Contents/MacOS/mods/</ModsPath>
+    </PropertyGroup>
+
+    <!-- Linux -->
+    <PropertyGroup Condition="'$(IsLinux)' == 'true'">
+        <Sts2Path Condition="'$(Sts2Path)' == ''">$(HOME)/.local/share/Steam/steamapps/common/Slay the Spire 2</Sts2Path>
+        <Sts2DataDir>$(Sts2Path)/data_sts2_linuxbsd_x86_64</Sts2DataDir>
+        <ModsPath>$(Sts2Path)/mods/</ModsPath>
+    </PropertyGroup>
+
+    <Target Name="CheckSts2Path" BeforeTargets="BeforeBuild">
+        <Error Text="Slay the Spire 2 data not found at '$(Sts2DataDir)'. Install the game or pass -p:Sts2Path=&quot;/path/to/Slay the Spire 2&quot;"
+               Condition="!Exists('$(Sts2DataDir)')"/>
+    </Target>
 
     <ItemGroup>
         <Reference Include="sts2">
