@@ -3,9 +3,13 @@ using MegaCrit.Sts2.Core.Commands;
 using MegaCrit.Sts2.Core.DevConsole;
 using MegaCrit.Sts2.Core.DevConsole.ConsoleCommands;
 using MegaCrit.Sts2.Core.Entities.Creatures;
+using MegaCrit.Sts2.Core.Context;
 using MegaCrit.Sts2.Core.Entities.Players;
 using MegaCrit.Sts2.Core.Helpers;
 using MegaCrit.Sts2.Core.Logging;
+using MegaCrit.Sts2.Core.Models;
+using MegaCrit.Sts2.Core.Rooms;
+using MegaCrit.Sts2.Core.Runs;
 
 namespace SpirePvp.Duel;
 
@@ -59,9 +63,15 @@ public class DuelConsoleCmd : AbstractConsoleCmd
             return new CmdResult(success: true, "Duel mode off.");
         }
 
+        if (mode == "start")
+        {
+            return StartDuelRoom();
+        }
+
         if (mode != "on")
         {
-            return new CmdResult(success: false, "Invalid argument '" + args[0] + "'. Use 'on' or 'off'.");
+            return new CmdResult(success: false,
+                "Invalid argument '" + args[0] + "'. Use 'start', 'on' or 'off'.");
         }
 
         if (!CombatManager.Instance.IsInProgress)
@@ -116,6 +126,62 @@ public class DuelConsoleCmd : AbstractConsoleCmd
         Log.Warn($"[SpirePvp] duel mode ON — {duelists.Count} duelists, clearing {enemies.Count} enemies");
         return new CmdResult(success: true,
             $"Duel on: {duelists.Count} duelists, {enemies.Count} enemies cleared.");
+    }
+
+    /// <summary>
+    /// Enters a fresh <see cref="DuelEncounter"/> room: a real combat with an empty enemy
+    /// side, so the duel starts from clean state rather than mid-fight.
+    ///
+    /// Ordering is load-bearing. DuelSession must be active *before* the room is entered:
+    /// combat setup evaluates the win condition against zero enemies, and without the veto
+    /// from DuelWinConditionPatch already in place the duel would end the instant it began.
+    /// </summary>
+    private static CmdResult StartDuelRoom()
+    {
+        RunManager? runManager = RunManager.Instance;
+        RunState? runState = runManager?.DebugOnlyGetState();
+        if (runManager == null || runState == null)
+        {
+            return new CmdResult(success: false, "Not in a run — start a multiplayer run first.");
+        }
+
+        EncounterModel encounter = (EncounterModel)ModelDb.Encounter<DuelEncounter>().ToMutable();
+        CombatRoom room = new CombatRoom(encounter, runState);
+
+        // Veto first, then enter. See the ordering note above.
+        DuelSession.ActivateDuel(0);
+        TaskHelper.RunSafely(EnterDuelRoom(runManager, room));
+
+        Log.Warn("[SpirePvp] entering duel arena");
+        return new CmdResult(success: true, "Entering the duel arena…");
+    }
+
+    private static async Task EnterDuelRoom(RunManager runManager, CombatRoom room)
+    {
+        await runManager.EnterRoom(room);
+
+        CombatState? state = CombatManager.Instance.DebugOnlyGetState();
+        if (state == null)
+        {
+            Log.Warn("[SpirePvp] duel arena entered but no combat state — aborting duel");
+            DuelSession.Reset();
+            return;
+        }
+
+        // Now that both players exist in the combat, record the opponent and fix the layout.
+        Player? me = LocalContext.GetMe(state);
+        foreach (Creature creature in state.PlayerCreatures)
+        {
+            Player? owner = creature.Player;
+            if (owner != null && me != null && owner.NetId != me.NetId)
+            {
+                DuelSession.ActivateDuel(owner.NetId);
+                break;
+            }
+        }
+
+        DuelLayout.MoveOpponentToEnemySide(state);
+        Log.Warn($"[SpirePvp] duel arena ready — {state.PlayerCreatures.Count} duelists, {state.Enemies.Count} enemies");
     }
 
     /// <summary>
