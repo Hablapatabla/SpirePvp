@@ -19,7 +19,7 @@ flags, console commands and gotchas below are OS-neutral unless marked.
 | **M2** round loop | **done**, playtested |
 | **M3** chess clock | **done**, playtested |
 | **M4** information rules | **done**, playtested |
-| **M5** race phase | **researched only** — see DESIGN I3/I4 |
+| **M5** race phase | **spike passed**, playtested — decoupled traversal works; race *content* (mirrored RNG, progress HUD, duel handshake) not built |
 | M6 full loop, M7 polish | not started |
 
 A duel is fully playable end to end today: enter the arena, fight with real cards and
@@ -207,20 +207,20 @@ Keep that split if you extend this.
 
 ## Immediate next step
 
-**Playtest the M5 spike.** It is written and applies cleanly (17 patch classes), but has never
-run in game — so it is evidence of nothing yet. DESIGN I3 has the two blockers it addresses
-and the three questions the playtest needs to answer.
+**The M5 spike passed** (DESIGN I3 has the four blockers and why they all share one root
+cause), so decoupling is viable and the v1.5 fallback is off the table. What is left is race
+*content*, roughly in dependency order:
 
-The test: `race on` on either client (it is networked, so both flip together), then have each
-player pick a *different* map node. Watch for the clients ending up in different rooms, and
-watch the log for `StateDivergence`, buffered-message errors from `OnLocationChanged`, or a
-combat whose first turn never ends.
+1. **Mirrored per-player RNG** (I4) — a one-line change to `Player.InitializeSeed`, and the
+   thing that makes the race a fair mirror match rather than two different runs.
+2. **The duel as a real map node** — see M6's note in DESIGN §7. Worth pulling forward: it
+   deletes the wholesale `EndCombatInternal` replacement, which is the most brittle patch in
+   the mod, and it is how the race actually *ends*.
+3. `RaceProgressMessage` + HUD, then the `DuelReadyMessage` handshake.
 
-If it resists, DESIGN §4's v1.5 fallback — co-op through Act 1 together, then duel — is a
-complete playable product, and M1–M4 are unaffected either way.
-
-After the spike, and not before: mirrored per-player RNG (I4, a one-line patch),
-`RaceProgressMessage` + HUD, and the `DuelReadyMessage` handshake.
+Expect the blocker-4 pattern to recur as the race covers rest sites, shops, events and
+rewards — each has its own synchronizer assuming both players are present. Diagnose them the
+same way: find where the code assumes every run player is there.
 
 Smaller known gaps, none blocking:
 

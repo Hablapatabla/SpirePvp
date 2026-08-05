@@ -376,11 +376,35 @@ mechanic. Note `HittableEnemies` is **not** patchable — it has no acting-playe
     `AllPlayersReadyToEndTurn` compares readiness count to player count, and the dead never
     signal. Vanilla auto-readies the dead only at *turn start*, which in a duel is never when
     anyone dies. `DuelDeadPlayerReadyPatch` applies that rule continuously.
-- **I3 (M5)** — *researched 2026-08-05; spike written and patching cleanly 2026-08-05 (Windows,
-  v0.110.1). Not yet playtested in game — that is the next action.*
+- **I3 (M5)** — **SPIKE PASSED, playtested 2026-08-05 on two Windows clients, v0.110.1.**
+  Two clients traversed the shared map independently, fought their own combats, and one
+  finished a combat and moved to the next room while the other was still fighting. Zero errors
+  in the log — including no `StateDivergence` and none of the buffered-message errors that
+  the earlier attempts produced.
 
-  **Spike update: two blockers, both single-chokepoint patches. The research below called map
-  traversal the only risk; it was wrong about that — there was a second, worse one.**
+  **Decoupling is viable. The v1.5 fallback (§4) is not needed.**
+
+  It took **four** blockers, not the one the research predicted, and they are worth reading as
+  a set because they share a root cause: *the engine assumes the party is co-located in many
+  unrelated places, and each assumption fails in a different way.* A hang, a silent freeze, and
+  a crash all traced back to the same wrong premise.
+
+  | # | Patch | Symptom | Assumption broken |
+  |---|---|---|---|
+  | 1 | `RaceMapTravelPatch` | party moves as one | map vote needs every player, then moves everyone |
+  | 2 | `RaceSoloCombatPatch` | first turn never ends | `CombatRoom.EnterInternal` enrols every run player |
+  | 3 | `RaceLocalActionPatch` + `RaceIgnoreRemoteActionsPatch` | client frozen turn 1, host fine | client actions need host arbitration, which is location-gated |
+  | 4 | `RaceAbsentPlayerPanelPatch` | black screen entering combat | co-op teammate panel binds to a `PlayerCombatState` that only enrolled players have |
+
+  Blocker 3's second half was never observed in play and was fixed pre-emptively: peer action
+  traffic would have flushed out of the location buffer on reaching a visited coord and
+  replayed the opponent's card plays inside your own run, minutes later and in another room.
+
+  Expect more of this family as the race covers more of the game — rest sites, shops, events
+  and rewards each have their own synchronizer. The pattern for diagnosing them is established:
+  find where the code assumes every run player is present.
+
+  *Original research, and the two blockers predicted before the playtest, follow.*
 
   1. **Map traversal — `RaceMapTravelPatch`.** Less dangerous than feared, because the
      "global position" framing is misleading. `RunState.CurrentMapCoord` is global *within a

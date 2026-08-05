@@ -34,8 +34,13 @@ if (-not $NoBuild) {
 
 if (-not $Fullscreen) { [void](Set-Sts2DevProfile -ClientId 1 -Role host -Width $Width) }
 
-$gameArgs = @("--force-steam=off")
+# Per-instance log. Both instances otherwise write to the same %APPDATA% godot.log and
+# interleave mid-line, which has already cost real debugging time.
+$log = Join-Path $PSScriptRoot "..\logs\host.log"
+New-Item -ItemType Directory -Force (Split-Path $log) | Out-Null
+
+$gameArgs = @("--force-steam=off", "--log-file", $log)
 if (-not $Setup) { $gameArgs += "--fastmp=host_standard" }
 
-Write-Host "Launching HOST: $gameArgs" -ForegroundColor Green
+Write-Host "Launching HOST (log: $log)" -ForegroundColor Green
 & (Get-Sts2Exe) @gameArgs

@@ -31,8 +31,12 @@ $ErrorActionPreference = "Stop"
 
 if (-not $Fullscreen) { [void](Set-Sts2DevProfile -ClientId $ClientId -Role client -Width $Width) }
 
-$gameArgs = @("--force-steam=off", "--clientId=$ClientId")
+# Per-instance log; see host.ps1.
+$log = Join-Path $PSScriptRoot "..\logs\client.log"
+New-Item -ItemType Directory -Force (Split-Path $log) | Out-Null
+
+$gameArgs = @("--force-steam=off", "--clientId=$ClientId", "--log-file", $log)
 if (-not $Setup) { $gameArgs += "--fastmp=join" }
 
-Write-Host "Launching CLIENT: $gameArgs" -ForegroundColor Green
+Write-Host "Launching CLIENT (log: $log)" -ForegroundColor Green
 & (Get-Sts2Exe) @gameArgs
