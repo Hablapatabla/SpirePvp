@@ -272,7 +272,12 @@ mechanic. Note `HittableEnemies` is **not** patchable — it has no acting-playe
 
 ## 9. Design knobs & open design questions
 
-- **Flag rule**: zugzwang (auto-pass every round) vs sudden death. Default zugzwang.
+- **Flag rule** — **DECIDED 2026-08-05: sudden death.** Running out of time is an instant
+  loss, as in chess. Zugzwang (auto-pass every round) is dropped.
+  This removes the forced-end-turn machinery from M3 entirely: the host detects the flag and
+  ends the duel, routing the flagged player through the same loss path a death takes. I5's
+  host-side enqueue-for-another-player finding is therefore *not* on M3's critical path,
+  though it stays true and would be needed for any per-turn timer variant.
 - **Clock size / increment**: fixed bank (3 min?) per duel; optional per-round increment
   (Fischer). Does race time count against the bank? (Original idea: clock runs during all
   combat turns of the run — deferrable to M7.)
