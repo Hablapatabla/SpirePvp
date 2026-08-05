@@ -184,7 +184,7 @@ For M1 the entry is just a dev-console command / hotkey both players press.
 | Component | Notes |
 |---|---|
 | `OpponentDeckPanel` | Shown at duel start (and toggleable during duel). Reads opponent's `Player` piles from synced state. Model it on the existing deck-view screen. |
-| `ClockHud` | Two clocks, local prediction + host sync. Turns red < 30s. |
+| `ClockHud` | **Done, and deliberately not a component.** Both clocks share the vanilla run-timer label in the top bar (`NRunTimer`, postfixed), rendered as `YOU 2:31 · OPP 1:47` in a stable `m:ss`. A separate two-element HUD was considered and dropped — one label reads fine and costs no scene work. Local prediction + host `ClockSyncMessage` at 2/sec. "Turns red < 30s" still unimplemented. |
 | `RaceProgressHud` | Opponent's map position, HP, deck count. Driven by `RaceProgressMessage`. |
 | `DuelResultScreen` | Winner, per-round damage stats, rematch button. |
 
@@ -360,6 +360,14 @@ mechanic. Note `HittableEnemies` is **not** patchable — it has no acting-playe
   (hand count? drawn cards? relic triggers?) so nothing leaks that we intend hidden — and
   confirm `HoveredModelTracker` suppression covers all surfaces (map pings too:
   `NetMapDrawingEvent`).
+  - **Do not skip this because hovers look invisible in the duel arena.** Playtesting 2026-08-05
+    showed no visible hover leak, but the data is on the wire regardless:
+    `HoveredModelTracker.SynchronizeLocalHoveredModel` → `PeerInputSynchronizer.SyncLocalHoveredModel`
+    sends a `PeerInputMessage` on every hover change, ungated. What is missing is only a
+    *renderer* — the consumers (`NMultiplayerPlayerIntentHandler`,
+    `NRemoteMouseCursorContainer`, `NMapDrawings`) are co-op surfaces that the arena does not
+    currently surface. Anything that later shows a player panel in the duel turns the leak
+    visible. Suppress at the broadcast, not at the display.
 - **I7 (M1)**: Two-local-instance recipe: how sts2-lan-multiplayer forces the ENet
   transport (Nexus mod 579), Steam single-account constraints, `--goldberg`-free options.
 
