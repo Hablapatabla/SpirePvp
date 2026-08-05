@@ -10,9 +10,22 @@ match the Windows figures, so the two decompiles are interchangeable for navigat
 
 ## 1. The mode
 
-Two players. Same seed → same map, same path options, same Neow bonus, same reward streams.
-Each plays their own run through Act 1 (the **race**), then both enter a 1v1 combat (the
-**duel**).
+Two players. Same seed → same map, same path options, same rolls. Each plays their own run
+through Act 1 (the **race**), then both enter a 1v1 combat (the **duel**).
+
+**Characters are chosen freely — this is not a mirror match.** Decided 2026-08-05. Both
+players race the *same map* under the *same rolls*, but may bring different characters, and
+character choice is part of the strategy rather than something to equalize.
+
+The consequence, which is expected behaviour and not a bug: **Neow blessings and card rewards
+will differ between players who picked different characters.** Both are filtered by character
+— Neow through `IsAllowedAtNeow(owner)`, rewards through the character's card pool — so
+identical RNG still yields different offers.
+
+This does not make RNG mirroring (I4) pointless; it makes it *more* important. With the seeds
+mirrored, neither player can be luckier than the other: every difference traces back to a
+choice one of them made, which is the property the race actually needs. Without it, a loss is
+always arguably variance.
 
 The duel is **real-time blitz**: both players act simultaneously within a round. You're
 racing to get your Strike out while your opening hand is still animating in. Actions resolve
