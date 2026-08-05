@@ -79,6 +79,20 @@ is I7, and it needed no mod code.
 <game binary> --force-steam=off --clientId=1001 --fastmp=join
 ```
 
+Concrete per-OS (tab 1 = host, tab 2 = client):
+
+macOS:
+```
+"$HOME/Library/Application Support/Steam/steamapps/common/Slay the Spire 2/SlayTheSpire2.app/Contents/MacOS/SlayTheSpire2" --force-steam=off --fastmp=host_standard
+"$HOME/Library/Application Support/Steam/steamapps/common/Slay the Spire 2/SlayTheSpire2.app/Contents/MacOS/SlayTheSpire2" --force-steam=off --clientId=1001 --fastmp=join
+```
+
+Windows (PowerShell; game on the D: Steam library — adjust if elsewhere):
+```
+& "D:\SteamLibrary\steamapps\common\Slay the Spire 2\SlayTheSpire2.exe" --force-steam=off --fastmp=host_standard
+& "D:\SteamLibrary\steamapps\common\Slay the Spire 2\SlayTheSpire2.exe" --force-steam=off --clientId=1001 --fastmp=join
+```
+
 - `--force-steam=off` skips Steamworks entirely (`NGame.InitializePlatform`). Required: a
   direct launch otherwise fails `SteamAPI_Init` with "No appID found" and the game quits. It
   also sidesteps Steam's one-instance-per-account limit, which is what makes two local clients
