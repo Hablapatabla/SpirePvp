@@ -2,6 +2,7 @@ using Godot;
 using MegaCrit.Sts2.Core.Combat;
 using MegaCrit.Sts2.Core.Context;
 using MegaCrit.Sts2.Core.Entities.Creatures;
+using MegaCrit.Sts2.Core.Entities.UI;
 using MegaCrit.Sts2.Core.Logging;
 using MegaCrit.Sts2.Core.Nodes.Combat;
 using MegaCrit.Sts2.Core.Nodes.Rooms;
@@ -59,6 +60,12 @@ public static class DuelLayout
             // overwrites it immediately after, but this avoids a one-frame jump.
             node.Reparent(room._enemyContainer, keepGlobalTransform: true);
             FaceLeft(node, faceLeft: true);
+
+            // Remote players start with their bar hidden (co-op shows it on hover only).
+            // Bring it up now; DuelHealthBarPatch stops it going away again.
+            node._stateDisplay.AnimateIn(HealthBarAnimMode.FromHidden);
+            node._stateDisplay.ZIndex = 1;
+
             moved.Add(node);
         }
 

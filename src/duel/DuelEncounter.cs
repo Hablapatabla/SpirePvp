@@ -25,6 +25,10 @@ public sealed class DuelEncounter : EncounterModel
 {
     public override RoomType RoomType => RoomType.Monster;
 
+    /// A duel pays out a winner, not a card reward. CombatRoom.OnCombatEnded checks this
+    /// before calling OfferRoomEndRewards, so returning false routes to ProceedWithoutRewards.
+    public override bool ShouldGiveRewards => false;
+
     public override IEnumerable<MonsterModel> AllPossibleMonsters => Array.Empty<MonsterModel>();
 
     protected override IReadOnlyList<(MonsterModel, string?)> GenerateMonsters()
