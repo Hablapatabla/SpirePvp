@@ -1,3 +1,4 @@
+using Godot;
 using MegaCrit.Sts2.Core.Combat;
 using MegaCrit.Sts2.Core.Context;
 using MegaCrit.Sts2.Core.Entities.Creatures;
@@ -153,6 +154,13 @@ public static class DuelEntry
         _screen._infoLabel.Text = _opponentReady
             ? "Your opponent's deck.   —   Opponent is READY."
             : "Your opponent's deck.   —   Opponent is still looking.";
+
+        // Mild green wash on the caption when they have confirmed, so their state reads at a
+        // glance rather than by reading the sentence. Deliberately softer than the confirm
+        // button's own green: that one is your state and should stay the louder of the two.
+        _screen._infoLabel.Modulate = _opponentReady
+            ? new Color(0.62f, 1f, 0.68f)
+            : Colors.White;
     }
 
     /// <summary>Host only: both sides ready, so tell everyone to enter.</summary>
