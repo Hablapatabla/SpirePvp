@@ -1,0 +1,292 @@
+# SpirePvp — Technical Design (Real-Time Blitz)
+
+Audience: Lucas + Claude (Opus) implementation agents. Each milestone below is scoped to be
+handed off as an independent task. File references like `Core/Combat/CombatManager.cs` point
+into the decompiled game source at `D:\modding\sts2\decompiled\MegaCrit\sts2\` — read the
+referenced file before implementing against it. Game version: v0.110.1 (re-verify facts after
+game patches; re-run ilspycmd per README).
+
+## 1. The mode
+
+Two players. Same seed → same map, same path options, same Neow bonus, same reward streams.
+Each plays their own run through Act 1 (the **race**), then both enter a 1v1 combat (the
+**duel**).
+
+The duel is **real-time blitz**: both players act simultaneously within a round. You're
+racing to get your Strike out while your opening hand is still animating in. Actions resolve
+in the order the host receives them — if your attack lands before their block resolves, it
+hits unblocked HP. When both players have ended turn (or a clock forces it), the round rolls
+over: statuses tick, hands redraw, energy refills, next round begins.
+
+Chess clock: each player has a time bank. Your clock runs while the round is live and you
+haven't ended turn; it pauses when you click end turn. Flag (clock = 0) behavior is a design
+knob (§9): default = your turn auto-ends instantly every round (you draw and pass); optional
+sudden-death = flag means loss.
+
+Information rules:
+- **Opponent's decklist**: revealed at duel start (read-only panel). No new netcode needed —
+  the engine already syncs each player's full serialized state (including piles) to every
+  client before combat (`Core/Multiplayer/CombatStateSynchronizer.cs`).
+- **Opponent's hover/selection**: hidden. Co-op currently broadcasts hovered card/relic/potion
+  (`Core/Multiplayer/Game/PeerInput/HoveredModelTracker.cs` + `PeerInputSynchronizer`); we
+  suppress display (or broadcast) in duel mode.
+- **Opponent's plays**: fully visible with animations — free, because every action executes
+  on every client (deterministic sim).
+- Hand contents, draw order, energy: hidden (opponent's hand is not rendered for remote
+  players anyway; verify nothing leaks via UI — I6).
+
+## 2. Verified engine facts (the foundation)
+
+| Fact | Where |
+|---|---|
+| Official mod loader; `[ModInitializer]` entry; Harmony ships with the game | `Core/Modding/`, `data_sts2_windows_x86_64/0Harmony.dll` |
+| Host-authoritative deterministic sim. Clients request actions; host orders; everyone executes the same stream | `Core/GameActions/Multiplayer/ActionQueueSynchronizer.cs` |
+| Before every combat, all players' full serialized state + host RNG broadcast to all peers; `IsDisabled` flag exists | `Core/Multiplayer/CombatStateSynchronizer.cs` |
+| Desync detection via checksums | `Core/Multiplayer/Game/ChecksumTracker.cs`, `StateDivergenceException.cs` |
+| Player phase is already simultaneous/real-time in co-op: turn ends only when **all** players are in `PlayersReadyToEndTurn` | `Core/Combat/CombatTurnState.cs`, `CombatManager.SetReadyToEndTurn` (~line 907) |
+| Combat is side-based: `_allies` / `_enemies` are both `List<Creature>`; `Player` has-a `Creature` (`IsPlayer`, `.Player` back-ref); HP/block/powers live on `Creature` | `Core/Combat/CombatState.cs`, `Core/Entities/Creatures/Creature.cs`, `Core/Entities/Players/Player.cs` |
+| Targeting is an enum incl. co-op types (`AnyPlayer`, `AnyAlly`, `AllAllies`) alongside `AnyEnemy`/`AllEnemies`/`RandomEnemy` | `Core/Entities/Cards/TargetType.cs` |
+| Custom net messages are first-class: `MessageTypes.Initialize` scans mod assemblies for `INetMessage` subtypes | `Core/Multiplayer/Serialization/MessageTypes.cs` |
+| Two transports: Steam and ENet (LAN/direct). LAN mod on Nexus proves ENet is usable for 2-instance dev | `Core/Multiplayer/Connection/`, `Transport/ENet/` |
+| Per-player RNG/odds seeded via RunState; host RNG set syncs pre-combat | `Core/Entities/Players/Player.cs` (`PlayerRng`, `PlayerOdds`) |
+| End-turn flows through an action (`EndPlayerTurnAction`) → `SetReadyToEndTurn(player, canBackOut)`; there is even `UndoEndPlayerTurnAction` | `Core/GameActions/` |
+
+**Why blitz "just works":** the engine never pauses for turn alternation between players —
+co-op players already race their plays into a shared host-ordered action queue during one
+common player phase. The duel reuses that machinery unchanged; we only change *who the
+targets are* and *when combat ends*.
+
+## 3. Architecture: two phases, two coupling models
+
+```
+ Lobby (2 players, co-op lobby, same seed)
+   │
+   ├─ RACE PHASE — loosely coupled
+   │    Each client simulates its own run (like singleplayer),
+   │    shared-room synchronizers disabled. Lightweight
+   │    RaceProgressMessage broadcasts for the progress HUD.
+   │    Same seed ⇒ same map/Neow/encounters/rewards for both.
+   │
+   ├─ CONVERGE — both players beat Act 1 boss & pick rewards
+   │    DuelReadyMessage from each; host schedules duel.
+   │
+   └─ DUEL PHASE — fully coupled (vanilla co-op machinery)
+        CombatStateSynchronizer re-syncs both players' full
+        state + RNG (this is exactly what it was built for),
+        then a shared CombatRoom runs with duel patches active.
+```
+
+The key insight making the race phase cheap: **the engine re-establishes full determinism
+from scratch at every combat entry**. We don't need lockstep during the race; divergent
+local sims are fine because the duel entry does an authoritative state sync anyway. During
+the race we must disable the shared-state machinery (`CombatStateSynchronizer.IsDisabled`,
+checksum tracking, map vote / shared room entry — see I3) so the two clients don't fight
+over state they no longer share.
+
+### 3.1 Duel combat model (the core trick)
+
+Both duelists enter ONE shared `CombatRoom` **on the same side** (`CombatSide.Player`),
+exactly like co-op. The enemy side is empty — no monsters, no monster AI, no intents, no
+enemy turn to worry about. Three patch groups make it a duel:
+
+1. **Retargeting** (`DuelTargetingPatch`): when duel mode is active, cards/potions with
+   `AnyEnemy` / `AllEnemies` / `RandomEnemy` resolve their candidate set to
+   `{opponent's player creature}` instead of the enemy side. Damage, block, thorns, Weak,
+   Vulnerable, powers, etc. all operate on `Creature` and don't care about sides — the
+   entire card mechanics layer comes along for free. (Ally-targeting co-op cards keep
+   working as-is; they just target you or the opponent per their own rules — design knob
+   whether co-op multiplayer cards are even in the pool.)
+2. **Win condition** (`DuelWinConditionPatch`): patch `CombatManager.IsCombatEnding` /
+   loss handling: combat ends when either player's creature dies; the survivor wins.
+   Suppress vanilla "no hittable enemies ⇒ victory" (always true with an empty enemy side —
+   this is the first thing M1 must defeat) and vanilla "all players dead ⇒ run loss".
+3. **Round rollover**: with no enemies, the enemy phase should be a fast no-op (verify —
+   I2). Statuses tick, discard/redraw, energy refill via the vanilla turn loop.
+
+Resolution order *within* a round is host-arrival order via `ActionQueueSynchronizer` —
+that's the "first strike" mechanic, no code needed. Note the latency asymmetry: the host's
+own requests don't cross the network, so the host has an inherent edge (~½ RTT). Acceptable
+for friendly play; mitigation ideas in §9 (design knobs).
+
+### 3.2 Chess clock
+
+- `DuelClock` is pure logic (per-player time bank, running/paused, flag event) — unit-testable
+  without the game.
+- Authoritative timekeeping on the host: host ticks both clocks, broadcasts `ClockSyncMessage`
+  (unreliable, ~2/sec) for HUD smoothing; clients render predicted time locally between syncs.
+- Clock starts when the round's player phase opens (hook: wherever
+  `CombatTurnState.EndTurnSignalSource` is recreated at player-turn start — find the turn
+  loop call site in `CombatManager`, I5). Player's clock pauses on their `SetReadyToEndTurn`
+  (hook `CombatManager.PlayerEndedTurn` event — public, no patch needed), resumes if they
+  back out (`UndoEndPlayerTurnAction`).
+- Flag: host sends `ForcedEndTurnMessage(playerId)`; every client (and host) executes the
+  forced end-turn as a queued action so the sim stays deterministic. Cleanest path: reuse
+  the existing `EndPlayerTurnAction` request flow on the flagged player's behalf (I5:
+  confirm an action can be enqueued server-side *for* another player; fallback: the flagged
+  player's own client auto-submits, host enforces with a timeout).
+
+### 3.3 Custom net messages (all `record struct : INetMessage` in mod assembly — auto-registered)
+
+| Message | Direction | Mode | Purpose |
+|---|---|---|---|
+| `RaceProgressMessage` | both → all | Reliable | node reached, HP, deck size, boss-killed flag → progress HUD |
+| `DuelReadyMessage` | both → host | Reliable | player finished Act 1 + rewards |
+| `DuelStartMessage` | host → all | Reliable | enter duel room (with agreed parameters) |
+| `ClockSyncMessage` | host → all | Unreliable | authoritative clock values |
+| `ForcedEndTurnMessage` | host → all | Reliable | flag fell — force end turn |
+| `DuelResultMessage` | host → all | Reliable | winner, stats, rematch offer |
+
+CAUTION: the vanilla bus tolerates unknown message ids from mods but assumes they "do not
+affect gameplay" (`NetMessageBus.TryDeserializeMessage`). Both players must run the same
+mod version; gate the duel on a version handshake inside `DuelReadyMessage` (carry mod
+version string).
+
+## 4. Race phase details
+
+- **Seed mirroring**: both players share the run seed (co-op lobby already does this — the
+  map is common). Additionally mirror per-player streams (`PlayerRng` / `PlayerOdds` seeds)
+  so card rewards / shop stock / events are identical for both players → mirror-match
+  fairness. (I4: find where `PlayerRng` gets seeded "when added to a RunState" and patch
+  both players to the same seed.)
+- **Decoupling**: during the race, players traverse the map independently — vanilla co-op
+  moves the party together (`MapSelectionSynchronizer`, `MapVote`) and enters rooms
+  together. Patch plan (I3): with race active, short-circuit map voting to "local choice
+  wins locally", set `CombatStateSynchronizer.IsDisabled = true`, disable checksum
+  tracking, and make room entry/exit not wait on peers. The other player's run still
+  *exists* in local state (their `Player` object sits idle) — the engine tolerates this
+  because nothing references them while synchronizers are off. This is the riskiest area
+  of the design; M5's first task is a spike proving two clients can occupy different rooms
+  without exceptions before building the HUD.
+- **v1 fallback** (de-risk): if decoupling fights back hard, ship v1.5 as "co-op through
+  Act 1 together, then duel" — zero decoupling work, still a complete playable loop, and
+  M1–M4 (the whole duel) are unaffected. Decide after the M5 spike.
+
+## 5. Duel entry & flow
+
+State machine in `DuelSession` (static, client-local, mirrored by messages):
+
+`Inactive → RaceActive → LocalReady (sent DuelReadyMessage) → DuelPending (both ready,
+host sent DuelStartMessage) → DuelActive → Complete(winner)`
+
+Duel room entry: after both `DuelReadyMessage`s, host triggers a synthetic combat room
+entry on all clients (I1: find the API that enters a `CombatRoom` with a chosen encounter —
+look at `Core/Rooms/CombatRoom.cs`, `RoomSet`, and how `ActChangeSynchronizer` moves
+everyone; an "empty encounter" or a 0-monster `MonsterGroup` is the goal). Standard
+`CombatStateSynchronizer.StartSync/WaitForSync` runs on entry and reconciles the two
+divergent race states authoritatively. Duel patches key off `DuelSession.IsDuelActive`.
+
+For M1 the entry is just a dev-console command / hotkey both players press.
+
+## 6. UI components (Godot side, via BaseLib node factories + our .pck)
+
+| Component | Notes |
+|---|---|
+| `OpponentDeckPanel` | Shown at duel start (and toggleable during duel). Reads opponent's `Player` piles from synced state. Model it on the existing deck-view screen. |
+| `ClockHud` | Two clocks, local prediction + host sync. Turns red < 30s. |
+| `RaceProgressHud` | Opponent's map position, HP, deck count. Driven by `RaceProgressMessage`. |
+| `DuelResultScreen` | Winner, per-round damage stats, rematch button. |
+
+BaseLib (Workshop id 3737335127, NuGet `Alchyr.Sts2.BaseLib`) provides node factories and
+config UI — study how Minty Spire 2 builds UI (`scratchpad clone or github: erasels/Minty-Spire-2`)
+before rolling custom scenes.
+
+## 7. Milestones (each is a handoff unit)
+
+Every milestone ends with: builds green, loads in-game without errors in
+`%APPDATA%\SlayTheSpire2\logs\godot.log`, and its acceptance test done in 2-client ENet
+setup (see §8).
+
+- **M0 — done.** Toolchain, skeleton mod loads, decompiled source.
+- **M1 — Duel spike (hardest risk first).** Two clients in a co-op run; hotkey enters a
+  shared combat with an empty enemy side; retargeting patch makes Strike hit the opponent;
+  win-condition patch prevents instant "victory" and ends combat on a death.
+  *Accept: P1 kills P2 with Strikes; both clients agree on the result; no desync.*
+- **M2 — Round loop.** Multi-round duel: end-turn by both → statuses tick, redraw, energy
+  refill, next round. Powers (Weak/Vulnerable/Strength) verified across rounds.
+  *Accept: a 5+ round duel with status cards completes cleanly.*
+- **M3 — Chess clock.** `DuelClock` + host sync + forced end turn + `ClockHud`.
+  *Accept: letting your clock run out force-ends your turns; clocks agree on both screens
+  within 200ms.*
+- **M4 — Information rules.** Hover suppression in duel; `OpponentDeckPanel` at duel start.
+  *Accept: hovering cards produces no visible signal on the opponent's screen; deck panel
+  matches the opponent's actual decklist.*
+- **M5 — Race decoupling spike, then race phase.** Spike: two clients in different rooms
+  simultaneously without errors. Then: independent map traversal, per-player mirrored RNG,
+  `RaceProgressMessage` + HUD, `DuelReadyMessage` handshake. Fallback to v1.5 (§4) if the
+  spike says no.
+  *Accept: both players independently clear a 3-room slice on identical seeds and see each
+  other's progress.*
+- **M6 — Full loop.** Lobby → Neow → race Act 1 → boss + rare card → duel → result screen →
+  rematch. Duel entry automatic once both ready.
+- **M7 — Polish/knobs.** Config UI (BaseLib) for clock settings & flag rule; balance knobs
+  (§9); Workshop packaging; spectator/obs support (stretch).
+
+## 8. Dev workflow
+
+- **IDE**: Rider, open `D:\modding\sts2\SpirePvp\SpirePvp.csproj`. Attach the decompiled
+  tree (`D:\modding\sts2\decompiled`) as a second project/folder for search, or just
+  ctrl-click into `sts2.dll` — Rider decompiles inline.
+- **Build**: `dotnet build` → auto-copies dll+json+pdb into the game's `mods\SpirePvp\`.
+  `.pck` re-export only when Godot assets change (see README).
+- **Two clients on one PC**: the game supports ENet direct connect
+  (`Core/Multiplayer/Connection/ENetClientConnectionInitializer.cs`); the Nexus
+  "sts2-lan-multiplayer" mod and the couch co-op launcher prove two local instances + ENet
+  works — study them (I7) and add a `--spirepvp-connect=<host:port>` style dev path so the
+  second instance skips Steam lobbies. Watch RAM: two instances + Rider is heavy; close the
+  Godot editor (only needed headless for exports).
+- **Logs**: `%APPDATA%\SlayTheSpire2\logs\godot.log`. `Log.Warn`/`Log.Info` from mod code
+  land there. Network debug: `Core/Multiplayer/MultiplayerDebugUtil.cs`, `LogType.GameSync`,
+  `LogType.Network`.
+- **Debugger**: Godot debug server — game launch option `--remote-debug tcp://127.0.0.1:6007`
+  (see STS2FirstMod README); or printf-debug via logs, which is usually enough.
+- **Console**: the game has a dev console (`Core/DevConsole/`) — check how to enable it;
+  register duel commands there for M1.
+
+## 9. Design knobs & open design questions
+
+- **Flag rule**: zugzwang (auto-pass every round) vs sudden death. Default zugzwang.
+- **Clock size / increment**: fixed bank (3 min?) per duel; optional per-round increment
+  (Fischer). Does race time count against the bank? (Original idea: clock runs during all
+  combat turns of the run — deferrable to M7.)
+- **Host advantage**: host resolves ~½ RTT faster. Options: accept it; input-delay
+  equalization (delay host's own enqueues by measured RTT/2); alternate hosting across a
+  match series. Defer; measure first.
+- **First-strike depth**: pure arrival order, or small windup (0.5s) per card so a fast
+  block can answer a seen attack? Playtest question.
+- **Co-op-only cards** (ally-targeting) in the duel pool: probably ban at draft/reward
+  level during the race; harmless mechanically.
+- **Potions, powers that reference "monsters"**: audit pass in M2 for mechanics that
+  hard-reference `MonsterModel` (e.g. on-kill effects, `ContainsMonster<T>`); most Creature-
+  level mechanics are fine.
+- **HP carryover**: duel starts at race-end HP (racing risky = arrive hurt) or full heal?
+  Start with full heal for clean testing; knob later.
+
+## 10. Open investigations (I#) — do these inside their milestone
+
+- **I1 (M1)**: How to enter a `CombatRoom` with an empty/custom encounter on demand, and
+  what `IsCombatEnding` does with zero enemies. Files: `Core/Rooms/CombatRoom.cs`,
+  `Core/Combat/CombatManager.cs` (~line 395), encounter construction (search
+  `MonsterGroup`/`EncounterModel` usages).
+- **I2 (M2)**: Enemy-phase behavior with an empty enemy side — confirm the turn loop's
+  enemy segment no-ops; find the turn loop method in `CombatManager` (search for the code
+  that awaits `EndTurnSignalSource`).
+- **I3 (M5)**: Decoupling shared-room sync during the race: `MapSelectionSynchronizer`,
+  room-entry waits, `ChecksumTracker`, `CombatStateSynchronizer.IsDisabled`, and whatever
+  `RestSiteSynchronizer`/`RewardSynchronizer` assume about peers being in the same room.
+- **I4 (M5)**: Where `Player.PlayerRng`/`PlayerOdds` get their real seeds; mirror across
+  players. Files: `Core/Entities/Players/Player.cs`, `Core/Runs/RunState` seeding.
+- **I5 (M3)**: Exact hook points for round-start (clock resume) and whether the host can
+  enqueue `EndPlayerTurnAction` on behalf of another player. Files:
+  `Core/GameActions/EndPlayerTurnAction.cs`, `ActionQueueSynchronizer`
+  (`RequestEnqueueActionMessage` handling — does it validate sender == actor?).
+- **I6 (M4)**: Audit what per-player info the UI already renders for remote players
+  (hand count? drawn cards? relic triggers?) so nothing leaks that we intend hidden — and
+  confirm `HoveredModelTracker` suppression covers all surfaces (map pings too:
+  `NetMapDrawingEvent`).
+- **I7 (M1)**: Two-local-instance recipe: how sts2-lan-multiplayer forces the ENet
+  transport (Nexus mod 579), Steam single-account constraints, `--goldberg`-free options.
+
+## 11. Non-goals (v1)
+
+Spectating, >2 players, ranked/matchmaking, Act 2+ races, mobile/console, Workshop-published
+balance patches to vanilla cards. The duel uses vanilla card mechanics untouched.
