@@ -503,9 +503,16 @@ mechanic. Note `HittableEnemies` is **not** patchable — it has no acting-playe
   - **The bank covers the whole run, not just the duel.** The clock is therefore
     *run-scoped*, started at run start and surviving room transitions — not created when the
     duel begins. Built that way from the outset so M5's race phase needs no retrofit.
-  - Race vs duel tick semantics differ: during the **race** both players act continuously and
-    simultaneously, so both clocks simply run down. During the **duel** it is a true chess
-    clock — yours runs while you have not ended turn, and pauses when you do.
+  - **It is a chess clock in both phases** (corrected 2026-08-05). Ending your turn in combat
+    stops *your* clock while your opponent's keeps running — that asymmetry is the mechanic,
+    and it pressures you to finish turns fast and trade accuracy for time. Everywhere else
+    the clock runs: map, shops, events, rest sites. A competitive mode should not pause while
+    someone reads an unfamiliar card; learning the game is not what is being measured.
+  - Authority follows knowledge. The duel is one shared combat, so the host sees both players'
+    end-turn state and owns both clocks. During the race the players are in separate combats
+    with action traffic dropped, so the host cannot know when the other ended a turn — each
+    client owns its own clock and reports it. Spoofable in principle; acceptable because both
+    players must run identical builds to connect, and the duel is host-authoritative.
   - Fischer increment still unimplemented (M7).
 - **Host advantage**: host resolves ~½ RTT faster. Options: accept it; input-delay
   equalization (delay host's own enqueues by measured RTT/2); alternate hosting across a

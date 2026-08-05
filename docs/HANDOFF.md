@@ -159,19 +159,25 @@ apart.
 
 ---
 
-## The clock does not pause during the race — this is deliberate
+## Clock rules (decided 2026-08-05)
 
-`DuelClockService.ApplyPhaseRules` runs both clocks continuously through the race and only
-behaves as a true chess clock (pausing on end turn) once the duel starts. Ending your turn
-mid-race does **not** stop your clock, which surprises everyone who sees it.
+It is a **chess clock, in the race as well as the duel**:
 
-The reason: the race bank is a *total time budget for the whole run*, not per-turn thinking
-time. If it paused on end turn, you could end turn and then deliberate forever on the map
-screen, in a shop, or at a rest site with the clock stopped — which is most of where a run's
-time actually goes. The budget would measure almost nothing.
+- **Ending your turn in combat stops YOUR clock.** Theirs keeps running. That is the whole
+  mechanic — it pressures you to finish turns fast and trade a little accuracy for time.
+- **Everywhere else the clock runs**: map, shops, events, rest sites, and your own combat turn.
+  Deliberately so. A competitive mode should not stop the clock while someone reads a card they
+  have not seen before; learning the game is not what the match is measuring.
 
-If that ever wants revisiting, the decision point is one method, and DESIGN §9 has the
-reasoning.
+**Authority moves with the phase, because knowledge does.** In the duel there is one shared
+combat, the host can see both players' end-turn state, and it owns both clocks — the usual
+"host decides, clients display". In the race the players are in separate combats and their
+action traffic is deliberately dropped, so the host *cannot* know when the other player ended
+a turn; a host-owned clock would simply be wrong. Each client therefore owns its own clock
+during the race and reports it, and each side displays the other's last report. Self-reported
+time is spoofable by a modified client, which is fine here: both players must already run
+identical builds to connect, and the duel — where the match is decided — stays
+host-authoritative.
 
 ## Starting a PvP match
 

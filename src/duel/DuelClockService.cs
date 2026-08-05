@@ -129,19 +129,49 @@ public static class DuelClockService
     /// </summary>
     private static void BroadcastSyncIfHost(DateTime now)
     {
-        if (RunManager.Instance?.NetService?.Type != NetGameType.Host)
+        if ((now - _lastSync).TotalMilliseconds < SyncIntervalMs)
         {
             return;
         }
 
-        if ((now - _lastSync).TotalMilliseconds < SyncIntervalMs)
+        bool isHost = RunManager.Instance?.NetService?.Type == NetGameType.Host;
+
+        // Authority moves with the phase, because knowledge does.
+        //
+        // In the duel there is one shared combat, so the host can see both players' end-turn
+        // state and owns both clocks — the usual "host decides, clients display" rule.
+        //
+        // In the race the players are in separate combats and their action traffic is
+        // deliberately dropped, so the host has no idea when the other player ended a turn.
+        // A host-owned clock would simply be wrong. Each client therefore owns its own clock
+        // during the race and reports it, and each side displays the other's last report.
+        //
+        // Self-reported time is trivially spoofable by a modified client. That is acceptable
+        // here — this is a mod played between friends, both of whom must already be running
+        // identical builds to connect at all — and the duel, where the match is actually
+        // decided, is host-authoritative regardless.
+        if (!isHost && !DuelSession.IsRaceActive)
         {
             return;
         }
 
         _lastSync = now;
 
-        RunManager.Instance.NetService.SendMessage(new ClockSyncMessage
+        if (DuelSession.IsRaceActive)
+        {
+            // Report only our own clock; the opponent slot is left empty so the receiver
+            // cannot mistake our guess about them for fact.
+            RunManager.Instance!.NetService.SendMessage(new ClockSyncMessage
+            {
+                playerA = _local!.PlayerId,
+                playerARemainingMs = (int)_local.RemainingMs,
+                playerB = 0,
+                playerBRemainingMs = 0
+            });
+            return;
+        }
+
+        RunManager.Instance!.NetService.SendMessage(new ClockSyncMessage
         {
             playerA = _local!.PlayerId,
             playerARemainingMs = (int)_local.RemainingMs,
@@ -150,9 +180,24 @@ public static class DuelClockService
         });
     }
 
-    /// <summary>Client-side: snap both clocks to the host's authoritative values.</summary>
+    /// <summary>
+    /// Apply an incoming clock report.
+    ///
+    /// During the duel this is the host's authoritative pair and a client snaps both clocks to
+    /// it. During the race it is a peer reporting only itself, so we take their value and never
+    /// let it touch our own — our clock is ours to own while the runs are decoupled.
+    /// </summary>
     public static void ApplySync(ClockSyncMessage message)
     {
+        if (DuelSession.IsRaceActive)
+        {
+            if (_opponent != null && message.playerA == _opponent.PlayerId)
+            {
+                _opponent.CorrectTo(message.playerARemainingMs);
+            }
+            return;
+        }
+
         if (RunManager.Instance?.NetService?.Type == NetGameType.Host)
         {
             return;
@@ -185,22 +230,25 @@ public static class DuelClockService
             return;
         }
 
-        if (!DuelSession.IsDuelActive)
+        CombatState? state = CombatManager.Instance.DebugOnlyGetState();
+
+        // Outside combat — map, shop, event, rest site — every clock runs. Deliberate: a
+        // competitive run should not stop the clock while you read an event or browse a shop.
+        if (state == null)
         {
             _local.Start();
             _opponent.Start();
             return;
         }
 
-        CombatState? state = CombatManager.Instance.DebugOnlyGetState();
-        if (state == null)
-        {
-            return;
-        }
-
         foreach (Player player in state.Players)
         {
-            DuelClock clock = LocalContext.IsMe(player) ? _local : _opponent;
+            bool isMe = LocalContext.IsMe(player);
+            DuelClock clock = isMe ? _local : _opponent;
+
+            // Chess-clock rule, and it applies during the race as much as the duel: ending
+            // your turn stops YOUR clock while your opponent's keeps running. That is the
+            // pressure — finish the turn fast, and trade a little accuracy for time.
             if (CombatManager.Instance.IsPlayerReadyToEndTurn(player))
             {
                 clock.Pause();
@@ -208,6 +256,13 @@ public static class DuelClockService
             else
             {
                 clock.Start();
+            }
+
+            // During the race the opponent is in their own combat, which this client cannot
+            // see, so never infer their state from ours — their value arrives by message.
+            if (!isMe && DuelSession.IsRaceActive)
+            {
+                _opponent.Start();
             }
         }
     }
