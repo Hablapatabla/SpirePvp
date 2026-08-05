@@ -94,13 +94,35 @@ public static class DuelMatch
         DuelSession.ActivateRace();
         RaceCoordinator.BeginRace();
 
-        // The bank covers the whole run, not just the duel (DESIGN §9), so the clocks start
-        // here rather than at duel entry. During the race both simply run down — the players
-        // act continuously and simultaneously — and only in the duel does it behave as a true
-        // chess clock, pausing on end turn. Ticking rides the vanilla run timer, which is
-        // alive for the whole run.
+        // Bank size only — the clocks cannot start yet, see OnRunLaunched.
         DuelClockService.Configure(ClockMinutes(runState));
+    }
 
+    /// <summary>
+    /// The second half of match setup: everything that needs to know which player is *us*.
+    ///
+    /// `LocalContext.NetId` is assigned in `RunManager.Launch`, which runs *after* modifiers'
+    /// `AfterRunCreated`. Doing local-player work in `OnRunCreated` therefore silently
+    /// misfires: `IsMe` is false for everyone, so the race deactivated hooks for *both*
+    /// players rather than just the opponent, and the clocks never started because
+    /// `GetMe` returned null. The log said it plainly — "hooks deactivated for remote player 1"
+    /// and "1001" on the same client.
+    ///
+    /// So anything identity-dependent belongs here instead.
+    /// </summary>
+    public static void OnRunLaunched(RunState runState)
+    {
+        if (!IsPvpRun(runState))
+        {
+            return;
+        }
+
+        RaceCoordinator.DeactivateRemotePlayerHooks(runState);
+
+        // The bank covers the whole run, not just the duel (DESIGN §9). During the race both
+        // clocks simply run down — the players act continuously and simultaneously — and only
+        // in the duel does it become a true chess clock that pauses on end turn. Ticking rides
+        // the vanilla run timer, which is alive for the whole run.
         Player? me = LocalContext.GetMe(runState.Players);
         Player? opponent = null;
         foreach (Player player in runState.Players)
@@ -115,6 +137,10 @@ public static class DuelMatch
         if (DuelClockService.Enabled && me != null && opponent != null)
         {
             DuelClockService.Start(me.NetId, opponent.NetId);
+        }
+        else if (DuelClockService.Enabled)
+        {
+            Log.Error($"[SpirePvp] clock configured but not started: me={me?.NetId}, opponent={opponent?.NetId}");
         }
     }
 }
