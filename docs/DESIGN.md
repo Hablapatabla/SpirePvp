@@ -2,9 +2,11 @@
 
 Audience: Lucas + Claude (Opus) implementation agents. Each milestone below is scoped to be
 handed off as an independent task. File references like `Core/Combat/CombatManager.cs` point
-into the decompiled game source at `D:\modding\sts2\decompiled\MegaCrit\sts2\` — read the
-referenced file before implementing against it. Game version: v0.110.1 (re-verify facts after
-game patches; re-run ilspycmd per README).
+into the decompiled game source at `D:\modding\sts2\decompiled\MegaCrit\sts2\` (macOS:
+`~/Code/sts2-decompiled/MegaCrit/sts2/`) — read the referenced file before implementing
+against it. Game version: v0.110.1 (re-verify facts after game patches; re-run ilspycmd per
+README). Line numbers here are from the v0.110.1 macOS `data_sts2_macos_arm64/sts2.dll` and
+match the Windows figures, so the two decompiles are interchangeable for navigation.
 
 ## 1. The mode
 
@@ -263,10 +265,30 @@ setup (see §8).
 
 ## 10. Open investigations (I#) — do these inside their milestone
 
-- **I1 (M1)**: How to enter a `CombatRoom` with an empty/custom encounter on demand, and
-  what `IsCombatEnding` does with zero enemies. Files: `Core/Rooms/CombatRoom.cs`,
-  `Core/Combat/CombatManager.cs` (~line 395), encounter construction (search
-  `MonsterGroup`/`EncounterModel` usages).
+- **I1 (M1)** — *partly resolved 2026-08-05 against v0.110.1 (macOS build).*
+  - **Win condition: SOLVED, and it needs no patch on the win check.** `IsEnding` delegates
+    to private `IsCombatEnding(CombatTurnState)` (`Core/Combat/CombatManager.cs:395`), whose
+    last step before concluding "no primary enemies alive ⇒ over" is
+    `Hook.ShouldStopCombatFromEnding(turnState.State)`. That hook (`Core/Hooks/Hook.cs:2451`)
+    polls `AbstractModel.ShouldStopCombatFromEnding()` across
+    `CombatState.IterateHookListeners()` (powers, relics, monsters) and any single `true`
+    vetoes the ending. `DuelWinConditionPatch` postfixes the hook and votes "keep going"
+    while ≥2 player creatures are alive. Ending is then vanilla and free: a duelist dies →
+    veto drops → `CheckWinCondition` closes combat. The native alternative is an invisible
+    `PowerModel` per duelist, which costs a BaseLib dependency for no behavioural gain.
+  - **Single-target retargeting: SOLVED.** `CardModel.IsValidTarget` (~line 1772) reduces
+    `TargetType.AnyEnemy` to `target.Side != Owner.Creature.Side`; both duelists are on
+    `CombatSide.Player`, hence the rejection. `DuelTargetingPatch` postfixes it, which also
+    covers `PlayCardAction`'s authoritative re-check (~line 85) so UI and synced action
+    agree. `PotionModel.IsValidTarget` (~line 260) is a separate method — same treatment
+    when potions matter.
+  - **AOE/random retargeting: still open (defer to M2).** They read
+    `CombatState.HittableEnemies`, which has no acting-player context, so the getter cannot
+    know whose opponent to return. Retarget at call sites holding `Owner` instead.
+  - **Still open for M1: duel room entry.** How to enter a `CombatRoom` with an
+    empty/custom encounter on demand — `Core/Rooms/CombatRoom.cs`, encounter construction
+    (search `MonsterGroup`/`EncounterModel` usages), and how `ActChangeSynchronizer` moves
+    everyone at once.
 - **I2 (M2)**: Enemy-phase behavior with an empty enemy side — confirm the turn loop's
   enemy segment no-ops; find the turn loop method in `CombatManager` (search for the code
   that awaits `EndTurnSignalSource`).

@@ -1,31 +1,49 @@
 using HarmonyLib;
 using MegaCrit.Sts2.Core.Combat;
-using MegaCrit.Sts2.Core.Logging;
+using MegaCrit.Sts2.Core.Entities.Creatures;
+using MegaCrit.Sts2.Core.Hooks;
 
 namespace SpirePvp.Duel.Patches;
 
 /// <summary>
 /// M1 (DESIGN §3.1 group 2, I1): duel win condition.
-/// With an empty enemy side, vanilla IsCombatEnding reports victory immediately — this
-/// patch must override that while the duel is active: combat ends only when a player
-/// creature dies, and the survivor wins.
 ///
-/// Currently a guarded no-op skeleton: it applies cleanly and does nothing outside a duel.
-/// TODO(M1): read CombatManager.IsCombatEnding (~line 395 in the decompiled source) and
-/// implement the duel-mode result; route the loser through a duel result flow instead of
-/// the vanilla run-loss flow (see the pendingLoss handling near line 1256).
+/// A duel combat has an empty enemy side, so vanilla concludes "victory" the instant it
+/// starts. Overriding that needs no patch on the win check itself: CombatManager's
+/// IsCombatEnding (v0.110.1, ~line 395) offers every hook listener a veto via
+/// Hook.ShouldStopCombatFromEnding before it concludes "no primary enemies alive ⇒ over".
+/// We postfix that hook and vote "keep going" while both duelists are standing.
+///
+/// Ending the duel is then the vanilla path for free: once a duelist dies the veto drops,
+/// IsCombatEnding goes true, and the turn loop's CheckWinCondition closes combat out.
+///
+/// I1 (win-condition half) RESOLVED against v0.110.1. The hook aggregates
+/// AbstractModel.ShouldStopCombatFromEnding over CombatState.IterateHookListeners() —
+/// powers, relics, monsters. An invisible PowerModel on each duelist would be the more
+/// native mechanism, but registering a custom model pulls in BaseLib; this postfix needs
+/// no dependency and states the intent in one place.
 /// </summary>
-[HarmonyPatch(typeof(CombatManager), "IsCombatEnding")]
+[HarmonyPatch(typeof(Hook), nameof(Hook.ShouldStopCombatFromEnding))]
 public static class DuelWinConditionPatch
 {
-    public static void Postfix(ref bool __result)
+    public static void Postfix(ICombatState combatState, ref bool __result)
     {
-        if (!DuelSession.IsDuelActive)
+        // Someone else already voted to keep combat alive, or we aren't duelling.
+        if (__result || !DuelSession.IsDuelActive)
         {
             return;
         }
-        // TODO(M1): __result = either duelist's creature is dead. For now, log once so the
-        // M1 spike can confirm the patch is live in-game.
-        Log.Info("[SpirePvp] DuelWinConditionPatch hit while duel active (skeleton no-op)");
+
+        int standing = 0;
+        foreach (Creature creature in combatState.PlayerCreatures)
+        {
+            if (creature.IsAlive)
+            {
+                standing++;
+            }
+        }
+
+        // Both duelists up: the duel is still on, whatever the empty enemy side implies.
+        __result = standing > 1;
     }
 }

@@ -25,10 +25,11 @@ Windows client) works over Steam or ENet.
    ```
    dotnet tool install ilspycmd -g --version 9.1.0.7988
    export DOTNET_ROLL_FORWARD=Major
-   ilspycmd -o ~/sts2-decompiled "$HOME/Library/Application Support/Steam/steamapps/common/Slay the Spire 2/SlayTheSpire2.app/Contents/Resources/data_sts2_macos_arm64/sts2.dll" --nested-directories -p
+   ilspycmd -o ~/Code/sts2-decompiled "$HOME/Library/Application Support/Steam/steamapps/common/Slay the Spire 2/SlayTheSpire2.app/Contents/Resources/data_sts2_macos_arm64/sts2.dll" --nested-directories -p
    ```
    (If a newer ilspycmd matches your SDK, use it; 9.1.0.7988 is what's pinned on the
-   Windows box. Keep the output out of the repo.)
+   Windows box. Keep the output out of the repo — it sits next to it at
+   `~/Code/sts2-decompiled`, 3493 files / 26 MB, mirroring `D:\modding\sts2\decompiled`.)
 
 ## Build & install
 
@@ -67,6 +68,19 @@ Expect `Found mod manifest`, `Loading assembly DLL`, and the init line
 `[SpirePvp] loaded — hello from the PvP mod`. (If the log dir isn't there, check
 `~/Library/Application Support/Godot/app_userdata/` — Windows puts it in
 `%APPDATA%\SlayTheSpire2\logs`.)
+
+Verified on macOS 2026-08-04 against game v0.109.0: manifest found, DLL + PCK loaded,
+init line present, `Loaded 5 mods`. Two things will make this silently fail:
+
+- **Steam must be running.** Without it the game burns its startup in a Steamworks init
+  retry loop and never reaches `ModManager.Initialize` — you get a log with no mod lines
+  at all, which looks identical to "the mods folder is wrong".
+- **No stale instance.** `steam://rungameid/2868840` is a no-op if a copy is already
+  running, so you end up reading an old log. Check with
+  `pgrep -fl "Contents/MacOS/Slay the Spire 2"` first.
+
+The live session writes to `logs/godot.log`; it only rotates to a timestamped file on the
+*next* launch, so grep `godot.log` while the game is still up.
 
 ## Gotchas
 

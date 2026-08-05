@@ -3,3 +3,9 @@
 bin/
 obj/
 sts2.dll
+
+# Rider / IDE
+.idea/
+
+# Decompiled game source, if kept alongside the repo rather than in ~/Code
+decompiled/
