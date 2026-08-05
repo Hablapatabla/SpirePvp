@@ -79,19 +79,21 @@ is I7, and it needed no mod code.
 <game binary> --force-steam=off --clientId=1001 --fastmp=join
 ```
 
-Concrete per-OS (tab 1 = host, tab 2 = client):
-
-macOS:
+macOS (tab 1 = host, tab 2 = client):
 ```
 "$HOME/Library/Application Support/Steam/steamapps/common/Slay the Spire 2/SlayTheSpire2.app/Contents/MacOS/SlayTheSpire2" --force-steam=off --fastmp=host_standard
 "$HOME/Library/Application Support/Steam/steamapps/common/Slay the Spire 2/SlayTheSpire2.app/Contents/MacOS/SlayTheSpire2" --force-steam=off --clientId=1001 --fastmp=join
 ```
 
-Windows (PowerShell; game on the D: Steam library — adjust if elsewhere):
+**Windows: use the scripts in `scripts/`** — they wrap the same flags and also handle the
+build, the windowing and the mod-consent gate (below). Tab 1 then tab 2:
 ```
-& "D:\SteamLibrary\steamapps\common\Slay the Spire 2\SlayTheSpire2.exe" --force-steam=off --fastmp=host_standard
-& "D:\SteamLibrary\steamapps\common\Slay the Spire 2\SlayTheSpire2.exe" --force-steam=off --clientId=1001 --fastmp=join
+.\scripts\host.ps1
+.\scripts\client.ps1
 ```
+`host.ps1` builds first and aborts the launch if the build fails; `client.ps1` never builds,
+because two concurrent builds fight over the same output files. Flags: `-NoBuild`,
+`-Fullscreen`, `-Width <px>`, `-ClientId <n>`. Verify the run with `.\scripts\check-log.ps1`.
 
 - `--force-steam=off` skips Steamworks entirely (`NGame.InitializePlatform`). Required: a
   direct launch otherwise fails `SteamAPI_Init` with "No appID found" and the game quits. It
@@ -103,8 +105,27 @@ Windows (PowerShell; game on the D: Steam library — adjust if elsewhere):
 - `--clientId=N` sets the net id *and* selects the save profile, so each instance needs its
   own.
 
-**First launch per instance:** start it with no `--fastmp`, accept the mod-loading warning on
-the Mods screen, quit. The consent is stored per profile and mods will not load without it.
+**Mod consent is per save profile, and it is a silent killer.** Without it the game logs
+`Skipping loading mod SpirePvp, user has not yet seen the mods warning` and loads *no mods at
+all*, while otherwise looking completely normal. Two ways to clear it:
+
+- By hand: launch with no `--fastmp`, accept the warning on the Mods screen, quit.
+- By file: the flag is `mod_settings.mods_enabled` in the profile's `settings.save`, which is
+  plain JSON. The Windows scripts set it automatically.
+
+Note that `--force-steam=off` selects a *different* profile than a Steam launch
+(`NullPlatformUtilStrategy.LocalPlayerId`, which is `1` or whatever `--clientId` says, names
+the directory: `%APPDATA%\SlayTheSpire2\default\<id>\`). So consenting once through Steam does
+nothing for the dev clients — each `--clientId` needs clearing separately.
+
+**Windowing: Godot's `--windowed` / `--resolution` flags do not work.** `NGame` reapplies the
+display mode from `settings.save` during startup and overrides them, so the game launches
+fullscreen no matter what you pass — which makes two clients unusable side by side. The
+setting file is the only thing that decides: `fullscreen`, `window_size`, `window_position`.
+`scripts/Sts2Path.ps1` patches those per profile before launch, tiling the host left and the
+client right on the primary monitor (`-Fullscreen` opts out, `-Width` overrides the size). The
+vanilla `-wpos X Y` flag also forces windowed and is a lighter alternative, but it still takes
+its *size* from the settings file, so editing the file covers both anyway.
 
 The client window retitles itself to "Slay The Spire 2 (Client)", which is how you tell them
 apart.
