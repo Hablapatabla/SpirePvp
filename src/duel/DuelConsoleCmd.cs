@@ -202,6 +202,7 @@ public class DuelConsoleCmd : AbstractConsoleCmd
         if (me != null)
         {
             DuelClockService.Start(me.NetId, DuelSession.OpponentId);
+            DuelFlag.Arm();
         }
 
         Log.Warn($"[SpirePvp] duel arena ready — {state.PlayerCreatures.Count} duelists, {state.Enemies.Count} enemies");

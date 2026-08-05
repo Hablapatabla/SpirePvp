@@ -78,13 +78,29 @@ public static class DuelResult
             return;
         }
 
-        bool won = LocalPlayerSurvived(combatState);
-        DuelSession.CompleteDuel(won);
-        Log.Warn($"[SpirePvp] duel over — local player {(won ? "WON" : "LOST")}");
+        DeclareWinner(LocalPlayerSurvived(combatState));
+    }
+
+    /// <summary>
+    /// Ends the duel with an explicit result. Used by the HP path (via ShowFor) and by
+    /// DuelFlag when someone loses on time. Idempotent — once the duel is Complete, later
+    /// calls are ignored, so a flag landing at the same moment as a kill cannot show two
+    /// screens or overwrite the first result.
+    /// </summary>
+    public static void DeclareWinner(bool localPlayerWon)
+    {
+        if (DuelSession.Phase == DuelPhase.Complete)
+        {
+            return;
+        }
+
+        Disarm();
+        DuelSession.CompleteDuel(localPlayerWon);
+        Log.Warn($"[SpirePvp] duel over — local player {(localPlayerWon ? "WON" : "LOST")}");
 
         // OnEnded writes the run history the screen reads; isVictory drives which banner
         // DuelResultBannerPatch then rewrites.
-        SerializableRun run = RunManager.Instance.OnEnded(won);
+        SerializableRun run = RunManager.Instance.OnEnded(localPlayerWon);
         NRun.Instance?.ShowGameOverScreen(run);
     }
 
