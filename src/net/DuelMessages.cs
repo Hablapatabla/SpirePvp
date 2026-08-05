@@ -130,24 +130,38 @@ public record struct ClockSyncMessage : INetMessage
 
     public int playerARemainingMs;
 
+    /// <summary>
+    /// Whether this clock is currently stopped. Without it the receiver keeps predicting a
+    /// paused clock downward and then snaps back on every sync — visible rubber-banding at
+    /// the sync interval. With it, local prediction matches the owner and corrections are
+    /// sub-frame.
+    /// </summary>
+    public bool playerAPaused;
+
     public ulong playerB;
 
     public int playerBRemainingMs;
+
+    public bool playerBPaused;
 
     public void Serialize(PacketWriter writer)
     {
         writer.WriteULong(playerA);
         writer.WriteInt(playerARemainingMs);
+        writer.WriteBool(playerAPaused);
         writer.WriteULong(playerB);
         writer.WriteInt(playerBRemainingMs);
+        writer.WriteBool(playerBPaused);
     }
 
     public void Deserialize(PacketReader reader)
     {
         playerA = reader.ReadULong();
         playerARemainingMs = reader.ReadInt();
+        playerAPaused = reader.ReadBool();
         playerB = reader.ReadULong();
         playerBRemainingMs = reader.ReadInt();
+        playerBPaused = reader.ReadBool();
     }
 }
 

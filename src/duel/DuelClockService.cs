@@ -15,9 +15,17 @@ namespace SpirePvp.Duel;
 /// start and survives room transitions. M5's race phase needs no retrofit — it is already
 /// running by then.
 ///
-/// Tick semantics differ by phase, per the design:
-///   race  — both players act continuously and simultaneously, so both clocks just run down.
-///   duel  — a true chess clock: yours runs while you have not ended turn.
+/// It is a chess clock in both phases: ending your turn in combat stops YOUR clock while the
+/// opponent's keeps running, and everywhere else — map, shops, events, rest sites — it runs.
+///
+/// What differs by phase is *authority*, and only because of what each side can observe. The
+/// duel is one shared combat so the host owns both clocks. The race puts the players in
+/// separate combats with action traffic dropped, so the host cannot see the other's end turn:
+/// each client owns its own clock and reports it, pause state included.
+///
+/// Reports carry the running/paused flag precisely so the receiver's local prediction moves
+/// the same way the owner's does. Value alone would leave a paused clock ticking down here
+/// and jumping back on each sync.
 ///
 /// Duration 0 disables the clock entirely; nobody can lose on time. That is the default, so
 /// the mod stays inert for anyone who has not opted in.
@@ -146,10 +154,9 @@ public static class DuelClockService
         // A host-owned clock would simply be wrong. Each client therefore owns its own clock
         // during the race and reports it, and each side displays the other's last report.
         //
-        // Self-reported time is trivially spoofable by a modified client. That is acceptable
-        // here — this is a mod played between friends, both of whom must already be running
-        // identical builds to connect at all — and the duel, where the match is actually
-        // decided, is host-authoritative regardless.
+        // The split exists because of what each side can *observe*, not to defend against a
+        // dishonest peer. Both players run identical builds by necessity, and a modified
+        // client can break far more than a clock.
         if (!isHost && !DuelSession.IsRaceActive)
         {
             return;
@@ -165,8 +172,10 @@ public static class DuelClockService
             {
                 playerA = _local!.PlayerId,
                 playerARemainingMs = (int)_local.RemainingMs,
+                playerAPaused = !_local.IsRunning,
                 playerB = 0,
-                playerBRemainingMs = 0
+                playerBRemainingMs = 0,
+                playerBPaused = false
             });
             return;
         }
@@ -175,8 +184,10 @@ public static class DuelClockService
         {
             playerA = _local!.PlayerId,
             playerARemainingMs = (int)_local.RemainingMs,
+            playerAPaused = !_local.IsRunning,
             playerB = _opponent!.PlayerId,
-            playerBRemainingMs = (int)_opponent.RemainingMs
+            playerBRemainingMs = (int)_opponent.RemainingMs,
+            playerBPaused = !_opponent.IsRunning
         });
     }
 
@@ -194,6 +205,7 @@ public static class DuelClockService
             if (_opponent != null && message.playerA == _opponent.PlayerId)
             {
                 _opponent.CorrectTo(message.playerARemainingMs);
+                ApplyReportedPause(_opponent, message.playerAPaused);
             }
             return;
         }
@@ -203,19 +215,37 @@ public static class DuelClockService
             return;
         }
 
-        Correct(message.playerA, message.playerARemainingMs);
-        Correct(message.playerB, message.playerBRemainingMs);
+        Correct(message.playerA, message.playerARemainingMs, message.playerAPaused);
+        Correct(message.playerB, message.playerBRemainingMs, message.playerBPaused);
     }
 
-    private static void Correct(ulong playerId, int remainingMs)
+    /// <summary>
+    /// Mirror the owner's running state so local prediction moves the same way theirs does.
+    /// Without this a paused clock keeps counting down here and jumps back on the next sync.
+    /// </summary>
+    private static void ApplyReportedPause(DuelClock clock, bool paused)
+    {
+        if (paused)
+        {
+            clock.Pause();
+        }
+        else
+        {
+            clock.Start();
+        }
+    }
+
+    private static void Correct(ulong playerId, int remainingMs, bool paused)
     {
         if (_local != null && _local.PlayerId == playerId)
         {
             _local.CorrectTo(remainingMs);
+            ApplyReportedPause(_local, paused);
         }
         else if (_opponent != null && _opponent.PlayerId == playerId)
         {
             _opponent.CorrectTo(remainingMs);
+            ApplyReportedPause(_opponent, paused);
         }
     }
 
@@ -259,10 +289,11 @@ public static class DuelClockService
             }
 
             // During the race the opponent is in their own combat, which this client cannot
-            // see, so never infer their state from ours — their value arrives by message.
+            // see. Leave their clock exactly as their last report set it — inferring it from
+            // our own combat would be guessing, and guessing wrong is what causes drift.
             if (!isMe && DuelSession.IsRaceActive)
             {
-                _opponent.Start();
+                continue;
             }
         }
     }
