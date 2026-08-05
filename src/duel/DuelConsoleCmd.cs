@@ -48,6 +48,12 @@ public class DuelConsoleCmd : AbstractConsoleCmd
 
         if (mode == "off")
         {
+            CombatState? current = CombatManager.Instance.DebugOnlyGetState();
+            if (current != null)
+            {
+                DuelLayout.RestoreAllySide(current);
+            }
+
             DuelSession.Reset();
             Log.Warn("[SpirePvp] duel mode OFF");
             return new CmdResult(success: true, "Duel mode off.");
@@ -102,6 +108,7 @@ public class DuelConsoleCmd : AbstractConsoleCmd
         }
 
         DuelSession.ActivateDuel(opponentId);
+        DuelLayout.MoveOpponentToEnemySide(state);
 
         List<Creature> enemies = new List<Creature>(state.Enemies);
         TaskHelper.RunSafely(ClearEnemySide(enemies));
