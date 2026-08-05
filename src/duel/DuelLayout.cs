@@ -58,6 +58,7 @@ public static class DuelLayout
             // Keep the visual transform stable across the reparent; PositionEnemies
             // overwrites it immediately after, but this avoids a one-frame jump.
             node.Reparent(room._enemyContainer, keepGlobalTransform: true);
+            FaceLeft(node, faceLeft: true);
             moved.Add(node);
         }
 
@@ -72,6 +73,28 @@ public static class DuelLayout
         room.UpdateCreatureNavigation();
 
         Log.Warn($"[SpirePvp] duel layout: moved {moved.Count} opponent creature(s) to the enemy side");
+    }
+
+    /// <summary>
+    /// Mirrors a creature's body art horizontally so the duelists face each other. Player
+    /// creatures are drawn facing right because they always stand on the left; once moved
+    /// across they need flipping or both fighters stare the same way.
+    ///
+    /// Flips the body node rather than NCreature.Visuals: Visuals.Scale feeds Bounds and the
+    /// aspect-ratio fit in AdjustCreatureScaleForAspectRatio, and a negative scale there
+    /// would poison that arithmetic. The health bar is a sibling (_stateDisplay), so it is
+    /// unaffected either way — text stays readable.
+    /// </summary>
+    private static void FaceLeft(NCreature node, bool faceLeft)
+    {
+        Node2D? body = node.Visuals?.GetCurrentBody();
+        if (body == null)
+        {
+            return;
+        }
+
+        float magnitude = Math.Abs(body.Scale.X);
+        body.Scale = new Vector2(faceLeft ? -magnitude : magnitude, body.Scale.Y);
     }
 
     /// <summary>
@@ -100,6 +123,7 @@ public static class DuelLayout
                 node.Reparent(room._allyContainer, keepGlobalTransform: true);
             }
 
+            FaceLeft(node, faceLeft: false);
             allies.Add(node);
         }
 
