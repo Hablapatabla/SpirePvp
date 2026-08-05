@@ -1,3 +1,5 @@
+using MegaCrit.Sts2.Core.Context;
+using MegaCrit.Sts2.Core.Entities.Players;
 using MegaCrit.Sts2.Core.Logging;
 using MegaCrit.Sts2.Core.Runs;
 
@@ -39,6 +41,37 @@ public static class RaceCoordinator
         run.ChecksumTracker.IsEnabled = false;
 
         Log.Warn("[SpirePvp] race mode ON — combat state sync and checksums disabled");
+    }
+
+    /// <summary>
+    /// Answers I4 with data instead of inference.
+    ///
+    /// Card rewards come from <c>player.PlayerRng.Rewards</c>, and
+    /// <c>Player.InitializeSeed</c> seeds that with
+    /// <c>hash(runSeed) + GetPlayerSlotIndex(this)</c> — so on paper the two players' rewards
+    /// must differ, and I4 exists to remove that offset for mirror-match fairness. Playtesting
+    /// says the rewards already match, which can only be true if both clients hand the local
+    /// player the same slot index.
+    ///
+    /// Rather than keep reading code, print the run seed and each player's slot and RNG seed
+    /// on both clients. If the local player's seed is identical across the two logs, the
+    /// mirroring is already happening and I4 is unnecessary.
+    /// </summary>
+    public static void LogSeedDiagnostics()
+    {
+        RunState? state = RunManager.Instance.State;
+        if (state == null)
+        {
+            Log.Warn("[SpirePvp] seed diagnostics: no run state");
+            return;
+        }
+
+        Log.Warn($"[SpirePvp] seed diag: run seed '{state.Rng.StringSeed}'");
+        foreach (Player player in state.Players)
+        {
+            Log.Warn($"[SpirePvp] seed diag: netId={player.NetId} slot={state.GetPlayerSlotIndex(player)} " +
+                     $"playerRngSeed={player.PlayerRng.Seed} isMe={LocalContext.IsMe(player)}");
+        }
     }
 
     public static void EndRace()

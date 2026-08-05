@@ -46,6 +46,7 @@ public class RaceConsoleCmd : AbstractConsoleCmd
         DuelSession.ActivateRace();
         RaceCoordinator.BeginRace();
         Log.Warn("[SpirePvp] race mode ON");
+        RaceCoordinator.LogSeedDiagnostics();
         return new CmdResult(success: true,
             "Race mode on — pick map nodes independently. Watch the log for state divergence errors.");
     }

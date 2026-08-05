@@ -27,6 +27,16 @@ $ErrorActionPreference = "Stop"
 . "$PSScriptRoot\Sts2Path.ps1"
 
 if (-not $NoBuild) {
+    # A running instance holds an open handle on the installed DLL, so the post-build copy
+    # fails with ~12 lines of MSBuild retry noise that reads like a compile error. Clear it
+    # first - relaunching is the whole point of running this script.
+    $running = Get-Process SlayTheSpire2 -ErrorAction SilentlyContinue
+    if ($running) {
+        Write-Host "Stopping $($running.Count) running instance(s) - they lock the mod DLL." -ForegroundColor Yellow
+        $running | ForEach-Object { Stop-Process -Id $_.Id -Force }
+        Start-Sleep -Milliseconds 700
+    }
+
     Write-Host "Building..." -ForegroundColor Cyan
     dotnet build "$PSScriptRoot\..\SpirePvp.csproj" --nologo -v minimal
     if ($LASTEXITCODE -ne 0) { throw "Build failed - not launching." }

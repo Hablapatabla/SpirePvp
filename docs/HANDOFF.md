@@ -62,6 +62,28 @@ an inherited method throws "Undefined target method". This caused the above.
 **Verify in game after every patch change.** Several sessions' worth of confusing symptoms
 were patches that had never applied.
 
+**With this mod installed you cannot join an unmodded friend's multiplayer game.** Confirmed
+2026-08-05. The mod is inert at *runtime* — every patch is guarded behind `DuelSession`, which
+stays `Inactive` in normal play — but its mere presence changes the multiplayer handshake, and
+`JoinFlow` rejects the connection before any of that matters. Two independent gates, either
+one sufficient:
+
+1. **Mod list mismatch** → `ConnectionFailureReason.ModMismatch`. `JoinFlow` compares
+   `PeerVersionInfo.gameplayAffectingMods` and refuses if either side has one the other
+   lacks. Our manifest declares `"affects_gameplay": true`, so SpirePvp is on that list.
+2. **Model database hash mismatch** → `ConnectionFailureReason.VersionMismatch`.
+   `ModelIdSerializationCache.Hash` is an xxHash over `ModelDb.All`, and `DuelEncounter` is
+   registered into it automatically by the mod-assembly scan.
+
+**So flipping `affects_gameplay` to `false` would not fix it** — gate 2 still fires, and the
+manifest would then be lying about a mod that genuinely alters combat. This is the engine
+correctly refusing a configuration that would desync. For real games, disable the mod on the
+Mods screen (`is_enabled` per mod, stored per profile, so the dev profiles are unaffected) or
+rename the `mods/SpirePvp` folder, then restart.
+
+Not a problem for shipping: SpirePvp is a PvP mod, so both players will have it anyway. It
+only bites when a developer plays vanilla co-op on the same install.
+
 **Steam updates the game silently.** A pending update landed mid-session and moved the codebase
 from v0.109.0 to v0.110.1 underneath a decompile, producing an investigation that was entirely
 wrong (a method that "did not exist" was added in the update). After any launch through Steam,
