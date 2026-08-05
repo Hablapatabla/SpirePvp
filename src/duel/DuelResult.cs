@@ -61,13 +61,24 @@ public static class DuelResult
     private static void OnCombatEnded(CombatRoom room)
     {
         Disarm();
+        ShowFor(room.CombatState);
+    }
+
+    /// <summary>
+    /// Declares the duel over and puts up the result screen. Called from
+    /// DuelEndCombatPatch, which replaces vanilla's EndCombatInternal, and idempotent so the
+    /// CombatEnded fallback cannot show the screen twice.
+    /// </summary>
+    public static void ShowFor(ICombatState combatState)
+    {
+        Disarm();
 
         if (!DuelSession.IsDuelActive)
         {
             return;
         }
 
-        bool won = LocalPlayerSurvived(room);
+        bool won = LocalPlayerSurvived(combatState);
         DuelSession.CompleteDuel(won);
         Log.Warn($"[SpirePvp] duel over — local player {(won ? "WON" : "LOST")}");
 
@@ -77,9 +88,9 @@ public static class DuelResult
         NRun.Instance?.ShowGameOverScreen(run);
     }
 
-    private static bool LocalPlayerSurvived(CombatRoom room)
+    private static bool LocalPlayerSurvived(ICombatState combatState)
     {
-        Player? me = LocalContext.GetMe(room.CombatState);
+        Player? me = LocalContext.GetMe(combatState);
         if (me != null)
         {
             return !me.Creature.IsDead;
@@ -87,7 +98,7 @@ public static class DuelResult
 
         // Fallback: if the local player can't be identified, treat any survivor as a loss
         // rather than handing out a win we can't justify.
-        foreach (Creature creature in room.CombatState.PlayerCreatures)
+        foreach (Creature creature in combatState.PlayerCreatures)
         {
             if (creature.IsAlive && LocalContext.IsMe(creature.Player))
             {
