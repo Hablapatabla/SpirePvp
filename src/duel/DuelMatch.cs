@@ -1,3 +1,5 @@
+using MegaCrit.Sts2.Core.Context;
+using MegaCrit.Sts2.Core.Entities.Players;
 using MegaCrit.Sts2.Core.Logging;
 using MegaCrit.Sts2.Core.Models;
 using MegaCrit.Sts2.Core.Runs;
@@ -90,7 +92,29 @@ public static class DuelMatch
                  $"clock={ClockMinutes(runState)} min, seed '{runState.Rng.StringSeed}'");
 
         DuelSession.ActivateRace();
-        DuelClockService.Configure(ClockMinutes(runState));
         RaceCoordinator.BeginRace();
+
+        // The bank covers the whole run, not just the duel (DESIGN §9), so the clocks start
+        // here rather than at duel entry. During the race both simply run down — the players
+        // act continuously and simultaneously — and only in the duel does it behave as a true
+        // chess clock, pausing on end turn. Ticking rides the vanilla run timer, which is
+        // alive for the whole run.
+        DuelClockService.Configure(ClockMinutes(runState));
+
+        Player? me = LocalContext.GetMe(runState.Players);
+        Player? opponent = null;
+        foreach (Player player in runState.Players)
+        {
+            if (!LocalContext.IsMe(player))
+            {
+                opponent = player;
+                break;
+            }
+        }
+
+        if (DuelClockService.Enabled && me != null && opponent != null)
+        {
+            DuelClockService.Start(me.NetId, opponent.NetId);
+        }
     }
 }

@@ -192,7 +192,7 @@ Mod commands:
 |---|---|
 | `duel start` | Opens the opponent's decklist as the duel entry screen. Both players confirm, then the arena loads. |
 | `duel now` | Skips the entry screen, straight into the arena. Debug shortcut. |
-| `duel clock <minutes>` | Sets the time bank. `0` disables the clock entirely (the default). |
+| ~~`duel clock <minutes>`~~ | **Removed.** The clock is part of the match agreement, picked in the lobby, and runs from run creation. A mid-run command could only hand someone a bank they never agreed to or reset one already spent — either silently invalidates the match. |
 | `duel on` / `duel off` | Converts the combat you are already in into a duel, and back. Legacy path from M1; `duel start` is the real flow. |
 | `race on` / `race off` | **Debug shortcut only.** A real match is configured in the lobby (below); this forces race mode onto an already-running co-op run, which is useful for exercising the patches but leaves Neow and pre-existing seeds un-mirrored. |
 

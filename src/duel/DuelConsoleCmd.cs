@@ -63,17 +63,15 @@ public class DuelConsoleCmd : AbstractConsoleCmd
             return new CmdResult(success: true, "Duel mode off.");
         }
 
+        // `duel clock <minutes>` was removed deliberately. The clock is part of the match
+        // agreement, chosen in the lobby (DESIGN §5b) and running from run creation, so a
+        // command that reconfigured it mid-run could only do two things: hand someone a bank
+        // they never agreed to, or reset one already spent. Both silently invalidate a match.
         if (mode == "clock")
         {
-            if (args.Length < 2 || !double.TryParse(args[1], out double minutes) || minutes < 0)
-            {
-                return new CmdResult(success: false, "Usage: duel clock <minutes>. 0 disables the clock.");
-            }
-
-            DuelClockService.Configure(minutes);
-            return new CmdResult(success: true, minutes <= 0
-                ? "Clock off — nobody can lose on time."
-                : $"Clock set to {minutes:0.##} min per player. Takes effect at the next duel start.");
+            return new CmdResult(success: false,
+                "The clock is set in the lobby: host a Custom run and pick a 'Duel Clock' modifier. " +
+                "It starts when the run does and cannot be changed mid-match.");
         }
 
         if (mode == "start")

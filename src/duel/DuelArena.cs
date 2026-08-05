@@ -73,11 +73,12 @@ public static class DuelArena
         DuelLayout.MoveOpponentToEnemySide(state);
         DuelResult.Arm();
 
-        // Run-scoped in principle (DESIGN §9: the bank covers the whole run). Started here
-        // only because the race phase does not exist yet — M5 moves this to run start.
+        // The clocks are NOT started here. They are run-scoped (DESIGN §9) and were started at
+        // run creation by DuelMatch, having already ticked down through the race — restarting
+        // would hand both players a fresh bank at the very moment the race is meant to have
+        // cost them something. Only the flag arms here, because losing on time is a duel rule.
         if (me != null)
         {
-            DuelClockService.Start(me.NetId, DuelSession.OpponentId);
             DuelFlag.Arm();
         }
 
