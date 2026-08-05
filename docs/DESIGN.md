@@ -278,9 +278,16 @@ mechanic. Note `HittableEnemies` is **not** patchable — it has no acting-playe
   ends the duel, routing the flagged player through the same loss path a death takes. I5's
   host-side enqueue-for-another-player finding is therefore *not* on M3's critical path,
   though it stays true and would be needed for any per-turn timer variant.
-- **Clock size / increment**: fixed bank (3 min?) per duel; optional per-round increment
-  (Fischer). Does race time count against the bank? (Original idea: clock runs during all
-  combat turns of the run — deferrable to M7.)
+- **Clock size / increment** — **DECIDED 2026-08-05.**
+  - **Duration is configurable, and 0 means no clock at all** — nobody can ever lose on time.
+    0 is the default so the mod stays inert for anyone not opting in.
+  - **The bank covers the whole run, not just the duel.** The clock is therefore
+    *run-scoped*, started at run start and surviving room transitions — not created when the
+    duel begins. Built that way from the outset so M5's race phase needs no retrofit.
+  - Race vs duel tick semantics differ: during the **race** both players act continuously and
+    simultaneously, so both clocks simply run down. During the **duel** it is a true chess
+    clock — yours runs while you have not ended turn, and pauses when you do.
+  - Fischer increment still unimplemented (M7).
 - **Host advantage**: host resolves ~½ RTT faster. Options: accept it; input-delay
   equalization (delay host's own enqueues by measured RTT/2); alternate hosting across a
   match series. Defer; measure first.

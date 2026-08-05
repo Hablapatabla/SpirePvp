@@ -63,6 +63,19 @@ public class DuelConsoleCmd : AbstractConsoleCmd
             return new CmdResult(success: true, "Duel mode off.");
         }
 
+        if (mode == "clock")
+        {
+            if (args.Length < 2 || !double.TryParse(args[1], out double minutes) || minutes < 0)
+            {
+                return new CmdResult(success: false, "Usage: duel clock <minutes>. 0 disables the clock.");
+            }
+
+            DuelClockService.Configure(minutes);
+            return new CmdResult(success: true, minutes <= 0
+                ? "Clock off — nobody can lose on time."
+                : $"Clock set to {minutes:0.##} min per player. Takes effect at the next duel start.");
+        }
+
         if (mode == "start")
         {
             return StartDuelRoom();
@@ -183,6 +196,14 @@ public class DuelConsoleCmd : AbstractConsoleCmd
 
         DuelLayout.MoveOpponentToEnemySide(state);
         DuelResult.Arm();
+
+        // Run-scoped in principle (DESIGN §9: the bank covers the whole run). Started here
+        // only because the race phase does not exist yet — M5 moves this to run start.
+        if (me != null)
+        {
+            DuelClockService.Start(me.NetId, DuelSession.OpponentId);
+        }
+
         Log.Warn($"[SpirePvp] duel arena ready — {state.PlayerCreatures.Count} duelists, {state.Enemies.Count} enemies");
     }
 
