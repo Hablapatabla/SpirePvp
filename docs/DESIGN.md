@@ -183,7 +183,7 @@ For M1 the entry is just a dev-console command / hotkey both players press.
 
 | Component | Notes |
 |---|---|
-| `OpponentDeckPanel` | Shown at duel start (and toggleable during duel). Reads opponent's `Player` piles from synced state. Model it on the existing deck-view screen. |
+| `OpponentDeckPanel` | **Design settled 2026-08-05 — it is the duel's entry flow, not a panel.** Clicking the duel map node opens a full deck screen showing the *opponent's* deck (the campfire-style view), whose confirm button reads **START DUEL** instead of the usual label. Both players enter the arena once both have viewed and confirmed. This folds the information rule and the ready-handshake into one screen: you cannot start without having been shown the decklist, and the confirm doubles as `DuelReadyMessage`. Cheaper than it sounds — `NDeckViewScreen.ShowScreen(Player)` is static and takes any player, so rendering the opponent's deck is a one-liner; the custom work is the button label and the both-confirmed gate. Until the map node exists (M6), `duel start` opens this screen rather than entering the arena directly. |
 | `ClockHud` | **Done, and deliberately not a component.** Both clocks share the vanilla run-timer label in the top bar (`NRunTimer`, postfixed), rendered as `YOU 2:31 · OPP 1:47` in a stable `m:ss`. A separate two-element HUD was considered and dropped — one label reads fine and costs no scene work. Local prediction + host `ClockSyncMessage` at 2/sec. "Turns red < 30s" still unimplemented. |
 | `RaceProgressHud` | Opponent's map position, HP, deck count. Driven by `RaceProgressMessage`. |
 | `DuelResultScreen` | Winner, per-round damage stats, rematch button. |
