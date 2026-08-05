@@ -42,6 +42,7 @@ public static class DuelFlag
         }
 
         net.RegisterMessageHandler<DuelResultMessage>(OnDuelResult);
+        net.RegisterMessageHandler<ClockSyncMessage>(OnClockSync);
 
         if (DuelClockService.Local != null)
         {
@@ -106,6 +107,11 @@ public static class DuelFlag
     private static void OnDuelResult(DuelResultMessage message, ulong senderId)
     {
         Declare(message.winnerId);
+    }
+
+    private static void OnClockSync(ClockSyncMessage message, ulong senderId)
+    {
+        DuelClockService.ApplySync(message);
     }
 
     private static void Declare(ulong winnerId)
