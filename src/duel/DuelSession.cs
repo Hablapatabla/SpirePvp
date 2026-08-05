@@ -32,7 +32,23 @@ public static class DuelSession
         OpponentId = 0;
     }
 
-    // TODO(M1): message handler registration (INetGameService.RegisterMessageHandler for
-    // DuelStartMessage etc.) and phase transitions. Registration must happen when a net
-    // service exists — find the lobby/run start hook (Core/Multiplayer/Game/Lobby).
+    /// <summary>
+    /// M1 spike entry point (DESIGN §5: "for M1 the entry is just a dev-console command").
+    /// Driven by <c>duel on</c>; because that command is networked, every client runs it,
+    /// so the phase flips in lockstep without any custom message plumbing yet.
+    /// </summary>
+    public static void ActivateDuel(ulong opponentId)
+    {
+        Phase = DuelPhase.DuelActive;
+        OpponentId = opponentId;
+    }
+
+    public static void CompleteDuel()
+    {
+        Phase = DuelPhase.Complete;
+    }
+
+    // TODO(M6): real phase transitions over DuelMessages (INetGameService.RegisterMessageHandler
+    // for DuelStartMessage etc.), replacing the console command. Registration must happen when a
+    // net service exists — find the lobby/run start hook (Core/Multiplayer/Game/Lobby).
 }
