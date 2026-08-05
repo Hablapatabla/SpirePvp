@@ -1,0 +1,40 @@
+<Project Sdk="Godot.NET.Sdk/4.5.1">
+    <PropertyGroup>
+        <TargetFramework>net9.0</TargetFramework>
+        <EnableDynamicLoading>true</EnableDynamicLoading>
+        <ImplicitUsings>true</ImplicitUsings>
+        <Nullable>enable</Nullable>
+        <GodotDisabledSourceGenerators>GodotPluginsInitializer</GodotDisabledSourceGenerators>
+        <!-- Mods are MSIL while the game dlls are win-x64; silence the mismatch warning. -->
+        <NoWarn>$(NoWarn);MSB3270</NoWarn>
+    </PropertyGroup>
+
+    <PropertyGroup>
+        <Sts2Path Condition="'$(Sts2Path)' == ''">D:/SteamLibrary/steamapps/common/Slay the Spire 2</Sts2Path>
+        <Sts2DataDir>$(Sts2Path)/data_sts2_windows_x86_64</Sts2DataDir>
+        <ModsPath>$(Sts2Path)/mods/</ModsPath>
+    </PropertyGroup>
+
+    <ItemGroup>
+        <Reference Include="sts2">
+            <HintPath>$(Sts2DataDir)/sts2.dll</HintPath>
+            <Private>false</Private>
+        </Reference>
+        <Reference Include="0Harmony">
+            <HintPath>$(Sts2DataDir)/0Harmony.dll</HintPath>
+            <Private>false</Private>
+        </Reference>
+    </ItemGroup>
+
+    <!-- Lets us call the game's private/internal members without reflection boilerplate. -->
+    <ItemGroup>
+        <PackageReference Include="Krafs.Publicizer" Version="2.3.0" PrivateAssets="All"/>
+        <Publicize Include="sts2" IncludeVirtualMembers="false" IncludeCompilerGeneratedMembers="false"/>
+    </ItemGroup>
+
+    <Target Name="CopyToModsFolder" AfterTargets="PostBuildEvent">
+        <Copy SourceFiles="$(TargetPath)" DestinationFolder="$(ModsPath)SpirePvp/"/>
+        <Copy SourceFiles="$(MSBuildProjectDirectory)/SpirePvp.json" DestinationFolder="$(ModsPath)SpirePvp/"/>
+        <Copy SourceFiles="$(TargetDir)$(TargetName).pdb" DestinationFolder="$(ModsPath)SpirePvp/" Condition="Exists('$(TargetDir)$(TargetName).pdb')"/>
+    </Target>
+</Project>

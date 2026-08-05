@@ -1,0 +1,11 @@
+{
+    "id": "SpirePvp",
+    "name": "Spire PvP",
+    "author": "lucas",
+    "description": "1v1 competitive Slay the Spire 2: same map, same Neow bonus, race through Act 1, then duel.",
+    "version": "0.1.0",
+    "has_pck": true,
+    "has_dll": true,
+    "dependencies": [],
+    "affects_gameplay": true
+}

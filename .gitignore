@@ -1,0 +1,5 @@
+.godot/
+*.pck
+bin/
+obj/
+sts2.dll
