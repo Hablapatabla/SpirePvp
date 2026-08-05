@@ -28,9 +28,6 @@ namespace SpirePvp.Duel.Patches;
 [HarmonyPatch(typeof(NDeckCardSelectScreen))]
 public static class DuelEntryScreenPatch
 {
-    private const string ReadyLabel = "START DUEL";
-    private const string WaitingLabel = "WAITING…";
-
     /// <summary>The opponent's deck is for reading, not picking from.</summary>
     [HarmonyPrefix]
     [HarmonyPatch("OnCardClicked", typeof(CardModel))]
@@ -89,38 +86,24 @@ public static class DuelEntryScreenPatch
         }
     }
 
+    /// <summary>
+    /// Shows confirmation state by tinting the button.
+    ///
+    /// The confirm is a bare check-mark icon with no text — relabelling it was a no-op, which
+    /// is why pressing it gave no feedback at all. Modulate needs no assets and no scene work,
+    /// so it stands in until the real treatment (a large green check, plus the opponent's
+    /// portrait on the button once they confirm, like group-choice events) lands with the M6
+    /// asset pass.
+    /// </summary>
     private static void Relabel(NDeckCardSelectScreen screen)
     {
-        // The buttons expose no label API — their text is a scene-placed child Label whose
-        // node name varies, so walk for the first one rather than guessing a path.
-        Label? label = FindLabel(screen._confirmButton);
-        if (label != null)
+        if (screen._confirmButton == null)
         {
-            label.Text = DuelEntry.LocalReady ? WaitingLabel : ReadyLabel;
-        }
-    }
-
-    private static Label? FindLabel(Node? node)
-    {
-        if (node == null)
-        {
-            return null;
+            return;
         }
 
-        foreach (Node child in node.GetChildren())
-        {
-            if (child is Label label)
-            {
-                return label;
-            }
-
-            Label? nested = FindLabel(child);
-            if (nested != null)
-            {
-                return nested;
-            }
-        }
-
-        return null;
+        screen._confirmButton.Modulate = DuelEntry.LocalReady
+            ? new Color(0.35f, 1f, 0.45f)   // confirmed — green check
+            : Colors.White;                 // not yet
     }
 }
