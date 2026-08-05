@@ -283,21 +283,51 @@ Two constraints to know: Custom mode is gated behind `CustomAndSeedsEpoch` being
 that boots straight into a custom multiplayer host — so the two-client scripts can drive this
 without menu clicking.
 
-### Duel parameters (clock, turn model) do *not* belong on the modifier
+### Clock duration and turn model ARE the match configuration
 
-The modifier answers one question — "is this a PvP match?" — and the modifier list UI is a
-set of on/off toggles, so it cannot carry a clock duration or a turn model. Those stay where
-§3.2 and §3.1b already put them: host-side config, broadcast on `DuelStartMessage` when the
-duel begins. That also keeps them adjustable after the run has started, which a run-creation
-property could not be.
+*Corrected 2026-08-05 — an earlier draft of this section had these as host-side settings
+broadcast at duel time. That was wrong.* These are the two things two players agree on before
+a match, exactly like time control and ruleset in chess: **how long is the clock**, and **are
+we playing real-time or turn-based**. They belong in the lobby, visible to both players before
+anyone commits, and fixed for the run.
 
-### Open question for implementation
+So they are expressed as modifiers too, in two mutually exclusive groups:
 
-Whether to piggyback the vanilla custom-run modifier list (zero custom UI, slightly buried:
-the player must know to pick Custom) or add a dedicated lobby entry point (clearer, but needs
-menu work and a BaseLib dependency for the UI). **Recommendation: piggyback first.** It is
-days cheaper, exercises the whole flow end to end, and the dedicated entry point is a
-presentation change that can land in M7 without touching any of the mechanism.
+| Group | Options | Meaning |
+|---|---|---|
+| **Turn model** (pick one) | `Duel: Real-Time Blitz` · `Duel: Turn-Based` | Also the "this is a PvP match" signal — either one present means duel mode |
+| **Clock** (pick one) | `Clock: 3 min` · `5 min` · `10 min` · `No clock` | Per-player time bank (§3.2) |
+
+Six tickboxes, but only two decisions, and both are visible to the joining player in the
+lobby before they start. Vanilla supports exclusivity directly:
+`ModelDb.MutuallyExclusiveModifiers` is a set-of-sets that `NCustomRunModifiersList` already
+uses to make tickboxes behave as radio buttons.
+
+`DuelStartMessage` keeps carrying `clockMs` and the turn model, but now as *derived* values
+read off the run's modifiers rather than as an independent host-side setting — one source of
+truth, decided in the lobby.
+
+### Two implementation obstacles, both surmountable
+
+1. **`ModelDb.GoodModifiers`, `BadModifiers` and `MutuallyExclusiveModifiers` are hardcoded
+   arrays**, not scanned collections — unlike `ModelDb.All`, which is why `DuelEncounter`
+   registers itself for free but these will not. Each property constructs a fresh array per
+   call, so a Harmony postfix appending our entries is safe and simple. Note
+   `NCustomRunModifiersList.GetAllModifiers` reads `GoodModifiers.Concat(BadModifiers)`, so
+   patching the `ModelDb` properties covers the UI as well as anything else reading them.
+2. **Modifier titles and descriptions come from a localization table** —
+   `LocString("modifiers", Id.Entry + ".title")` — so the mod needs loc JSON shipped in its
+   `.pck`. This is the first real asset work in the project (the `.pck` currently holds only
+   the mod image); Minty Spire 2's `localization/**/*.json` layout is the reference. Budget
+   for a `.pck` re-export in the build loop, which the Windows scripts do not currently do.
+
+### Entry point
+
+**Now:** the vanilla custom-run modifier list. Zero custom UI, and it gets the whole flow
+working end to end. Slightly buried — the host must know to choose a Custom run.
+
+**M7:** a dedicated PvP entry in the multiplayer menu that sets the same modifiers, so the
+mechanism does not change, only its presentation.
 
 ## 6. UI components (Godot side, via BaseLib node factories + our .pck)
 
@@ -412,8 +442,9 @@ mechanic. Note `HittableEnemies` is **not** patchable — it has no acting-playe
   the same coord on both clients?); with the v1.5 fallback the party is already together and
   the node is a plain shared room. Building it before that is known risks building the wrong
   one.
-- **M7 — Polish/knobs.** Config UI (BaseLib) for clock settings & flag rule; balance knobs
-  (§9); Workshop packaging; spectator/obs support (stretch).
+- **M7 — Polish/knobs.** Dedicated PvP entry point in the multiplayer menu (sets the same
+  modifiers as §5b, so only presentation changes); balance knobs (§9); Workshop packaging;
+  spectator/obs support (stretch).
 - **M8 — Simultaneous turn-based duel** (§3.1b model B). Introduce `IDuelTurnModel`, move the
   existing behaviour behind a `BlitzTurnModel` unchanged, then add the lock-in model beside
   it. Carry the choice on `DuelStartMessage`. **Use submission order and do not tune it** —
