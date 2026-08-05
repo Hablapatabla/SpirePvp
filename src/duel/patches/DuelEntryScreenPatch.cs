@@ -73,9 +73,19 @@ public static class DuelEntryScreenPatch
     [HarmonyPatch("AfterOverlayShown")]
     public static void AfterShown(NDeckCardSelectScreen __instance)
     {
-        if (DuelEntry.IsChoosing)
+        if (!DuelEntry.IsChoosing)
         {
-            Relabel(__instance);
+            return;
+        }
+
+        Relabel(__instance);
+
+        // The screen writes _prefs.Prompt into _infoLabel. CardSelectorPrefs only takes a
+        // LocString (loc table + key, no raw-text constructor), so the prompt is set from a
+        // placeholder key and corrected here — otherwise it reads "Choose a card to Upgrade".
+        if (__instance._infoLabel != null)
+        {
+            __instance._infoLabel.Text = "Your opponent's deck.";
         }
     }
 

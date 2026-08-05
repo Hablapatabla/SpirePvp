@@ -42,6 +42,7 @@ public static class DuelEntry
     private static bool _localReady;
     private static bool _opponentReady;
     private static Player? _opponent;
+    private static NDeckCardSelectScreen? _screen;
 
     public static bool IsChoosing { get; private set; }
 
@@ -82,6 +83,7 @@ public static class DuelEntry
             return false;
         }
 
+        _screen = screen;
         NOverlayStack.Instance.Push(screen);
 
         Log.Warn("[SpirePvp] duel entry — showing opponent deck");
@@ -169,7 +171,16 @@ public static class DuelEntry
         }
 
         IsChoosing = false;
-        NCapstoneContainer.Instance?.Close();
+
+        // The screen was pushed onto NOverlayStack, so it has to come off the same stack.
+        // Closing NCapstoneContainer here did nothing, leaving the grid on top of the duel
+        // and swallowing every click.
+        if (_screen != null)
+        {
+            NOverlayStack.Instance?.Remove(_screen);
+            _screen = null;
+        }
+
         DuelArena.Enter();
     }
 
