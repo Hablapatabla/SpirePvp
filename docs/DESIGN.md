@@ -252,6 +252,40 @@ mechanic. Note `HittableEnemies` is **not** patchable — it has no acting-playe
   complete playable product and M1–M4 are unaffected.
 - **M6 — Full loop.** Lobby → Neow → race Act 1 → boss + rare card → duel → result screen →
   rematch. Duel entry automatic once both ready.
+
+  ### M6's first task: the duel as a real map node (researched 2026-08-05)
+
+  Motivation is not cosmetics. `DuelEndCombatPatch` currently *replaces* `EndCombatInternal`
+  wholesale — the most brittle patch in the mod, and the one most likely to break on a game
+  update — purely because the synthetic arena has no map point behind it, so vanilla's
+  progression path NREs on `CurrentMapPointHistoryEntry.Rooms.Last()`. A real node removes
+  that whole class of "no map point" hack.
+
+  **Feasible, and the chokepoints are known:**
+  - `RunManager.CreateRoom(RoomType, MapPointType, AbstractModel?)` is a single switch and the
+    natural interception point: return a duel `CombatRoom` (carrying `DuelEncounter`) instead
+    of rolling a normal encounter.
+  - `RollRoomTypeFor` maps point type → room type, also a single switch.
+
+  **The constraint that shapes the design: `MapPointType` and `RoomType` are plain enums**,
+  not extensible models like encounters were. A mod cannot add a value, so the duel node must
+  masquerade as an existing type. `Boss` is the natural host — it is where the duel sits in
+  the run anyway, `NBossMapPoint` already supplies large node art, and `TravelToMapCoord`
+  even scales its selection VFX 2x. That also means **a custom icon is optional for v1**;
+  piggybacking boss art gets a working node with no `.pck` asset work at all.
+
+  **What it does *not* remove:** the duel still must suppress combat rewards, skip
+  `UpdateProgressAfterCombatWon` and the "defeated all enemies" achievement, and end the run
+  on a result screen rather than continuing. So the patch shrinks from "replace the method"
+  to "suppress progression and route to the result screen" — a real improvement in
+  robustness, but not a deletion.
+
+  **Sequenced after M5 deliberately.** The node's design depends on which world M5 lands in:
+  with a decoupled race, the duel node is a convergence point reached from two *different*
+  map positions (who triggers entry? what if one player arrives first? does the node exist at
+  the same coord on both clients?); with the v1.5 fallback the party is already together and
+  the node is a plain shared room. Building it before that is known risks building the wrong
+  one.
 - **M7 — Polish/knobs.** Config UI (BaseLib) for clock settings & flag rule; balance knobs
   (§9); Workshop packaging; spectator/obs support (stretch).
 
