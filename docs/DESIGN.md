@@ -329,10 +329,21 @@ mechanic. Note `HittableEnemies` is **not** patchable — it has no acting-playe
   `RestSiteSynchronizer`/`RewardSynchronizer` assume about peers being in the same room.
 - **I4 (M5)**: Where `Player.PlayerRng`/`PlayerOdds` get their real seeds; mirror across
   players. Files: `Core/Entities/Players/Player.cs`, `Core/Runs/RunState` seeding.
-- **I5 (M3)**: Exact hook points for round-start (clock resume) and whether the host can
-  enqueue `EndPlayerTurnAction` on behalf of another player. Files:
-  `Core/GameActions/EndPlayerTurnAction.cs`, `ActionQueueSynchronizer`
-  (`RequestEnqueueActionMessage` handling — does it validate sender == actor?).
+- **I5 (M3)** — *host-authority half resolved; the fallback is not needed.*
+  **The host CAN enqueue an action on behalf of another player.**
+  `ActionQueueSynchronizer.EnqueueAction(action, actionOwnerId)` broadcasts
+  `ActionEnqueuedMessage { playerId = actionOwnerId }`, and clients enqueue against
+  `message.playerId` verbatim. Private, but reachable via Publicizer. So the flag can force
+  an end turn host-side and stay deterministic — no need for the flagged player's own client
+  to auto-submit.
+  Two constraints found alongside it:
+  - The public `RequestEnqueue(action)` cannot do this: on host it hardcodes
+    `EnqueueAction(action, _netService.NetId)`, always attributing to the host. Call
+    `EnqueueAction` directly with the target player's id.
+  - A **client** cannot spoof another player: `HandleRequestEnqueueActionMessage` derives the
+    owner from `senderId` and ignores any claim in the message. So forced end turn must
+    originate on the host, which is what §3.2 wants anyway.
+  Still open: the exact round-start hook for resuming the clock.
 - **I6 (M4)**: Audit what per-player info the UI already renders for remote players
   (hand count? drawn cards? relic triggers?) so nothing leaks that we intend hidden — and
   confirm `HoveredModelTracker` suppression covers all surfaces (map pings too:
