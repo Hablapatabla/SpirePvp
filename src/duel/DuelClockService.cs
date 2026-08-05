@@ -166,14 +166,9 @@ public static class DuelClockService
             return "0:00.0";
         }
 
+        // Always m:ss. An earlier version switched to tenths under ten seconds, which made
+        // the label change shape exactly when you are most likely to be staring at it.
         TimeSpan span = TimeSpan.FromMilliseconds(ms);
-
-        // Tenths under ten seconds, where the difference actually matters.
-        if (ms < 10_000)
-        {
-            return $"{span.Seconds}.{span.Milliseconds / 100}";
-        }
-
         return $"{(int)span.TotalMinutes}:{span.Seconds:00}";
     }
 }
