@@ -80,10 +80,8 @@ public static class DuelEntryScreenPatch
         // The screen writes _prefs.Prompt into _infoLabel. CardSelectorPrefs only takes a
         // LocString (loc table + key, no raw-text constructor), so the prompt is set from a
         // placeholder key and corrected here — otherwise it reads "Choose a card to Upgrade".
-        if (__instance._infoLabel != null)
-        {
-            __instance._infoLabel.Text = "Your opponent's deck.";
-        }
+        // DuelEntry owns the text because it also carries the opponent's ready state.
+        DuelEntry.RefreshCaption();
     }
 
     /// <summary>

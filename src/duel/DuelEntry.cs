@@ -133,7 +133,26 @@ public static class DuelEntry
         }
 
         _opponentReady = message.isReady;
+        RefreshCaption();
         TryStart();
+    }
+
+    /// <summary>
+    /// Interim way to show the opponent's confirmation state: the caption carries it. The
+    /// confirm button is a single check-mark icon, so it can only express *your* state — and
+    /// you need to know whether they are still reading. Replaced by the opponent's portrait
+    /// on the button in the M6 asset pass (DESIGN §6).
+    /// </summary>
+    public static void RefreshCaption()
+    {
+        if (_screen?._infoLabel == null)
+        {
+            return;
+        }
+
+        _screen._infoLabel.Text = _opponentReady
+            ? "Your opponent's deck.   —   Opponent is READY."
+            : "Your opponent's deck.   —   Opponent is still looking.";
     }
 
     /// <summary>Host only: both sides ready, so tell everyone to enter.</summary>
