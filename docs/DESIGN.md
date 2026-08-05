@@ -503,16 +503,14 @@ mechanic. Note `HittableEnemies` is **not** patchable — it has no acting-playe
   - **The bank covers the whole run, not just the duel.** The clock is therefore
     *run-scoped*, started at run start and surviving room transitions — not created when the
     duel begins. Built that way from the outset so M5's race phase needs no retrofit.
-  - **It is a chess clock in both phases** (corrected 2026-08-05). Ending your turn in combat
-    stops *your* clock while your opponent's keeps running — that asymmetry is the mechanic,
-    and it pressures you to finish turns fast and trade accuracy for time. Everywhere else
-    the clock runs: map, shops, events, rest sites. A competitive mode should not pause while
-    someone reads an unfamiliar card; learning the game is not what is being measured.
-  - Authority follows knowledge. The duel is one shared combat, so the host sees both players'
-    end-turn state and owns both clocks. During the race the players are in separate combats
-    with action traffic dropped, so the host cannot know when the other ended a turn — each
-    client owns its own clock and reports it. Spoofable in principle; acceptable because both
-    players must run identical builds to connect, and the duel is host-authoritative.
+  - **Race is a global countdown; the duel is a chess clock** (settled 2026-08-05 after
+    playing both). During the race both clocks run continuously and never pause — reach the
+    arena before the bank empties. Pausing per-player was tried and is meaningless there: the
+    players are in separate combats and never wait on each other. Time spent racing is time
+    unavailable in the duel. In the duel they *do* wait on each other, so ending your turn
+    stops your clock while theirs runs.
+  - Host-authoritative in both phases. Sync carries a paused flag per clock so client-side
+    prediction matches the owner rather than rubber-banding on each correction.
   - Fischer increment still unimplemented (M7).
 - **Host advantage**: host resolves ~½ RTT faster. Options: accept it; input-delay
   equalization (delay host's own enqueues by measured RTT/2); alternate hosting across a

@@ -159,25 +159,22 @@ apart.
 
 ---
 
-## Clock rules (decided 2026-08-05)
+## Clock rules (settled 2026-08-05, after trying it both ways)
 
-It is a **chess clock, in the race as well as the duel**:
+**Race — a global countdown.** Both clocks run continuously and never pause: reach the arena
+before the bank empties. They start together and never stop, so the two values stay identical.
 
-- **Ending your turn in combat stops YOUR clock.** Theirs keeps running. That is the whole
-  mechanic — it pressures you to finish turns fast and trade a little accuracy for time.
-- **Everywhere else the clock runs**: map, shops, events, rest sites, and your own combat turn.
-  Deliberately so. A competitive mode should not stop the clock while someone reads a card they
-  have not seen before; learning the game is not what the match is measuring.
+A chess clock was tried here first and is *wrong* for this phase: the players are in separate
+combats and never wait on each other, so stopping your clock while theirs runs measures
+nothing. Time spent racing is simply time you will not have in the duel.
 
-**Authority moves with the phase, because knowledge does.** In the duel there is one shared
-combat, the host can see both players' end-turn state, and it owns both clocks — the usual
-"host decides, clients display". In the race the players are in separate combats and their
-action traffic is deliberately dropped, so the host *cannot* know when the other player ended
-a turn; a host-owned clock would simply be wrong. Each client therefore owns its own clock
-during the race and reports it, and each side displays the other's last report. Self-reported
-time is spoofable by a modified client, which is fine here: both players must already run
-identical builds to connect, and the duel — where the match is decided — stays
-host-authoritative.
+**Duel — a real chess clock.** Now the players do wait on each other, so ending your turn
+stops your clock while your opponent's keeps running.
+
+Host-authoritative in both phases: nothing pauses during the race, and in the duel the host
+sees both players' end-turn state directly. Sync carries each clock's paused flag so a client's
+prediction stops when the owner's does, instead of counting a stopped clock down and snapping
+it back twice a second.
 
 ## Starting a PvP match
 

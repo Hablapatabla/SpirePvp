@@ -15,17 +15,18 @@ namespace SpirePvp.Duel;
 /// start and survives room transitions. M5's race phase needs no retrofit — it is already
 /// running by then.
 ///
-/// It is a chess clock in both phases: ending your turn in combat stops YOUR clock while the
-/// opponent's keeps running, and everywhere else — map, shops, events, rest sites — it runs.
+/// Two phases, two meanings — settled 2026-08-05 by playing both:
+///   race — a global countdown. Reach the arena before the bank empties. Both clocks run
+///          continuously and never pause, so they stay identical. Stopping one while the
+///          other ran would measure nothing: the players are in separate combats and never
+///          wait on each other. Time spent racing is time you will not have in the duel.
+///   duel — a real chess clock. Here you *do* wait on each other, so ending your turn stops
+///          your clock while your opponent's keeps running.
 ///
-/// What differs by phase is *authority*, and only because of what each side can observe. The
-/// duel is one shared combat so the host owns both clocks. The race puts the players in
-/// separate combats with action traffic dropped, so the host cannot see the other's end turn:
-/// each client owns its own clock and reports it, pause state included.
-///
-/// Reports carry the running/paused flag precisely so the receiver's local prediction moves
-/// the same way the owner's does. Value alone would leave a paused clock ticking down here
-/// and jumping back on each sync.
+/// Host-authoritative in both phases: nothing pauses during the race, and in the duel the
+/// host sees both players' end-turn state directly. Sync carries each clock's paused flag so
+/// a client's prediction stops when the owner's does, rather than counting a stopped clock
+/// down and snapping it back twice a second.
 ///
 /// Duration 0 disables the clock entirely; nobody can lose on time. That is the default, so
 /// the mod stays inert for anyone who has not opted in.
@@ -137,50 +138,19 @@ public static class DuelClockService
     /// </summary>
     private static void BroadcastSyncIfHost(DateTime now)
     {
-        if ((now - _lastSync).TotalMilliseconds < SyncIntervalMs)
+        if (RunManager.Instance?.NetService?.Type != NetGameType.Host)
         {
             return;
         }
 
-        bool isHost = RunManager.Instance?.NetService?.Type == NetGameType.Host;
-
-        // Authority moves with the phase, because knowledge does.
-        //
-        // In the duel there is one shared combat, so the host can see both players' end-turn
-        // state and owns both clocks — the usual "host decides, clients display" rule.
-        //
-        // In the race the players are in separate combats and their action traffic is
-        // deliberately dropped, so the host has no idea when the other player ended a turn.
-        // A host-owned clock would simply be wrong. Each client therefore owns its own clock
-        // during the race and reports it, and each side displays the other's last report.
-        //
-        // The split exists because of what each side can *observe*, not to defend against a
-        // dishonest peer. Both players run identical builds by necessity, and a modified
-        // client can break far more than a clock.
-        if (!isHost && !DuelSession.IsRaceActive)
+        if ((now - _lastSync).TotalMilliseconds < SyncIntervalMs)
         {
             return;
         }
 
         _lastSync = now;
 
-        if (DuelSession.IsRaceActive)
-        {
-            // Report only our own clock; the opponent slot is left empty so the receiver
-            // cannot mistake our guess about them for fact.
-            RunManager.Instance!.NetService.SendMessage(new ClockSyncMessage
-            {
-                playerA = _local!.PlayerId,
-                playerARemainingMs = (int)_local.RemainingMs,
-                playerAPaused = !_local.IsRunning,
-                playerB = 0,
-                playerBRemainingMs = 0,
-                playerBPaused = false
-            });
-            return;
-        }
-
-        RunManager.Instance!.NetService.SendMessage(new ClockSyncMessage
+        RunManager.Instance.NetService.SendMessage(new ClockSyncMessage
         {
             playerA = _local!.PlayerId,
             playerARemainingMs = (int)_local.RemainingMs,
@@ -194,22 +164,12 @@ public static class DuelClockService
     /// <summary>
     /// Apply an incoming clock report.
     ///
-    /// During the duel this is the host's authoritative pair and a client snaps both clocks to
-    /// it. During the race it is a peer reporting only itself, so we take their value and never
-    /// let it touch our own — our clock is ours to own while the runs are decoupled.
+    /// The host's authoritative pair; clients snap both clocks to it. Host-owned in both
+    /// phases — nothing pauses during the race, and in the duel the host sees both players'
+    /// end-turn state directly.
     /// </summary>
     public static void ApplySync(ClockSyncMessage message)
     {
-        if (DuelSession.IsRaceActive)
-        {
-            if (_opponent != null && message.playerA == _opponent.PlayerId)
-            {
-                _opponent.CorrectTo(message.playerARemainingMs);
-                ApplyReportedPause(_opponent, message.playerAPaused);
-            }
-            return;
-        }
-
         if (RunManager.Instance?.NetService?.Type == NetGameType.Host)
         {
             return;
@@ -260,25 +220,29 @@ public static class DuelClockService
             return;
         }
 
-        CombatState? state = CombatManager.Instance.DebugOnlyGetState();
-
-        // Outside combat — map, shop, event, rest site — every clock runs. Deliberate: a
-        // competitive run should not stop the clock while you read an event or browse a shop.
-        if (state == null)
+        // RACE — a global countdown, not a chess clock. The players are in separate combats
+        // and never wait on each other, so stopping one clock while the other runs would
+        // measure nothing. Both simply count down: reach the arena before the bank empties.
+        // Starting together and never pausing is what keeps the two values identical, which
+        // is what "global timer" means here. Time spent racing is time you lack in the duel.
+        if (!DuelSession.IsDuelActive)
         {
             _local.Start();
             _opponent.Start();
             return;
         }
 
+        // DUEL — now a real chess clock, because now you *do* wait on each other. Ending your
+        // turn stops your clock while your opponent's keeps running.
+        CombatState? state = CombatManager.Instance.DebugOnlyGetState();
+        if (state == null)
+        {
+            return;
+        }
+
         foreach (Player player in state.Players)
         {
-            bool isMe = LocalContext.IsMe(player);
-            DuelClock clock = isMe ? _local : _opponent;
-
-            // Chess-clock rule, and it applies during the race as much as the duel: ending
-            // your turn stops YOUR clock while your opponent's keeps running. That is the
-            // pressure — finish the turn fast, and trade a little accuracy for time.
+            DuelClock clock = LocalContext.IsMe(player) ? _local : _opponent;
             if (CombatManager.Instance.IsPlayerReadyToEndTurn(player))
             {
                 clock.Pause();
@@ -286,14 +250,6 @@ public static class DuelClockService
             else
             {
                 clock.Start();
-            }
-
-            // During the race the opponent is in their own combat, which this client cannot
-            // see. Leave their clock exactly as their last report set it — inferring it from
-            // our own combat would be guessing, and guessing wrong is what causes drift.
-            if (!isMe && DuelSession.IsRaceActive)
-            {
-                continue;
             }
         }
     }
