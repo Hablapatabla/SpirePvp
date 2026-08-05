@@ -199,6 +199,32 @@ Every milestone ends with: builds green, loads in-game without errors in
 setup (see §8).
 
 - **M0 — done.** Toolchain, skeleton mod loads, decompiled source.
+- **M1 — done** (2026-08-05, playtested on two local macOS clients over ENet). Retargeting,
+  win condition, duel arena entry via `duel start`, opponent drawn and facing correctly on the
+  enemy side, HP bar always visible.
+- **M2 — done** (2026-08-05). AOE/random/auto-play retargeting, round loop verified over
+  multiple rounds, poison timing corrected, duel ends on a victory/defeat screen.
+
+### The M1/M2 lesson, which predicts most future bugs
+
+**The duel never breaks card logic — it breaks every place the engine encodes "enemy" as a
+*side* rather than a *relationship*.** Damage, block, powers and DoT all operate on `Creature`
+and worked untouched, exactly as §3.1 bet. Every single bug was a side test:
+
+| Symptom | Cause |
+|---|---|
+| Strike would not drop on the opponent | `CardModel.IsValidTarget`: `target.Side != Owner.Creature.Side` |
+| ...and still would not, after fixing that | `NTargetManager.AllowedToTargetCreature` requires `Side == Enemy` — targeting is validated twice, independently |
+| Fire Potion would not throw | `PotionModel.IsValidTarget`, a separate method with the same check |
+| AOE cards "played" and hit nothing | `CombatState.GetOpponentsOf` returns the opposite side |
+| Hellraiser's auto-Strikes whiffed | `CardCmd.AutoPlay` picks from `HittableEnemies` directly |
+| Opponent HP bar hover-only | `_isRemotePlayerOrPet` — co-op teammate presentation |
+| Poison ticked a round late | `AfterSideTurnStart` fires per side; a poisoned *player* resolves at player-turn start, not enemy-turn start |
+| Duel froze after a kill | `EndCombatInternal` assumes a real map room; NRE killed the turn loop |
+
+When something behaves oddly in a duel, look for a side comparison before suspecting the
+mechanic. Note `HittableEnemies` is **not** patchable — it has no acting-player context.
+`GetOpponentsOf` is the correct chokepoint because it is handed the attacker.
 - **M1 — Duel spike (hardest risk first).** Two clients in a co-op run; hotkey enters a
   shared combat with an empty enemy side; retargeting patch makes Strike hit the opponent;
   win-condition patch prevents instant "victory" and ends combat on a death.
@@ -289,9 +315,15 @@ setup (see §8).
     empty/custom encounter on demand — `Core/Rooms/CombatRoom.cs`, encounter construction
     (search `MonsterGroup`/`EncounterModel` usages), and how `ActChangeSynchronizer` moves
     everyone at once.
-- **I2 (M2)**: Enemy-phase behavior with an empty enemy side — confirm the turn loop's
-  enemy segment no-ops; find the turn loop method in `CombatManager` (search for the code
-  that awaits `EndTurnSignalSource`).
+- **I2 (M2)** — **RESOLVED, no work needed.** The enemy phase no-ops correctly with an empty
+  enemy side. Playtested: round rollover, fresh hand, energy refill and power decrement all
+  behave normally over multiple rounds. The empty enemy phase still *runs* each round
+  (`After enemy turn start action` appears in the combat log), which turned out to matter —
+  it is the correct moment for duelists' DoT to resolve (see the poison fix).
+  - Related, and not obvious: a player who dies **mid-turn** stalls the round forever.
+    `AllPlayersReadyToEndTurn` compares readiness count to player count, and the dead never
+    signal. Vanilla auto-readies the dead only at *turn start*, which in a duel is never when
+    anyone dies. `DuelDeadPlayerReadyPatch` applies that rule continuously.
 - **I3 (M5)**: Decoupling shared-room sync during the race: `MapSelectionSynchronizer`,
   room-entry waits, `ChecksumTracker`, `CombatStateSynchronizer.IsDisabled`, and whatever
   `RestSiteSynchronizer`/`RewardSynchronizer` assume about peers being in the same room.
