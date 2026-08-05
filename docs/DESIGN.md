@@ -245,6 +245,11 @@ mechanic. Note `HittableEnemies` is **not** patchable — it has no acting-playe
   spike says no.
   *Accept: both players independently clear a 3-room slice on identical seeds and see each
   other's progress.*
+  **Researched, not started — read I3 and I4 below before writing any code.** Short version:
+  the state synchronizers are trivially disablable (public bools), the RNG mirroring is a
+  one-line patch, and the whole risk sits in map traversal, where position is global and the
+  move action travels every client. Spike that one thing first; if it resists, v1.5 is a
+  complete playable product and M1–M4 are unaffected.
 - **M6 — Full loop.** Lobby → Neow → race Act 1 → boss + rare card → duel → result screen →
   rematch. Duel entry automatic once both ready.
 - **M7 — Polish/knobs.** Config UI (BaseLib) for clock settings & flag rule; balance knobs
@@ -337,9 +342,61 @@ mechanic. Note `HittableEnemies` is **not** patchable — it has no acting-playe
     `AllPlayersReadyToEndTurn` compares readiness count to player count, and the dead never
     signal. Vanilla auto-readies the dead only at *turn start*, which in a duel is never when
     anyone dies. `DuelDeadPlayerReadyPatch` applies that rule continuously.
-- **I3 (M5)**: Decoupling shared-room sync during the race: `MapSelectionSynchronizer`,
-  room-entry waits, `ChecksumTracker`, `CombatStateSynchronizer.IsDisabled`, and whatever
-  `RestSiteSynchronizer`/`RewardSynchronizer` assume about peers being in the same room.
+- **I3 (M5)** — *researched 2026-08-05 against v0.110.1. Not yet spiked in game.*
+
+  **The verdict: harder than the design assumed, but not obviously impossible. The blocker is
+  map traversal, not state sync.**
+
+  What is *easy* (public API, no patching):
+  - `CombatStateSynchronizer.IsDisabled` — a public settable bool. `RunManager.Instance
+    .CombatStateSynchronizer` is public, so the race can turn pre-combat state sync off with
+    an assignment. Vanilla's own `NMultiplayerTest` debug screen does exactly this.
+  - `ChecksumTracker.IsEnabled` — likewise a public settable bool. Divergence detection can
+    be switched off for the race and back on for the duel.
+
+  What is *hard*: **map position is global, not per-player.**
+  - `MapSelectionSynchronizer.PlayerVotedForMapCoord` only proceeds when
+    `_votes.All(...)` — every player must vote — and then the host calls `MoveToMapCoord`,
+    which picks **one** destination (randomly among tied votes) and enqueues a single
+    `MoveToMapCoordAction`.
+  - That action's `_player` is only the queue owner. `ExecuteAction` runs
+    `NMapScreen.Instance.TravelToMapCoord(destination)` on *every* client, and `RunState`
+    exposes a single `CurrentMapCoord`. There is no per-player location in the run state.
+  - So decoupling is not "disable a synchronizer" — it means giving each client its own map
+    position while the engine believes there is one. That is the real M5 risk, and it is
+    where the spike should start.
+
+  What is *more permissive than feared*: `RunLocationTargetedMessageBuffer` (which gates
+  every `IRunLocationTargetedMessage`) blocks on `_visitedLocations`, a set of everywhere the
+  receiver has *ever been* — not on current location. A message about a room you already
+  passed is delivered immediately; only messages from a peer who is *ahead* of you are held.
+  In a race over a shared map both players visit the same coords, so buffering should be
+  transient rather than permanent. Note `OnLocationChanged` logs an **error** if anything is
+  still buffered after a transition, so this will be noisy if it goes wrong — useful signal
+  during the spike.
+
+  Note the mod's own `DuelMessages` do **not** implement `IRunLocationTargetedMessage`, so
+  they bypass this buffer entirely.
+
+  Other waits to expect: `ActChangeSynchronizer` gates act transitions behind
+  `SetLocalPlayerReady` / `IsWaitingForOtherPlayers` before calling `EnterNextAct` —
+  a genuine rendezvous, and arguably one the race *wants* to keep at the Act 1 boundary.
+  `RestSiteSynchronizer` and `RewardSynchronizer` are per-choice message relays keyed on the
+  location buffer rather than hard barriers, so they are likely to tolerate divergence better
+  than map traversal does.
+
+- **I4 (M5)** — **RESOLVED. It is a one-line change.**
+  `Player.InitializeSeed(string seed)` (`Core/Entities/Players/Player.cs:328`) does:
+  ```
+  PlayerRng = new PlayerRngSet(GetDeterministicHashCode(seed) + (ulong)_runState.GetPlayerSlotIndex(this));
+  PlayerOdds = new PlayerOddsSet(PlayerRng);
+  ```
+  The per-player slot index is the *only* thing making two players' card rewards, shop stock
+  and event rolls differ on a shared seed. Dropping that offset — patching `InitializeSeed` so
+  both duelists seed from the run seed alone — gives the mirror-match fairness §4 asks for.
+  Beware the two other construction sites: line 269 seeds `0uL` before a run seed exists, and
+  line 321 restores from a save via `PlayerRngSet.FromSerializable`, which a mirrored run must
+  also keep consistent.
 - **I4 (M5)**: Where `Player.PlayerRng`/`PlayerOdds` get their real seeds; mirror across
   players. Files: `Core/Entities/Players/Player.cs`, `Core/Runs/RunState` seeding.
 - **I5 (M3)** — *host-authority half resolved; the fallback is not needed.*
