@@ -4,8 +4,13 @@ using MegaCrit.Sts2.Core.Entities.Creatures;
 using MegaCrit.Sts2.Core.Entities.Players;
 using MegaCrit.Sts2.Core.Logging;
 using MegaCrit.Sts2.Core.Multiplayer.Game;
+using MegaCrit.Sts2.Core.CardSelection;
+using MegaCrit.Sts2.Core.Localization;
+using MegaCrit.Sts2.Core.Nodes.CommonUi;
 using MegaCrit.Sts2.Core.Nodes.Screens;
+using MegaCrit.Sts2.Core.Nodes.Screens.CardSelection;
 using MegaCrit.Sts2.Core.Nodes.Screens.Capstones;
+using MegaCrit.Sts2.Core.Nodes.Screens.Overlays;
 using MegaCrit.Sts2.Core.Runs;
 using SpirePvp.Net;
 
@@ -59,7 +64,26 @@ public static class DuelEntry
         _opponentReady = false;
         IsChoosing = true;
 
-        NDeckViewScreen.ShowScreen(_opponent);
+        // The campfire-style grid, not the deck view. MinSelect != MaxSelect is what enables
+        // this screen's right-hand confirm button (RefreshConfirmButtonVisibility), so (0, 1)
+        // gives a live confirm with nothing selected — which is what we want, since nothing
+        // here is selectable. DuelEntryScreenPatch blocks card clicks and repurposes the
+        // button.
+        CardSelectorPrefs prefs = new CardSelectorPrefs(
+            new LocString("card_selection", "TO_UPGRADE"), 0, 1)
+        {
+            Cancelable = false
+        };
+
+        NDeckCardSelectScreen screen = NDeckCardSelectScreen.Create(_opponent.Deck.Cards.ToList(), prefs);
+        if (NOverlayStack.Instance == null)
+        {
+            IsChoosing = false;
+            return false;
+        }
+
+        NOverlayStack.Instance.Push(screen);
+
         Log.Warn("[SpirePvp] duel entry — showing opponent deck");
         return true;
     }

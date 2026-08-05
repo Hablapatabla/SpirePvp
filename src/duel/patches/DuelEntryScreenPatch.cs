@@ -1,32 +1,48 @@
-using HarmonyLib;
 using Godot;
+using HarmonyLib;
+using MegaCrit.Sts2.Core.Models;
 using MegaCrit.Sts2.Core.Nodes.GodotExtensions;
-using MegaCrit.Sts2.Core.Nodes.Screens;
+using MegaCrit.Sts2.Core.Nodes.Screens.CardSelection;
 
 namespace SpirePvp.Duel.Patches;
 
 /// <summary>
-/// Turns the vanilla deck view into the duel's entry screen while <see cref="DuelEntry"/> is
-/// waiting on confirmations.
+/// Turns the campfire-style card grid into the duel's entry screen while
+/// <see cref="DuelEntry"/> is waiting on confirmations.
 ///
-/// NCardsViewScreen has a single _backButton whose handler, OnReturnButtonPressed, closes the
-/// screen. During duel entry it becomes the confirm instead: relabelled, and toggling ready
-/// rather than closing. Toggling — not committing — because confirming stays revocable until
-/// the opponent confirms too.
+/// NDeckCardSelectScreen is the screen used to pick a card at a rest site, and it already has
+/// the shape we want: a full grid of cards with a confirm button on the right
+/// (NConfirmButton, node %Confirm) separate from the back button. Its confirm is enabled by
+/// RefreshConfirmButtonVisibility whenever MinSelect != MaxSelect, which is why DuelEntry
+/// passes (0, 1) — a live confirm with nothing selected.
 ///
-/// Everything else about the screen is left alone: it is still the real deck view, with the
-/// real sorters, showing the opponent's real pile via ShowScreen(opponentPlayer).
+/// Two interceptions make it view-only:
+///   OnCardClicked   — swallowed, so the opponent's cards cannot be selected or highlighted.
+///   PreviewSelection — the confirm handler; toggles readiness instead of completing the
+///                      selection, because confirming stays revocable until the opponent
+///                      confirms too.
+///
+/// Everything else is the real screen: real grid, real card previews on hover, showing the
+/// opponent's actual deck.
 /// </summary>
-[HarmonyPatch(typeof(NCardsViewScreen))]
+[HarmonyPatch(typeof(NDeckCardSelectScreen))]
 public static class DuelEntryScreenPatch
 {
     private const string ReadyLabel = "START DUEL";
-    private const string WaitingLabel = "WAITING… (CLICK TO CANCEL)";
+    private const string WaitingLabel = "WAITING…";
 
-    /// <summary>Swallow the press and toggle readiness instead of closing the screen.</summary>
+    /// <summary>The opponent's deck is for reading, not picking from.</summary>
     [HarmonyPrefix]
-    [HarmonyPatch("OnReturnButtonPressed")]
-    public static bool BeforeReturnPressed(NCardsViewScreen __instance)
+    [HarmonyPatch("OnCardClicked", typeof(CardModel))]
+    public static bool BeforeCardClicked()
+    {
+        return !DuelEntry.IsChoosing;
+    }
+
+    /// <summary>Confirm pressed. Toggle rather than complete — confirming is revocable.</summary>
+    [HarmonyPrefix]
+    [HarmonyPatch("PreviewSelection", new Type[0])]
+    public static bool BeforePreviewSelection(NDeckCardSelectScreen __instance)
     {
         if (!DuelEntry.IsChoosing)
         {
@@ -38,10 +54,17 @@ public static class DuelEntryScreenPatch
         return false;
     }
 
-    /// <summary>Relabel once the screen is up.</summary>
+    /// <summary>Same, for the button-signal overload.</summary>
+    [HarmonyPrefix]
+    [HarmonyPatch("PreviewSelection", typeof(NButton))]
+    public static bool BeforePreviewSelectionFromButton(NDeckCardSelectScreen __instance)
+    {
+        return BeforePreviewSelection(__instance);
+    }
+
     [HarmonyPostfix]
-    [HarmonyPatch("_Ready")]
-    public static void AfterReady(NCardsViewScreen __instance)
+    [HarmonyPatch("ConnectSignalsAndInitGrid")]
+    public static void AfterInit(NDeckCardSelectScreen __instance)
     {
         if (DuelEntry.IsChoosing)
         {
@@ -49,25 +72,24 @@ public static class DuelEntryScreenPatch
         }
     }
 
-    private static void Relabel(NCardsViewScreen screen)
+    private static void Relabel(NDeckCardSelectScreen screen)
     {
-        NButton? button = screen._backButton;
-        if (button == null)
-        {
-            return;
-        }
-
-        // NButton exposes no label API — its text lives in a child Label placed by the scene,
-        // and the name varies by button. Walk for the first one rather than guessing a path.
-        Label? label = FindLabel(button);
+        // The buttons expose no label API — their text is a scene-placed child Label whose
+        // node name varies, so walk for the first one rather than guessing a path.
+        Label? label = FindLabel(screen._confirmButton);
         if (label != null)
         {
             label.Text = DuelEntry.LocalReady ? WaitingLabel : ReadyLabel;
         }
     }
 
-    private static Label? FindLabel(Node node)
+    private static Label? FindLabel(Node? node)
     {
+        if (node == null)
+        {
+            return null;
+        }
+
         foreach (Node child in node.GetChildren())
         {
             if (child is Label label)
