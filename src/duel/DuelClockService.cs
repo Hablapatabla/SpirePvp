@@ -254,12 +254,28 @@ public static class DuelClockService
         }
     }
 
-    /// <summary>Label text for the top bar: "YOU 2:31 · OPP 1:47".</summary>
+    /// <summary>
+    /// Label text for the top bar, and it changes with the phase because the phases mean
+    /// different things.
+    ///
+    /// Race — one number: "7:42". Both clocks are identical here by construction (they start
+    /// together and neither ever pauses), so "YOU 7:42 · OPP 7:42" would be two ways of saying
+    /// the same thing and an invitation to compare numbers that cannot differ. It is a shared
+    /// deadline to reach the arena, so it reads as one.
+    ///
+    /// Duel — both: "YOU 2:31 · OPP 1:47". Now they genuinely diverge, and the gap between
+    /// them is the whole tension.
+    /// </summary>
     public static string? FormatForHud()
     {
         if (!Enabled || _local == null || _opponent == null)
         {
             return null;
+        }
+
+        if (!DuelSession.IsDuelActive)
+        {
+            return Format(_local.RemainingMs);
         }
 
         return $"YOU {Format(_local.RemainingMs)} · OPP {Format(_opponent.RemainingMs)}";

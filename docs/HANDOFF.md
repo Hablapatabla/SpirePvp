@@ -171,6 +171,10 @@ nothing. Time spent racing is simply time you will not have in the duel.
 **Duel — a real chess clock.** Now the players do wait on each other, so ending your turn
 stops your clock while your opponent's keeps running.
 
+The top-bar display follows the phase: a single countdown during the race (both clocks are
+identical there by construction, so two numbers would say the same thing twice), and
+`YOU 2:31 · OPP 1:47` once the duel starts and they actually diverge.
+
 Host-authoritative in both phases: nothing pauses during the race, and in the duel the host
 sees both players' end-turn state directly. Sync carries each clock's paused flag so a client's
 prediction stops when the owner's does, instead of counting a stopped clock down and snapping
