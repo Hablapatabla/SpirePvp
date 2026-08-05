@@ -66,14 +66,22 @@ public record struct DuelReadyMessage : INetMessage
 
     public string modVersion;
 
+    /// <summary>
+    /// False when the player revokes. Confirming is revocable right up until the opponent
+    /// confirms too, so the screen is a negotiation rather than a commitment.
+    /// </summary>
+    public bool isReady;
+
     public void Serialize(PacketWriter writer)
     {
         writer.WriteString(modVersion);
+        writer.WriteBool(isReady);
     }
 
     public void Deserialize(PacketReader reader)
     {
         modVersion = reader.ReadString();
+        isReady = reader.ReadBool();
     }
 }
 

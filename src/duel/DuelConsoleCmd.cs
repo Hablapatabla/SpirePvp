@@ -81,6 +81,11 @@ public class DuelConsoleCmd : AbstractConsoleCmd
             return StartDuelRoom();
         }
 
+        if (mode == "now")
+        {
+            return StartDuelRoomImmediately();
+        }
+
         if (mode != "on")
         {
             return new CmdResult(success: false,
@@ -150,62 +155,34 @@ public class DuelConsoleCmd : AbstractConsoleCmd
     /// combat setup evaluates the win condition against zero enemies, and without the veto
     /// from DuelWinConditionPatch already in place the duel would end the instant it began.
     /// </summary>
+    /// <summary>
+    /// Opens the duel entry screen: the opponent's decklist, with START DUEL on it. Both
+    /// players confirm there before the arena loads. Until the map node exists (M6) this is
+    /// how you reach that screen; afterwards the node replaces the command, not the flow.
+    /// </summary>
     private static CmdResult StartDuelRoom()
     {
-        RunManager? runManager = RunManager.Instance;
-        RunState? runState = runManager?.DebugOnlyGetState();
-        if (runManager == null || runState == null)
+        if (!CombatManager.Instance.IsInProgress)
         {
-            return new CmdResult(success: false, "Not in a run — start a multiplayer run first.");
+            return new CmdResult(success: false,
+                "Not in a combat — the entry screen needs both players present. Start one first.");
         }
 
-        EncounterModel encounter = (EncounterModel)ModelDb.Encounter<DuelEncounter>().ToMutable();
-        CombatRoom room = new CombatRoom(encounter, runState);
+        if (!DuelEntry.Open())
+        {
+            return new CmdResult(success: false,
+                "Could not find an opponent — a duel needs a second player in this combat.");
+        }
 
-        // Veto first, then enter. See the ordering note above.
-        DuelSession.ActivateDuel(0);
-        TaskHelper.RunSafely(EnterDuelRoom(runManager, room));
-
-        Log.Warn("[SpirePvp] entering duel arena");
-        return new CmdResult(success: true, "Entering the duel arena…");
+        return new CmdResult(success: true, "Opponent's deck open — press START DUEL when ready.");
     }
 
-    private static async Task EnterDuelRoom(RunManager runManager, CombatRoom room)
+    /// <summary>Skips the entry screen and drops straight into the arena. Debug shortcut.</summary>
+    private static CmdResult StartDuelRoomImmediately()
     {
-        await runManager.EnterRoom(room);
-
-        CombatState? state = CombatManager.Instance.DebugOnlyGetState();
-        if (state == null)
-        {
-            Log.Warn("[SpirePvp] duel arena entered but no combat state — aborting duel");
-            DuelSession.Reset();
-            return;
-        }
-
-        // Now that both players exist in the combat, record the opponent and fix the layout.
-        Player? me = LocalContext.GetMe(state);
-        foreach (Creature creature in state.PlayerCreatures)
-        {
-            Player? owner = creature.Player;
-            if (owner != null && me != null && owner.NetId != me.NetId)
-            {
-                DuelSession.ActivateDuel(owner.NetId);
-                break;
-            }
-        }
-
-        DuelLayout.MoveOpponentToEnemySide(state);
-        DuelResult.Arm();
-
-        // Run-scoped in principle (DESIGN §9: the bank covers the whole run). Started here
-        // only because the race phase does not exist yet — M5 moves this to run start.
-        if (me != null)
-        {
-            DuelClockService.Start(me.NetId, DuelSession.OpponentId);
-            DuelFlag.Arm();
-        }
-
-        Log.Warn($"[SpirePvp] duel arena ready — {state.PlayerCreatures.Count} duelists, {state.Enemies.Count} enemies");
+        return DuelArena.Enter()
+            ? new CmdResult(success: true, "Entering the duel arena…")
+            : new CmdResult(success: false, "Not in a run — start a multiplayer run first.");
     }
 
     /// <summary>
