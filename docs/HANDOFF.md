@@ -19,7 +19,8 @@ flags, console commands and gotchas below are OS-neutral unless marked.
 | **M2** round loop | **done**, playtested |
 | **M3** chess clock | **done**, playtested |
 | **M4** information rules | **done**, playtested |
-| **M5** race phase | **spike passed**, playtested — decoupled traversal works; race *content* (mirrored RNG, progress HUD, duel handshake) not built |
+| **M5** race phase | **working, playtested 2026-08-05.** Two clients race the same seeded map independently — own combats, own rewards, advancing at their own pace — with mirrored RNG and a run-long clock. Remaining: progress HUD, duel handshake |
+| **M6** match setup | lobby configuration **done** (modifiers for turn model + clock); duel map node not started |
 | M6 full loop, M7 polish | not started |
 
 A duel is fully playable end to end today: enter the arena, fight with real cards and
@@ -157,6 +158,20 @@ The client window retitles itself to "Slay The Spire 2 (Client)", which is how y
 apart.
 
 ---
+
+## The clock does not pause during the race — this is deliberate
+
+`DuelClockService.ApplyPhaseRules` runs both clocks continuously through the race and only
+behaves as a true chess clock (pausing on end turn) once the duel starts. Ending your turn
+mid-race does **not** stop your clock, which surprises everyone who sees it.
+
+The reason: the race bank is a *total time budget for the whole run*, not per-turn thinking
+time. If it paused on end turn, you could end turn and then deliberate forever on the map
+screen, in a shop, or at a rest site with the clock stopped — which is most of where a run's
+time actually goes. The budget would measure almost nothing.
+
+If that ever wants revisiting, the decision point is one method, and DESIGN §9 has the
+reasoning.
 
 ## Starting a PvP match
 
