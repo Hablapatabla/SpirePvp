@@ -1,0 +1,100 @@
+using MegaCrit.Sts2.Core.Combat;
+using MegaCrit.Sts2.Core.Context;
+using MegaCrit.Sts2.Core.Entities.Creatures;
+using MegaCrit.Sts2.Core.Entities.Players;
+using MegaCrit.Sts2.Core.Logging;
+using MegaCrit.Sts2.Core.Nodes;
+using MegaCrit.Sts2.Core.Rooms;
+using MegaCrit.Sts2.Core.Runs;
+using MegaCrit.Sts2.Core.Saves;
+
+namespace SpirePvp.Duel;
+
+/// <summary>
+/// Ends the duel on a result screen instead of dumping you back into the run.
+///
+/// Vanilla only shows the game-over screen when the whole party wipes —
+/// CreatureCmd.Kill gates it on `runState.Players.All(p =&gt; p.Creature.IsDead)`. Exactly one
+/// duelist dies, so the screen never appeared and the winner was silently returned to the
+/// map. Both halves of the trigger are public, so no patch is needed:
+///
+///   SerializableRun run = RunManager.Instance.OnEnded(isVictory);
+///   NRun.Instance.ShowGameOverScreen(run);
+///
+/// Each client decides its own result from its own local player, so the winner sees victory
+/// and the loser sees defeat off the same combat outcome, with no extra message.
+///
+/// Hooks CombatManager.CombatEnded rather than patching EndCombatInternal: that method is
+/// async, so a Harmony postfix would run when the state machine is created rather than when
+/// combat has actually finished.
+///
+/// M6 replaces this with a proper DuelResultScreen (per-round damage, rematch). This reuses
+/// the vanilla screen with rewritten text — see DuelResultBannerPatch.
+/// </summary>
+public static class DuelResult
+{
+    private static bool _subscribed;
+
+    /// <summary>Called when a duel begins so we can catch the end of it.</summary>
+    public static void Arm()
+    {
+        if (_subscribed)
+        {
+            return;
+        }
+
+        CombatManager.Instance.CombatEnded += OnCombatEnded;
+        _subscribed = true;
+    }
+
+    public static void Disarm()
+    {
+        if (!_subscribed)
+        {
+            return;
+        }
+
+        CombatManager.Instance.CombatEnded -= OnCombatEnded;
+        _subscribed = false;
+    }
+
+    private static void OnCombatEnded(CombatRoom room)
+    {
+        Disarm();
+
+        if (!DuelSession.IsDuelActive)
+        {
+            return;
+        }
+
+        bool won = LocalPlayerSurvived(room);
+        DuelSession.CompleteDuel(won);
+        Log.Warn($"[SpirePvp] duel over — local player {(won ? "WON" : "LOST")}");
+
+        // OnEnded writes the run history the screen reads; isVictory drives which banner
+        // DuelResultBannerPatch then rewrites.
+        SerializableRun run = RunManager.Instance.OnEnded(won);
+        NRun.Instance?.ShowGameOverScreen(run);
+    }
+
+    private static bool LocalPlayerSurvived(CombatRoom room)
+    {
+        Player? me = LocalContext.GetMe(room.CombatState);
+        if (me != null)
+        {
+            return !me.Creature.IsDead;
+        }
+
+        // Fallback: if the local player can't be identified, treat any survivor as a loss
+        // rather than handing out a win we can't justify.
+        foreach (Creature creature in room.CombatState.PlayerCreatures)
+        {
+            if (creature.IsAlive && LocalContext.IsMe(creature.Player))
+            {
+                return true;
+            }
+        }
+
+        return false;
+    }
+}

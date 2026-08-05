@@ -43,9 +43,13 @@ public static class DuelSession
         OpponentId = opponentId;
     }
 
-    public static void CompleteDuel()
+    /// <summary>True when the local player won the duel that just finished.</summary>
+    public static bool LocalPlayerWon { get; private set; }
+
+    public static void CompleteDuel(bool localPlayerWon)
     {
         Phase = DuelPhase.Complete;
+        LocalPlayerWon = localPlayerWon;
     }
 
     // TODO(M6): real phase transitions over DuelMessages (INetGameService.RegisterMessageHandler

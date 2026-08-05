@@ -119,6 +119,7 @@ public class DuelConsoleCmd : AbstractConsoleCmd
 
         DuelSession.ActivateDuel(opponentId);
         DuelLayout.MoveOpponentToEnemySide(state);
+        DuelResult.Arm();
 
         List<Creature> enemies = new List<Creature>(state.Enemies);
         TaskHelper.RunSafely(ClearEnemySide(enemies));
@@ -181,6 +182,7 @@ public class DuelConsoleCmd : AbstractConsoleCmd
         }
 
         DuelLayout.MoveOpponentToEnemySide(state);
+        DuelResult.Arm();
         Log.Warn($"[SpirePvp] duel arena ready — {state.PlayerCreatures.Count} duelists, {state.Enemies.Count} enemies");
     }
 
