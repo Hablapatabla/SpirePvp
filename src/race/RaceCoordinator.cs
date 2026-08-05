@@ -1,19 +1,51 @@
+using MegaCrit.Sts2.Core.Logging;
+using MegaCrit.Sts2.Core.Runs;
+
 namespace SpirePvp.Race;
 
 /// <summary>
-/// M5 (DESIGN §4, I3, I4): decouples the two players during the race phase so each client
-/// simulates its own run on the shared seed, and broadcasts RaceProgressMessage for the HUD.
+/// M5 spike (DESIGN §4, I3): lets the two clients run independently through the same seeded
+/// map instead of moving as a co-op party.
 ///
-/// Responsibilities when implemented:
-///  - On race start: set CombatStateSynchronizer.IsDisabled = true, neutralize
-///    ChecksumTracker, make MapSelectionSynchronizer treat the local vote as final, and
-///    remove room-entry waits on peers (spike first — see M5 acceptance).
-///  - Mirror per-player RNG seeds (Player.PlayerRng / PlayerOdds) across both players so
-///    rewards/shops/events are identical (I4).
-///  - Broadcast RaceProgressMessage on room enter/exit and HP change.
-///  - On local Act 1 boss reward completion: send DuelReadyMessage{modVersion}; host
-///    transitions to DuelPending when both are in.
+/// The state-sync half is genuinely trivial — both switches are public settable bools, and
+/// vanilla's own NMultiplayerTest debug screen flips the first one. What the spike is really
+/// testing is the other two patches in this folder, which cover the parts of the engine that
+/// assume the party is co-located.
+///
+/// Deliberately NOT disabled here: ActChangeSynchronizer's rendezvous at act boundaries. The
+/// race wants that barrier — it is where both players converge for the duel.
 /// </summary>
 public static class RaceCoordinator
 {
+    private static bool _combatSyncWasDisabled;
+    private static bool _checksumsWereEnabled;
+
+    public static void BeginRace()
+    {
+        RunManager run = RunManager.Instance;
+
+        // Remember vanilla's values rather than assuming, so EndRace restores rather than
+        // guesses — the duel needs both of these back on to stay deterministic.
+        _combatSyncWasDisabled = run.CombatStateSynchronizer.IsDisabled;
+        _checksumsWereEnabled = run.ChecksumTracker.IsEnabled;
+
+        // Pre-combat state sync broadcasts every player's serialized state and waits for
+        // everyone. During a race the peers are in different rooms and have genuinely
+        // divergent state, so waiting is both pointless and a deadlock risk.
+        run.CombatStateSynchronizer.IsDisabled = true;
+
+        // Divergence is the *point* during a race, so checksum comparison would fire
+        // constantly. Re-enabled for the duel, which is fully coupled again.
+        run.ChecksumTracker.IsEnabled = false;
+
+        Log.Warn("[SpirePvp] race mode ON — combat state sync and checksums disabled");
+    }
+
+    public static void EndRace()
+    {
+        RunManager run = RunManager.Instance;
+        run.CombatStateSynchronizer.IsDisabled = _combatSyncWasDisabled;
+        run.ChecksumTracker.IsEnabled = _checksumsWereEnabled;
+        Log.Warn("[SpirePvp] race mode OFF — state sync restored");
+    }
 }

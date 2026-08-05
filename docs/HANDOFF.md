@@ -150,6 +150,7 @@ Mod commands:
 | `duel now` | Skips the entry screen, straight into the arena. Debug shortcut. |
 | `duel clock <minutes>` | Sets the time bank. `0` disables the clock entirely (the default). |
 | `duel on` / `duel off` | Converts the combat you are already in into a duel, and back. Legacy path from M1; `duel start` is the real flow. |
+| `race on` / `race off` | **M5 spike, untested in game.** Decouples the clients so each traverses the shared map alone: disables pre-combat state sync and checksums, travels locally instead of voting, and enrols only the local player into combats. `off` restores party movement. |
 
 Useful vanilla ones for testing:
 
@@ -206,14 +207,20 @@ Keep that split if you extend this.
 
 ## Immediate next step
 
-**M5's spike, and only the spike.** DESIGN I3 has the full research; the summary is that the
-state synchronizers are trivially disablable public bools, the RNG mirroring is a one-line
-patch, and *all* the risk is in map traversal, where position is global and
-`MoveToMapCoordAction` travels every client.
+**Playtest the M5 spike.** It is written and applies cleanly (17 patch classes), but has never
+run in game — so it is evidence of nothing yet. DESIGN I3 has the two blockers it addresses
+and the three questions the playtest needs to answer.
 
-Prove two clients can occupy different map coords without the engine falling over **before**
-building any race HUD. If it resists, DESIGN §4's v1.5 fallback — co-op through Act 1 together,
-then duel — is a complete playable product, and M1–M4 are unaffected either way.
+The test: `race on` on either client (it is networked, so both flip together), then have each
+player pick a *different* map node. Watch for the clients ending up in different rooms, and
+watch the log for `StateDivergence`, buffered-message errors from `OnLocationChanged`, or a
+combat whose first turn never ends.
+
+If it resists, DESIGN §4's v1.5 fallback — co-op through Act 1 together, then duel — is a
+complete playable product, and M1–M4 are unaffected either way.
+
+After the spike, and not before: mirrored per-player RNG (I4, a one-line patch),
+`RaceProgressMessage` + HUD, and the `DuelReadyMessage` handshake.
 
 Smaller known gaps, none blocking:
 

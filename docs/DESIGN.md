@@ -342,7 +342,42 @@ mechanic. Note `HittableEnemies` is **not** patchable — it has no acting-playe
     `AllPlayersReadyToEndTurn` compares readiness count to player count, and the dead never
     signal. Vanilla auto-readies the dead only at *turn start*, which in a duel is never when
     anyone dies. `DuelDeadPlayerReadyPatch` applies that rule continuously.
-- **I3 (M5)** — *researched 2026-08-05 against v0.110.1. Not yet spiked in game.*
+- **I3 (M5)** — *researched 2026-08-05; spike written and patching cleanly 2026-08-05 (Windows,
+  v0.110.1). Not yet playtested in game — that is the next action.*
+
+  **Spike update: two blockers, both single-chokepoint patches. The research below called map
+  traversal the only risk; it was wrong about that — there was a second, worse one.**
+
+  1. **Map traversal — `RaceMapTravelPatch`.** Less dangerous than feared, because the
+     "global position" framing is misleading. `RunState.CurrentMapCoord` is global *within a
+     client*, but each client owns its own `RunState`; the two only agree because one
+     `MoveToMapCoordAction` executes on everyone. Prefix
+     `NMapScreen.OnMapPointSelectedLocally`, call `TravelToMapCoord` locally instead of
+     enqueuing the vote, and the positions diverge with no shared authority to fight. Same
+     call the vanilla action makes, so animation/fade/`EnterMapCoord`/visited-coords
+     bookkeeping are unchanged.
+  2. **Party enrolment into combat — `RaceSoloCombatPatch`. This is the one the research
+     missed, and it fails as a silent hang.** `CombatRoom.EnterInternal` adds *every*
+     `runState.Players` entry to whatever combat you enter. In a race your solo combat would
+     therefore contain the absent opponent's creature, and the player phase ends only when
+     every player in `CombatState.Players` has readied — so your first turn never ends. The
+     same class of bug as M2's dead-duelist stall, arrived at from a different direction.
+     The fix rides vanilla's own guard: it only enrols the party `if
+     (CombatState.Players.Count == 0)`, so a prefix that adds just the local player makes
+     that condition false and the loop is skipped.
+
+  Everything else the research predicted held: `CombatStateSynchronizer.IsDisabled` and
+  `ChecksumTracker.IsEnabled` are public settable bools (`RaceCoordinator` saves and restores
+  them rather than assuming vanilla's values, because the duel needs both back on).
+
+  Open questions the playtest must answer, in order:
+  - Does `RunLocationTargetedMessageBuffer` stay transient as predicted, or does
+    `OnLocationChanged` start logging its "still buffered" error?
+  - Does anything else read the remote player's state during the race and get stale data?
+  - Does the duel still start correctly *after* a divergent race — i.e. does
+    `CombatStateSynchronizer` genuinely reconcile the two runs on duel entry, as §4 bets?
+
+  *Original research follows.*
 
   **The verdict: harder than the design assumed, but not obviously impossible. The blocker is
   map traversal, not state sync.**

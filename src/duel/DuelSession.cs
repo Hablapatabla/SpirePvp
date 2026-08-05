@@ -43,6 +43,16 @@ public static class DuelSession
         OpponentId = opponentId;
     }
 
+    /// <summary>
+    /// M5 spike entry point. Driven by the networked <c>race on</c> command, so both clients
+    /// enter race mode in the same action stream — which matters, because a race is only
+    /// coherent if both sides agree to stop synchronizing at the same moment.
+    /// </summary>
+    public static void ActivateRace()
+    {
+        Phase = DuelPhase.RaceActive;
+    }
+
     /// <summary>True when the local player won the duel that just finished.</summary>
     public static bool LocalPlayerWon { get; private set; }
 
