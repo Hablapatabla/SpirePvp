@@ -56,5 +56,18 @@ public static class RaceSoloCombatPatch
 
         __instance.CombatState.AddPlayer(me);
         Log.Info($"[SpirePvp] race: solo combat for player {me.NetId} (party enrolment skipped)");
+
+        // Re-assert the opponent's hook deactivation right before hooks fire.
+        //
+        // Deactivating once at run launch is not enough: something between launch and room
+        // entry sets IsActiveForHooks back to true — the guard in RaceStarsWithoutCombatPatch
+        // caught the opponent at "activeForHooks=True" long after we cleared it. The likely
+        // culprit is SyncWithSerializedPlayer, which assigns IsActiveForHooks = Creature.IsAlive
+        // whenever a player is synced from serialized state.
+        //
+        // Rather than chase every place that resets it, re-apply here, which is the last point
+        // before CombatRoom.StartCombat runs Hook.AfterRoomEntered over every active player's
+        // relics. Cheap and idempotent.
+        RaceCoordinator.DeactivateRemotePlayerHooks(runState as RunState);
     }
 }

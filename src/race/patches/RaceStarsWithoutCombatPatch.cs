@@ -30,7 +30,13 @@ namespace SpirePvp.Race.Patches;
 [HarmonyPatch(typeof(PlayerCmd), "GainStars")]
 public static class RaceStarsWithoutCombatPatch
 {
-    public static bool Prefix(Player player)
+    // GainStars returns Task, and callers await it. Skipping the original without assigning
+    // __result leaves it null, so `await PlayerCmd.GainStars(...)` NREs inside the caller —
+    // which is exactly what the first version of this guard did: it swapped a crash in
+    // ShouldGainStars for an identical-looking crash in DivineRight.AfterRoomEntered, with the
+    // same black screen. Any prefix that skips an async method has to hand back a completed
+    // task.
+    public static bool Prefix(Player player, ref Task __result)
     {
         if (!DuelSession.IsRaceActive && !DuelSession.IsDuelActive)
         {
@@ -44,7 +50,8 @@ public static class RaceStarsWithoutCombatPatch
 
         Log.Warn($"[SpirePvp] race: skipped GainStars for player {player?.NetId} — " +
                  $"no combat state (isMe={MegaCrit.Sts2.Core.Context.LocalContext.IsMe(player)}, " +
-                 $"activeForHooks={player?.IsActiveForHooks}). This is the black-screen guard.");
+                 $"activeForHooks={player?.IsActiveForHooks})");
+        __result = Task.CompletedTask;
         return false;
     }
 }
