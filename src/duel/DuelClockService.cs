@@ -432,9 +432,13 @@ public static class DuelClockService
 
     private static string Format(double ms)
     {
+        // "0:00.0" here was a leftover from the tenths format the comment below describes
+        // removing, and zero is not a rare value to render: an expired race clock is exactly
+        // zero and sits on the result screen for as long as the player looks at it, which is
+        // the one place the label is read rather than glanced at.
         if (ms <= 0)
         {
-            return "0:00.0";
+            return "0:00";
         }
 
         // Always m:ss. An earlier version switched to tenths under ten seconds, which made

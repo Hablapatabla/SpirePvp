@@ -202,7 +202,10 @@ public record struct DuelResultMessage : INetMessage
 
     public ulong winnerId;
 
-    /// <summary>How the duel ended: 0 = HP, 1 = flag (sudden death), 2 = concede, 3 = disconnect.</summary>
+    /// <summary>
+    /// How the match ended. Values are <see cref="Duel.DuelEndReason"/> — do not restate them
+    /// here; this comment previously listed a set that had drifted out of step with the code.
+    /// </summary>
     public int reason;
 
     public void Serialize(PacketWriter writer)
@@ -215,6 +218,42 @@ public record struct DuelResultMessage : INetMessage
     {
         winnerId = reader.ReadULong();
         reason = reader.ReadInt();
+    }
+}
+
+/// <summary>
+/// A draw offer, and the answer to one — both directions on one type.
+///
+/// Appended at the end of this file deliberately. Message ids are positional, so inserting a
+/// type above an existing one renumbers everything after it; adding at the bottom leaves the
+/// established ids alone. (Both players must still run the same build, as ever.)
+/// </summary>
+public record struct DuelDrawOfferMessage : INetMessage
+{
+    public bool ShouldBroadcast => true;
+
+    public NetTransferMode Mode => NetTransferMode.Reliable;
+
+    public LogLevel LogLevel => LogLevel.Info;
+
+    public bool ShouldBuffer => true;
+
+    /// <summary>False = "I offer a draw"; true = "here is my answer to yours".</summary>
+    public bool isResponse;
+
+    /// <summary>Meaningful only when <see cref="isResponse"/> is true.</summary>
+    public bool accepted;
+
+    public void Serialize(PacketWriter writer)
+    {
+        writer.WriteBool(isResponse);
+        writer.WriteBool(accepted);
+    }
+
+    public void Deserialize(PacketReader reader)
+    {
+        isResponse = reader.ReadBool();
+        accepted = reader.ReadBool();
     }
 }
 

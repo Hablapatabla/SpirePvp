@@ -55,9 +55,21 @@ if [ "$no_build" -eq 0 ]; then
         godot="/Applications/Godot_mono.app/Contents/MacOS/Godot"
         if [ -x "$godot" ]; then
             echo "Assets changed — re-exporting .pck..."
+            # Export to a sibling temp file and rename into place. client.sh does not build,
+            # so the client's startup read lands seconds after the host begins exporting, and
+            # writing "$pck" directly lets that read catch a half-written pack — which
+            # surfaces as `LocException: Failed to parse language file` on the client and
+            # looks exactly like malformed JSON in the repo. See host.ps1 for the measured
+            # timeline. mv within a directory is atomic, so a reader sees old or new, never
+            # partial.
             ( cd "$SCRIPT_DIR/.." \
               && "$godot" --headless --import >/dev/null 2>&1 \
-              && "$godot" --headless --export-pack "Windows Desktop" "$pck" 2>&1 | grep -i error || true )
+              && "$godot" --headless --export-pack "Windows Desktop" "$pck.new" 2>&1 | grep -i error || true )
+            if [ -f "$pck.new" ]; then
+                mv -f "$pck.new" "$pck"
+            else
+                echo "Export produced no pack — keeping the existing one."
+            fi
         else
             echo "Godot not found — .pck may be stale (modifier names will show as loc keys)."
         fi

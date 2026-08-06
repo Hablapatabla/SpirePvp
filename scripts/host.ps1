@@ -60,8 +60,33 @@ if (-not $NoBuild) {
             Write-Host "Assets changed - re-exporting .pck..." -ForegroundColor Cyan
             Push-Location "$PSScriptRoot\.."
             & $godot --headless --import 2>&1 | Out-Null
-            & $godot --headless --export-pack "Windows Desktop" $pck 2>&1 | Select-String -Pattern "ERROR|error" | ForEach-Object { Write-Host $_ -ForegroundColor Red }
+
+            # Export to a sibling temp file and rename into place, rather than writing the
+            # live pack directly.
+            #
+            # client.ps1 does not build, so the usual workflow is "start the host, then start
+            # the client" - which puts the client's startup read a couple of seconds after the
+            # host's export begins. Writing $pck in place means that read can land mid-write.
+            # Measured 2026-08-06: pack written 11:07:15, client launched 11:07:18, and the
+            # client died on `LocException: Failed to parse language file` with the filename
+            # itself truncated inside the pack's directory. It looked exactly like malformed
+            # JSON in the repo, which is where the investigation started; the JSON was fine.
+            #
+            # A fresh clone or a pull makes this *likely* rather than rare: it refreshes the
+            # mtimes under SpirePvp/, so the next host launch always re-exports.
+            #
+            # Move-Item -Force is a rename within the same directory, so a reader sees either
+            # the old pack or the new one and never a partial file.
+            $pckTmp = "$pck.new"
+            & $godot --headless --export-pack "Windows Desktop" $pckTmp 2>&1 | Select-String -Pattern "ERROR|error" | ForEach-Object { Write-Host $_ -ForegroundColor Red }
             Pop-Location
+
+            if (Test-Path $pckTmp) {
+                Move-Item -Path $pckTmp -Destination $pck -Force
+            }
+            else {
+                Write-Host "Export produced no pack - keeping the existing one." -ForegroundColor Yellow
+            }
         }
         else {
             Write-Host "Godot not found - .pck may be stale (modifier names will show as loc keys)." -ForegroundColor Yellow

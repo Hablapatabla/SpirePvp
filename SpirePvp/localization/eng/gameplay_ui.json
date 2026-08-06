@@ -1,0 +1,13 @@
+{
+  "PAUSE_MENU.SPIREPVP_RESIGN": "Resign",
+  "PAUSE_MENU.SPIREPVP_OFFER_DRAW": "Offer Draw",
+  "SPIREPVP_DRAW.header": "DRAW OFFERED",
+  "SPIREPVP_DRAW.body": "Your opponent offers a draw. Neither of you wins.",
+  "SPIREPVP_DRAW.accept": "Accept",
+  "SPIREPVP_DRAW.decline": "Decline",
+  "SPIREPVP_DRAW_SENT.header": "DRAW OFFERED",
+  "SPIREPVP_DRAW_SENT.body": "Waiting for your opponent to answer.",
+  "SPIREPVP_DRAW_DECLINED.header": "DRAW DECLINED",
+  "SPIREPVP_DRAW_DECLINED.body": "Your opponent wants to play on.",
+  "SPIREPVP_DRAW.ok": "OK"
+}

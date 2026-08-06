@@ -1,3 +1,4 @@
+using MegaCrit.Sts2.Core.Context;
 using MegaCrit.Sts2.Core.Logging;
 using MegaCrit.Sts2.Core.Multiplayer.Game;
 using MegaCrit.Sts2.Core.Runs;
@@ -24,11 +25,6 @@ namespace SpirePvp.Duel;
 /// </summary>
 public static class DuelFlag
 {
-    private const int ReasonFlag = 1;
-
-    /// <summary>The race deadline passed with neither player at the arena. Always a draw.</summary>
-    private const int ReasonRaceExpired = 2;
-
     private static bool _armed;
 
     public static void Arm()
@@ -116,7 +112,7 @@ public static class DuelFlag
             RunManager.Instance.NetService.SendMessage(new DuelResultMessage
             {
                 winnerId = 0,
-                reason = ReasonRaceExpired
+                reason = DuelEndReason.RaceExpired
             });
 
             DuelResult.DeclareDraw();
@@ -132,7 +128,7 @@ public static class DuelFlag
         DuelResultMessage message = new DuelResultMessage
         {
             winnerId = winner,
-            reason = ReasonFlag
+            reason = DuelEndReason.Flag
         };
 
         RunManager.Instance.NetService.SendMessage(message);
@@ -141,9 +137,15 @@ public static class DuelFlag
         Declare(winner);
     }
 
+    /// <summary>
+    /// Every route out of a match arrives here on the receiving side — flag, resign, agreed
+    /// draw, race expiry. Switching on the reason rather than on `winnerId != 0` keeps the two
+    /// drawn outcomes distinguishable from a win, since a draw legitimately carries no winner.
+    /// </summary>
     private static void OnDuelResult(DuelResultMessage message, ulong senderId)
     {
-        if (message.reason == ReasonRaceExpired)
+        if (message.reason == DuelEndReason.RaceExpired ||
+            message.reason == DuelEndReason.AgreedDraw)
         {
             Disarm();
             DuelClockService.Stop();
@@ -164,7 +166,13 @@ public static class DuelFlag
         Disarm();
         DuelClockService.Stop();
 
-        bool localWon = DuelClockService.Local?.PlayerId == winnerId;
+        // `LocalContext.NetId`, not the local clock's PlayerId. They are the same number
+        // whenever a clock exists, and the clock does not exist when both banks are `Off` — at
+        // which point `DuelClockService.Local?.PlayerId` is null, never equals a winner id, and
+        // every client concludes it lost. That could not happen while the only route here was a
+        // flag (a flag requires a clock), so it sat harmless. Resigning is reachable in an
+        // untimed match and would have made both players see DEFEATED.
+        bool localWon = LocalContext.NetId == winnerId;
         DuelResult.DeclareWinner(localWon);
     }
 }

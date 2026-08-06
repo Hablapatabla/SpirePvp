@@ -139,6 +139,7 @@ public static class DuelMatch
         DuelEntry.Disarm();
         DuelRendezvous.Disarm();
         DuelResult.Disarm();
+        DuelResign.Disarm();
         RaceProgress.Disarm();
         MaskedModifiers = null;
     }
@@ -219,6 +220,8 @@ public static class DuelMatch
         DuelEntry.Arm();
         RaceProgress.Reset();
         RaceProgress.Arm();
+        DuelResign.Reset();
+        DuelResign.Arm();
 
         // Started at run creation because the *race* bank is already counting (DESIGN §9): it
         // is the deadline for reaching the arena. During the race both clocks simply run down —
