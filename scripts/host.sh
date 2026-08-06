@@ -62,11 +62,16 @@ if [ "$no_build" -eq 0 ]; then
             # looks exactly like malformed JSON in the repo. See host.ps1 for the measured
             # timeline. mv within a directory is atomic, so a reader sees old or new, never
             # partial.
+            #
+            # The temp name must end in .pck — Godot rejects any other extension outright and
+            # exports nothing, which silently keeps the stale pack — and must not be
+            # SpirePvp.pck, which is the exact name ModManager loads.
+            pcktmp="$(dirname "$pck")/SpirePvp.new.pck"
             ( cd "$SCRIPT_DIR/.." \
               && "$godot" --headless --import >/dev/null 2>&1 \
-              && "$godot" --headless --export-pack "Windows Desktop" "$pck.new" 2>&1 | grep -i error || true )
-            if [ -f "$pck.new" ]; then
-                mv -f "$pck.new" "$pck"
+              && "$godot" --headless --export-pack "Windows Desktop" "$pcktmp" 2>&1 | grep -i error || true )
+            if [ -f "$pcktmp" ]; then
+                mv -f "$pcktmp" "$pck"
             else
                 echo "Export produced no pack — keeping the existing one."
             fi

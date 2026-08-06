@@ -77,7 +77,13 @@ if (-not $NoBuild) {
             #
             # Move-Item -Force is a rename within the same directory, so a reader sees either
             # the old pack or the new one and never a partial file.
-            $pckTmp = "$pck.new"
+            #
+            # The temp name must still end in .pck - Godot rejects any other extension with
+            # "Export path doesn't end with a supported extension" and exports nothing, which
+            # then silently keeps the stale pack. It must also not BE SpirePvp.pck: ModManager
+            # loads exactly Path.Combine(mod.path, modId + ".pck"), so "SpirePvp.new.pck" sits
+            # in the same folder without ever being loaded.
+            $pckTmp = Join-Path (Split-Path $pck) "SpirePvp.new.pck"
             & $godot --headless --export-pack "Windows Desktop" $pckTmp 2>&1 | Select-String -Pattern "ERROR|error" | ForEach-Object { Write-Host $_ -ForegroundColor Red }
             Pop-Location
 
