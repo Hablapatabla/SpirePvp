@@ -23,7 +23,33 @@ namespace SpirePvp.Duel;
 /// </summary>
 public sealed class DuelEncounter : EncounterModel
 {
-    public override RoomType RoomType => RoomType.Monster;
+    /// <summary>
+    /// Boss, not Monster — and load-bearing rather than cosmetic.
+    ///
+    /// `ActModel.SetSecondBossEncounter` rejects anything whose RoomType is not Boss, and that
+    /// method is how the arena becomes a real map node: setting it makes `HasSecondBoss` true,
+    /// and `StandardActMap` then places a second node one row below the boss and chains it as
+    /// the boss's child — the back-to-back layout Act 3 already uses for double bosses. No map
+    /// generation code needed patching at all.
+    ///
+    /// It also gets the arena boss-sized node art and the 2x selection VFX for free.
+    /// </summary>
+    public override RoomType RoomType => RoomType.Boss;
+
+    /// <summary>
+    /// Art for the duel's map node.
+    ///
+    /// Vanilla resolves this to a Spine skeleton (`..._node_skel_data.tres`) for animated boss
+    /// nodes, and `BossNodeSpineResource` returns null when that resource is missing — at which
+    /// point `MapNodeAssetPaths` falls back to two static textures, `<path>.png` and
+    /// `<path>_outline.png`. We have no Spine rig, so pointing at a path with no `.tres` puts
+    /// us on the static branch deliberately rather than by accident.
+    ///
+    /// Both files ship in the mod's `.pck`; remember `host.ps1` only re-exports the pack when
+    /// something under `SpirePvp/` changed, and a missing texture here shows as a blank node
+    /// rather than an error.
+    /// </summary>
+    public override string BossNodePath => "res://SpirePvp/map/duel_node";
 
     /// A duel pays out a winner, not a card reward. CombatRoom.OnCombatEnded checks this
     /// before calling OfferRoomEndRewards, so returning false routes to ProceedWithoutRewards.

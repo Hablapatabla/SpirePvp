@@ -2,6 +2,7 @@ using MegaCrit.Sts2.Core.Context;
 using MegaCrit.Sts2.Core.Entities.Players;
 using MegaCrit.Sts2.Core.Logging;
 using MegaCrit.Sts2.Core.Models;
+using MegaCrit.Sts2.Core.Models.Acts;
 using MegaCrit.Sts2.Core.Runs;
 using SpirePvp.Modifiers;
 using SpirePvp.Race;
@@ -96,6 +97,34 @@ public static class DuelMatch
 
         // Bank size only — the clocks cannot start yet, see OnRunLaunched.
         DuelClockService.Configure(ClockMinutes(runState));
+
+        InstallArenaNode(runState);
+    }
+
+    /// <summary>
+    /// Makes the duel arena a real map node, sitting immediately after the act boss.
+    ///
+    /// This needs no map-generation code of its own. `StandardActMap` already builds a second
+    /// boss node one row below the first and chains it as the boss's child — that is the
+    /// back-to-back layout Act 3 uses for double bosses — and it does so whenever
+    /// `ActModel.HasSecondBoss` is true, which is simply "a second boss encounter has been
+    /// set". So handing the act our DuelEncounter through the public
+    /// `SetSecondBossEncounter` is the entire feature: boss → arena, exactly as intended.
+    ///
+    /// Called at run creation, before the act's map is generated, because generation reads
+    /// `HasSecondBoss` at that moment. Doing it later would build a map with no arena on it.
+    ///
+    /// Any act with a boss gets one; for v1 that is Act 1, which is where the race ends.
+    /// </summary>
+    private static void InstallArenaNode(RunState runState)
+    {
+        DuelEncounter arena = ModelDb.Encounter<DuelEncounter>();
+        foreach (ActModel act in runState.Acts)
+        {
+            act.SetSecondBossEncounter(arena);
+        }
+
+        Log.Warn($"[SpirePvp] arena node installed after the boss in {runState.Acts.Count} act(s)");
     }
 
     /// <summary>

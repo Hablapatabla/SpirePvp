@@ -422,39 +422,36 @@ mechanic. Note `HittableEnemies` is **not** patchable — it has no acting-playe
   is from the moment it is created. Order: modifier → map node → progress HUD → ready
   handshake.
 
-  ### M6's first task: the duel as a real map node (researched 2026-08-05)
+  ### The arena node (implemented 2026-08-05)
 
-  Motivation is not cosmetics. `DuelEndCombatPatch` currently *replaces* `EndCombatInternal`
-  wholesale — the most brittle patch in the mod, and the one most likely to break on a game
-  update — purely because the synthetic arena has no map point behind it, so vanilla's
-  progression path NREs on `CurrentMapPointHistoryEntry.Rooms.Last()`. A real node removes
-  that whole class of "no map point" hack.
+  **The engine already had the shape we needed.** `StandardActMap` builds a *second boss* node
+  one row below the first and chains it as the boss's child — the back-to-back layout Act 3
+  uses for double bosses — whenever `ActModel.HasSecondBoss` is true. And `HasSecondBoss` is
+  just "a second boss encounter has been set". So the whole feature is one public call:
+  `act.SetSecondBossEncounter(duelEncounter)` at run creation, before the map is generated.
+  No map-generation patching, no custom `MapPointType`, no new node class.
 
-  **Feasible, and the chokepoints are known:**
-  - `RunManager.CreateRoom(RoomType, MapPointType, AbstractModel?)` is a single switch and the
-    natural interception point: return a duel `CombatRoom` (carrying `DuelEncounter`) instead
-    of rolling a normal encounter.
-  - `RollRoomTypeFor` maps point type → room type, also a single switch.
+  Consequences that fall out for free: the arena is boss-sized, gets the 2x boss selection
+  VFX, and takes its art from `EncounterModel.BossNodePath`. `DuelEncounter.RoomType` had to
+  become `Boss` — `SetSecondBossEncounter` rejects anything else — which is also what earns
+  the boss presentation.
 
-  **The constraint that shapes the design: `MapPointType` and `RoomType` are plain enums**,
-  not extensible models like encounters were. A mod cannot add a value, so the duel node must
-  masquerade as an existing type. `Boss` is the natural host — it is where the duel sits in
-  the run anyway, `NBossMapPoint` already supplies large node art, and `TravelToMapCoord`
-  even scales its selection VFX 2x. That also means **a custom icon is optional for v1**;
-  piggybacking boss art gets a working node with no `.pck` asset work at all.
+  Art: `BossNodePath` resolves a Spine skeleton first and falls back to two static PNGs when
+  the `.tres` is absent, so pointing at a path with no rig deliberately selects the static
+  branch. Ships in the `.pck` at `SpirePvp/map/duel_node.png` and `duel_node_outline.png`.
 
-  **What it does *not* remove:** the duel still must suppress combat rewards, skip
-  `UpdateProgressAfterCombatWon` and the "defeated all enemies" achievement, and end the run
-  on a result screen rather than continuing. So the patch shrinks from "replace the method"
-  to "suppress progression and route to the result screen" — a real improvement in
-  robustness, but not a deletion.
+  ### The arena is the one node where players wait for each other
 
-  **Sequenced after M5 deliberately.** The node's design depends on which world M5 lands in:
-  with a decoupled race, the duel node is a convergence point reached from two *different*
-  map positions (who triggers entry? what if one player arrives first? does the node exist at
-  the same coord on both clients?); with the v1.5 fallback the party is already together and
-  the node is a plain shared room. Building it before that is known risks building the wrong
-  one.
+  Design intent, 2026-08-05: every other node is raced independently, but the arena is a
+  rendezvous. Reaching it does not load the duel — it waits for the opponent, then opens the
+  opponent's-deck screen (the M4 entry flow), and the duel starts once both confirm.
+
+  This is the natural home for the `DuelReadyMessage` handshake, and it means the race's
+  finish line is "arrive and wait" rather than "arrive and fight". It also makes the progress
+  HUD matter: while you wait, you want to see where they are. Note `ActChangeSynchronizer`
+  already implements a genuine act-boundary rendezvous that the race deliberately left intact
+  — worth reading before building a second waiting mechanism.
+
 - **M7 — Polish/knobs.** Dedicated PvP entry point in the multiplayer menu (sets the same
   modifiers as §5b, so only presentation changes); balance knobs (§9); Workshop packaging;
   spectator/obs support (stretch).
