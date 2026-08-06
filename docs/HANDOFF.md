@@ -1,4 +1,4 @@
-# Handoff — state of the mod as of 2026-08-05
+# Handoff — state of the mod as of 2026-08-06
 
 Written for someone (human or agent) picking this up cold, on any OS. Everything below was
 built and playtested against **Slay the Spire 2 v0.110.1**, on two local clients connected
@@ -20,7 +20,7 @@ flags, console commands and gotchas below are OS-neutral unless marked.
 | **M3** chess clock | **done**, playtested |
 | **M4** information rules | **done**, playtested |
 | **M5** race phase | **working, playtested 2026-08-05.** Two clients race the same seeded map independently — own combats, own rewards, advancing at their own pace — with mirrored RNG and a run-long clock |
-| **M6** full loop | **working, playtested 2026-08-05.** Lobby modifiers → race → arena node → rendezvous → deck review → duel → result screen, with checksums live. Remaining: progress HUD, result screen, rematch |
+| **M6** full loop | **working, playtested 2026-08-06.** Lobby modifiers → race → arena node → rendezvous → deck review → duel → result screen, with checksums live, split race/duel clocks and Neow intact. Remaining: progress HUD, result screen, rematch |
 | M7 polish | not started |
 
 A duel is fully playable end to end today: enter the arena, fight with real cards and
@@ -62,6 +62,23 @@ an inherited method throws "Undefined target method". This caused the above.
 
 **Verify in game after every patch change.** Several sessions' worth of confusing symptoms
 were patches that had never applied.
+
+**A prefix that skips an async method must assign `__result = Task.CompletedTask`.** Otherwise
+the caller awaits null and throws — and it throws *in the caller*, so the stack names a vanilla
+method with no frame for the one you patched. That reads as inlining and sends you off reading
+the callee. It has now cost this project two separate multi-session hunts
+(`RaceStarsWithoutCombatPatch`, then `DuelEndCombatPatch`). When a prefix returns `false`,
+check the target's return type before anything else; every skipping prefix in `src/` has been
+swept for this and the rest target `void` methods.
+
+**A run can end without a duel result, and most teardown routes are not `DuelResult`.**
+Abandoning the run, the host quitting, a disconnect — none of them reach
+`DuelResult.DeclareWinner`, which was the only thing stopping the clocks. Measured 2026-08-06:
+abandoning a race left the host broadcasting `ClockSyncMessage` twice a second into a
+disconnected service for 21 seconds — 46 error lines on the host, a matching "no message
+handlers are registered" on the client. `DuelClockService.Tick` now stops on any run that is no
+longer `IsInProgress`, and the host's broadcast additionally checks `NetService.IsConnected`.
+Guard on the *condition*, not on each new route out; there is always another route.
 
 **Mod state is static; the run it belongs to is not.** Every `_armed` flag, the clocks and
 `DuelSession` all outlive a run, while the net service they were bound to is disposed with it.
@@ -117,11 +134,18 @@ is I7, and it needed no mod code.
 <game binary> --force-steam=off --clientId=1001 --fastmp=join
 ```
 
-macOS (tab 1 = host, tab 2 = client):
+macOS (tab 1 = host, tab 2 = client). **The binary is `Slay the Spire 2`, with spaces** — not
+`SlayTheSpire2`, which is the bundle's name and does not exist inside `MacOS/`:
 ```
-"$HOME/Library/Application Support/Steam/steamapps/common/Slay the Spire 2/SlayTheSpire2.app/Contents/MacOS/SlayTheSpire2" --force-steam=off --fastmp=host_standard
-"$HOME/Library/Application Support/Steam/steamapps/common/Slay the Spire 2/SlayTheSpire2.app/Contents/MacOS/SlayTheSpire2" --force-steam=off --clientId=1001 --fastmp=join
+"$HOME/Library/Application Support/Steam/steamapps/common/Slay the Spire 2/SlayTheSpire2.app/Contents/MacOS/Slay the Spire 2" --force-steam=off --fastmp=host_standard
+"$HOME/Library/Application Support/Steam/steamapps/common/Slay the Spire 2/SlayTheSpire2.app/Contents/MacOS/Slay the Spire 2" --force-steam=off --clientId=1001 --fastmp=join
 ```
+
+**macOS: use `scripts/*.sh`** (there is no pwsh on the MacBook) — same workflow as the
+PowerShell set, plus windowed side-by-side tiling, which is not optional there: a fullscreen
+window gets its own Space, so you cannot see both clients at once. `./scripts/host.sh --custom`
+then `./scripts/client.sh`, and `./scripts/check-log.sh --errors` afterwards. Details and the
+points-vs-backing-pixels trap in `docs/MAC_SETUP.md`.
 
 **Windows: use the scripts in `scripts/`** — they wrap the same flags and also handle the
 build, the windowing and the mod-consent gate (below). Tab 1 then tab 2:
@@ -134,8 +158,13 @@ execution policies, and 5.1 commonly defaults to `Restricted`, which refuses the
 "running scripts is disabled on this system" — nothing to do with the scripts themselves.
 Either switch shells, or `Set-ExecutionPolicy -Scope CurrentUser RemoteSigned` for 5.1.
 `host.ps1` builds first and aborts the launch if the build fails; `client.ps1` never builds,
-because two concurrent builds fight over the same output files. Flags: `-NoBuild`,
+because two concurrent builds fight over the same output files. Flags: `-NoBuild`, `-Custom`
+(the lobby that exposes the modifier list — needed to configure a match), `-Setup`,
 `-Fullscreen`, `-Width <px>`, `-ClientId <n>`. Verify the run with `.\scripts\check-log.ps1`.
+
+Both launchers **rotate the log** rather than truncating it, keeping the last five runs as
+`logs/host.<timestamp>.log`. `--log-file` truncates on open, and losing the previous run cost a
+real investigation on 2026-08-06 — the host's half of the run being diagnosed was already gone.
 
 - `--force-steam=off` skips Steamworks entirely (`NGame.InitializePlatform`). Required: a
   direct launch otherwise fails `SteamAPI_Init` with "No appID found" and the game quits. It
@@ -176,15 +205,23 @@ apart.
 
 ## Clock rules (settled 2026-08-05, after trying it both ways)
 
+**Two banks, not one** (built 2026-08-06, DESIGN §9). `Race Clock` and `Duel Clock` are
+separate lobby groups, because an act and one duel are not the same length of thing and a
+single number could only rush the first or drag out the second. The duel bank is granted
+*fresh* at the phase flip, so reaching the arena early buys you nothing in the fight — but
+running the race bank out is still a loss. Either may be 0, which makes that half untimed and
+hides the top-bar clock for its duration.
+
 **Race — a global countdown.** Both clocks run continuously and never pause: reach the arena
 before the bank empties. They start together and never stop, so the two values stay identical.
 
 A chess clock was tried here first and is *wrong* for this phase: the players are in separate
 combats and never wait on each other, so stopping your clock while theirs runs measures
-nothing. Time spent racing is simply time you will not have in the duel.
+nothing.
 
 **Duel — a real chess clock.** Now the players do wait on each other, so ending your turn
-stops your clock while your opponent's keeps running.
+stops your clock while your opponent's keeps running. The deck review counts as duel: the
+phase flips before it opens, precisely so that reading their deck is charged to the duel bank.
 
 The top-bar display follows the phase: a single countdown during the race (both clocks are
 identical there by construction, so two numbers would say the same thing twice), and
@@ -199,13 +236,18 @@ it back twice a second.
 
 Configured in the lobby, before the run exists (DESIGN §5b) — not by a console command.
 
-Host: **Multiplayer → host → Custom run**, then tick one turn model and one clock in the
-modifier list:
+Host: **Multiplayer → host → Custom run**, then tick one entry from each of the three groups
+in the modifier list:
 
 - `1v1 Duel: Real-Time` **or** `1v1 Duel: Turn-Based` — picking either marks the run as PvP
-- `Duel Clock: 3 / 5 / 10 min` **or** `Off`
+- `Race Clock: 1 / 10 / 15 / 20 min` **or** `Off` — deadline to reach the arena
+- `Duel Clock: 1 / 2 / 3 / 5 min` **or** `Off` — a fresh bank granted when the duel begins
 
-Both groups are mutually exclusive (radio-button behaviour, via vanilla's
+Picking no clock at all is the same as `Off`: silently handing someone a timer they never
+agreed to would be worse than giving them none. The 1-minute options exist to make flagging
+reachable inside one test run.
+
+All three groups are mutually exclusive (radio-button behaviour, via vanilla's
 `MutuallyExclusiveModifiers`), and the joining player sees the choices in the lobby before
 starting. Custom mode also exposes the seed field, which is useful for rematches on a known
 seed. `--fastmp=host_custom` boots straight into a custom multiplayer host.
@@ -229,7 +271,7 @@ Mod commands:
 |---|---|
 | `duel start` | Opens the opponent's decklist as the duel entry screen. Both players confirm, then the arena loads. |
 | `duel now` | Skips the entry screen, straight into the arena. Debug shortcut. |
-| ~~`duel clock <minutes>`~~ | **Removed.** The clock is part of the match agreement, picked in the lobby, and runs from run creation. A mid-run command could only hand someone a bank they never agreed to or reset one already spent — either silently invalidates the match. |
+| ~~`duel clock <minutes>`~~ | **Removed.** The clocks are part of the match agreement, picked in the lobby as `Race Clock` and `Duel Clock`. The race bank runs from run creation and the duel gets a fresh one when it begins. A mid-run command could only hand someone a bank they never agreed to or reset one already spent — either silently invalidates the match. Pick the 1-minute options to test flagging. |
 | `duel on` / `duel off` | Converts the combat you are already in into a duel, and back. Legacy path from M1; `duel start` is the real flow. |
 | `race on` / `race off` | **Debug shortcut only.** A real match is configured in the lobby (below); this forces race mode onto an already-running co-op run, which is useful for exercising the patches but leaves Neow and pre-existing seeds un-mirrored. |
 
@@ -241,7 +283,8 @@ Useful vanilla ones for testing:
 | `card <ID> [pile]` | Screaming snake case (`BODY_SLAM`). Piles: `Draw Hand Discard Exhaust Play Deck`. **`Deck` is the run-level pile** the entry screen reads. |
 | `power <id> <amount> <target-index>` | Index is into `state.Creatures` — `0` is you, `1` is the opponent. Works fine despite the empty enemy side. |
 | `damage <amount> <index>` | **Always pass the index.** Bare `damage 10` targets `Enemies`, which is empty in a duel, and silently does nothing. |
-| `energy`, `draw`, `block`, `heal`, `potion`, `relic`, `kill` | As labelled. |
+| `kill [index\|all]` | **Does not work in a duel, by design.** It indexes `CombatState.Enemies`, which is empty in a duel, so bare `kill` throws `ArgumentOutOfRangeException` on `Enemies[0]` and an index is rejected as out of range. Same root as `damage` below — use `damage <amount> <index>` to finish someone off. Not worth patching: it is a dev command, and the empty enemy side is the design (DESIGN §3.1). |
+| `energy`, `draw`, `block`, `heal`, `potion`, `relic` | As labelled. |
 
 Known vanilla quirk, not a bug in this mod: the top-bar deck counter caches its value and only
 refreshes on the pile's `CardAddFinished`/`CardRemoveFinished`, which the console's add into
@@ -289,14 +332,40 @@ Keep that split if you extend this.
 
 ## Immediate next step
 
-Fix the Neow regression in Open Issues first — it is the only thing currently broken. Then, in
-the order Lucas asked for (2026-08-05):
+**First: verify four fixes made after the last playtest, all of them unplaytested.** One
+race-timeout run plus one HP-win duel covers every one. Each is detailed in Open Issues below.
 
-0. **Split the clock into a race bank and a duel bank** (DESIGN §9). The single shared bank is
-   wrong: an act needs far more time than one duel. Two lobby modifier groups, and the duel
-   starts on a *fresh* bank rather than the race's remainder. This is the next feature.
+| Fix | What to expect |
+|---|---|
+| `duel over` NRE — `DuelEndCombatPatch` skipped an `async Task` without `__result` | Zero error lines on an **HP win** (the flag path never triggered it) |
+| Race clock expiry is a **draw**, not a coin-flip loss | `DRAW` banner, "Time ran out before either of you reached the arena" |
+| Result screen after a race timeout showed `YOU 0:00 · OPP 0:00` | The single expired race clock instead — no duel was played |
+| Abandoning a run left the host broadcasting `ClockSyncMessage` for 21s | Abandon mid-race; expect no "not connected" errors |
 
-Then content and polish, none of it risky:
+One gap left from the clock split: **an untimed duel** (`Race Clock: 10` + `Duel Clock: Off`).
+The untimed *race* half is confirmed working — with `Race Clock: Off` you get the vanilla run
+timer counting up, and the duel clock appears correctly at the deck review. The reverse was
+started on 2026-08-06 but abandoned before the arena, so the duel bank at 0 has never been
+reached: expect the clock to disappear at the deck review rather than freeze at the race's
+remainder.
+
+Then M6 is feature-complete except for the three items below. Content and polish, none of it
+risky:
+
+0. ~~**Split the clock into a race bank and a duel bank** (DESIGN §9).~~ **Done, playtested
+   2026-08-06** on a 1-min/1-min match: fresh duel bank granted at the phase flip on both
+   clients, host-authoritative flag, correct win/loss, zero errors in either log. Three lobby
+   groups now (turn model · `Race Clock` · `Duel Clock`). Either bank may be 0 independently,
+   so half a match can be untimed and the top bar shows nothing at all during that half; an
+   untimed race is confirmed, an untimed duel is not (see above).
+
+   Found while building it, and fixed in the same change: **`DuelFlag.Arm()` ran before
+   `DuelClockService.Start()` in `DuelMatch.OnRunLaunched`**, so it subscribed to two null
+   clocks, set `_armed` anyway, and nobody has been able to lose on time in a
+   modifier-configured match since the clock became run-scoped (`fb2b657`). M3's flag was
+   playtested before that commit, which is why it was believed to work. Same shape as the
+   arm-too-late trap the message handlers keep hitting — the ordering is now commented at both
+   ends and `Arm` logs an error if it is ever called first again.
 
 1. **`RaceProgressHud`** — the messages already flow (`RaceProgressMessage`, and the opponent's
    portrait moves on your map); what is missing is a real HUD showing their position, HP and
@@ -372,8 +441,22 @@ in the two lines that differ.
 
 ## Open issues (2026-08-05, end of session)
 
-**BLOCKING — Neow offers no blessings at all; the room looks skipped.** A regression from this
-session, and the first thing to fix.
+**~~BLOCKING — Neow offers no blessings at all.~~ FIXED, playtested 2026-08-06.** Both clients
+now log `Neow: hiding 3 duel modifier(s) so vanilla rolls its blessings` **twice** — once per
+player, which is the per-player pass this was failing on — and the blessings are back.
+
+What changed: the prefix's own guard asked `DuelMatch.IsPvpRun`, which since `MaskedModifiers`
+was added answers from `MaskedModifiers ?? runState.Modifiers` — the very mask this patch
+installs. That is circular, and it has a failure mode that matches the symptom exactly: with a
+mask already in place, the list the patch blanks and parks is `Array.Empty`, so from then on
+every `IsPvpRun` answers "not a PvP run" and the *next* player's Neow falls into vanilla's
+modifier branch and returns nothing. The guard now reads `DuelMatch.IsPvpRunUnmasked`, and the
+patch refuses to mask over an existing mask. Every bail-out logs which one it was, because an
+empty option list is indistinguishable in game from Neow being skipped — and that logging is
+worth keeping: it is what would name the cause next time instead of leaving four silent
+opt-outs to be reasoned about.
+
+The four things it was written against, still worth knowing if Neow ever goes quiet again:
 
 The log is unambiguous:
 
@@ -403,13 +486,27 @@ call so vanilla takes its normal branch. **On this run it did not.** Start there
 - This is a per-player event (`shared: False`), so the option generation runs once per player.
   Confirm the patch covers both passes, not just the local one.
 
-**The `duel over` NullReferenceException, still unpinned.** Thrown once per duel, on both
-clients, from `CombatManager.CheckWinCondition` between `duel over` and the game-over screen
-loading. Harmless so far — the result screen is already up and the outcome is correct.
-`DuelEndCombatPatch` was widened to cover `DuelPhase.Complete`, which removed one route into it
-(vanilla `EndCombatInternal` running against the synthetic arena); the remaining candidates are
-`ProcessPendingLoss` and `IsCombatEnding`, and inlining has eaten the frames that would say
-which. Add logging inside the patch rather than guessing.
+**~~The `duel over` NullReferenceException.~~ ROOT-CAUSED AND FIXED 2026-08-06** (unplaytested
+at time of writing). It was **`DuelEndCombatPatch.Prefix` returning `false` without assigning
+`__result`** — the async-skip rule, in the one patch that had not applied it.
+`EndCombatInternal` is `async Task`, so skipping it left the caller holding `null` and awaiting
+it.
+
+Two things made this take three sessions, both worth remembering:
+
+- **The stack frame lies about where the bug is.** `await null` throws in the *caller*, so the
+  trace read `CombatManager.CheckWinCondition` with no `EndCombatInternal` frame beneath it —
+  which looked exactly like inlining having eaten the frames, and sent two investigations into
+  reading `ProcessPendingLoss` and `IsCombatEnding` line by line. Nothing was ever wrong with
+  either. **A missing frame under an `await` is a signal to check the patch, not the callee.**
+- **It only reproduced on HP wins.** A duel decided on the clock ends through `DuelFlag` →
+  `DuelResult.DeclareWinner` without `IsCombatEnding` ever going true, so `EndCombatInternal`
+  is never called and there is nothing to skip. The flag-win playtest came back with zero
+  errors on both clients and briefly looked like the bug had gone away on its own.
+
+Harmless throughout — everything in the prefix had already run, so the result screen was up
+and the winner correct — but it threw once per duel on both clients, which meant every log
+read began by discounting a real exception.
 
 **Should the opponent's pet be attackable?** Open *design* question, deliberately not decided.
 `DuelLayout` now draws the opponent's pets on the enemy side (`BelongsToOpponent` resolves

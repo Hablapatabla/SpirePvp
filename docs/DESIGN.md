@@ -504,17 +504,38 @@ mechanic. Note `HittableEnemies` is **not** patchable — it has no acting-playe
   - **The bank covers the whole run, not just the duel.** The clock is therefore
     *run-scoped*, started at run start and surviving room transitions — not created when the
     duel begins. Built that way from the outset so M5's race phase needs no retrofit.
-  - **The race bank and the duel bank are two separate settings.** *Decided 2026-08-05, and
-    not yet implemented.* One shared number was wrong: playing a whole act needs far more time
-    than one duel does, so a single bank either rushes the race or makes the duel interminable.
-    A match is configured as, say, **a 10-minute race followed by a 2-minute duel**.
-    - Two modifier groups in the lobby, not one: `Race Clock: …` and `Duel Clock: …`.
+  - **The race bank and the duel bank are two separate settings.** *Decided 2026-08-05;
+    **implemented 2026-08-05**.* One shared number was wrong: playing a whole act needs far
+    more time than one duel does, so a single bank either rushes the race or makes the duel
+    interminable. A match is configured as, say, **a 10-minute race followed by a 2-minute
+    duel**.
+    - Two modifier groups in the lobby, not one: `Race Clock: 1/10/15/20/Off` and
+      `Duel Clock: 1/2/3/5/Off`. Three exclusivity groups in total with the turn model. The
+      1-minute entries are there to make flagging reachable in a single test run; they sit in
+      the real list rather than behind a dev flag because they are legitimate time controls.
+    - Either bank may be 0 independently, so half a match can be untimed. The top bar shows
+      *nothing* during an untimed phase rather than a frozen `0:00`, which would read as a
+      broken clock.
+    - The swap happens in `DuelClockService.GrantDuelBankIfEntered`, off the phase flip both
+      clients already share (`DuelRendezvous` → `DuelSession.ActivateDuel`), so it needs no
+      message of its own. The clocks are *refilled in place*, not replaced: `DuelFlag`
+      subscribes to `DuelClock.Flagged` once at run launch and there is no second arming pass.
     - Mechanically the duel bank is a *fresh* bank granted at duel start, not a remainder — so
       arriving at the arena early no longer buys you duel time. That reverses the old "time
       spent racing is time you will not have in the duel" line above; the race clock now stands
       on its own as a deadline to reach the arena, and the duel is timed independently.
-    - Reaching the arena late still costs you: the race clock is a hard deadline, and running it
-      out is still a loss.
+    - **Running the race clock out is a DRAW, not a loss.** *Corrected 2026-08-06 after
+      playing it — an earlier draft of this line said "still a loss", which is not a thing the
+      race clock can express.* Both race banks start together and never pause (they are a
+      global countdown, see below), so they are equal by construction and empty in the same
+      tick. Declaring a winner there reported nothing but which clock `DuelClockService`
+      happened to tick first — the local one — so the host lost its own race every time. Nobody
+      reached the arena, so nobody won: `DuelOutcome.Draw`, a `DRAW` banner, and
+      `DuelResultMessage.reason = 2` so both clients agree from the host's one decision.
+    - Open knob, deliberately not taken: a race timeout *could* be decided on progress instead
+      (further into the act wins, `RaceProgress` already carries what that would need). That is
+      a different game — it makes the deadline a race-to-the-front rather than a shared
+      deadline — and wants play before code.
   - **Race is a global countdown; the duel is a chess clock** (settled 2026-08-05 after
     playing both). During the race both clocks run continuously and never pause — reach the
     arena before the bank empties. Pausing per-player was tried and is meaningless there: the
