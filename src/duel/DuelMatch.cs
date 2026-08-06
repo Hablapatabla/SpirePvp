@@ -156,6 +156,7 @@ public static class DuelMatch
         DuelEntry.Arm();
         RaceProgress.Reset();
         RaceProgress.Arm();
+        DuelFlag.Arm();
 
         // The bank covers the whole run, not just the duel (DESIGN §9). During the race both
         // clocks simply run down — the players act continuously and simultaneously — and only
