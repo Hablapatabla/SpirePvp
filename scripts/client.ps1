@@ -34,6 +34,7 @@ if (-not $Fullscreen) { [void](Set-Sts2DevProfile -ClientId $ClientId -Role clie
 # Per-instance log; see host.ps1.
 $log = Join-Path $PSScriptRoot "..\logs\client.log"
 New-Item -ItemType Directory -Force (Split-Path $log) | Out-Null
+Move-Sts2Log $log
 
 $gameArgs = @("--force-steam=off", "--clientId=$ClientId", "--log-file", $log)
 if (-not $Setup) { $gameArgs += "--fastmp=join" }

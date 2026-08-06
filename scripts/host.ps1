@@ -10,6 +10,10 @@ Skip the build and just launch (useful when you only changed the other client).
 First-run mode: launch WITHOUT --fastmp, so the game creates this profile and sits at the
 main menu. Needed once per profile before the settings file exists.
 
+.PARAMETER Custom
+Boot straight into a Custom multiplayer lobby rather than the standard one. Custom is the
+only lobby that exposes the modifier list, so it is the only way to configure a match.
+
 .PARAMETER Fullscreen
 Leave the display setting alone instead of forcing a tiled window.
 
@@ -19,6 +23,7 @@ Window width in pixels. Default: half the primary monitor, 16:9.
 param(
     [switch]$NoBuild,
     [switch]$Setup,
+    [switch]$Custom,
     [switch]$Fullscreen,
     [int]$Width = 0
 )
@@ -70,9 +75,12 @@ if (-not $Fullscreen) { [void](Set-Sts2DevProfile -ClientId 1 -Role host -Width 
 # interleave mid-line, which has already cost real debugging time.
 $log = Join-Path $PSScriptRoot "..\logs\host.log"
 New-Item -ItemType Directory -Force (Split-Path $log) | Out-Null
+Move-Sts2Log $log
 
 $gameArgs = @("--force-steam=off", "--log-file", $log)
-if (-not $Setup) { $gameArgs += "--fastmp=host_standard" }
+if (-not $Setup) {
+    $gameArgs += if ($Custom) { "--fastmp=host_custom" } else { "--fastmp=host_standard" }
+}
 
 Write-Host "Launching HOST (log: $log)" -ForegroundColor Green
 & (Get-Sts2Exe) @gameArgs

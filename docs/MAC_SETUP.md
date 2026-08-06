@@ -82,6 +82,53 @@ init line present, `Loaded 5 mods`. Two things will make this silently fail:
 The live session writes to `logs/godot.log`; it only rotates to a timestamped file on the
 *next* launch, so grep `godot.log` while the game is still up.
 
+## Two local clients, tiled side by side
+
+`scripts/*.sh` are the macOS counterparts of the PowerShell dev scripts (there is no pwsh on
+this machine). Same workflow, same per-instance logs:
+
+```
+./scripts/host.sh --custom      # tab 1: builds, re-exports the .pck if assets changed, launches left
+./scripts/client.sh             # tab 2: launches right
+./scripts/check-log.sh --errors # after the run
+./scripts/stop.sh               # kill both
+```
+
+**Why this exists:** the two instances launched fullscreen, and on macOS a fullscreen window
+takes over its own Space — so you cannot see both at once, which is unworkable for testing a
+two-client mod. The fix is not a launch flag. **The game ignores Godot's `--windowed` and
+`--resolution`:** `NGame` reapplies the display mode from `settings.save` at startup, so the
+settings file is the only thing that decides. `sts2_set_dev_profile` edits it per profile —
+`fullscreen: false`, `window_size`, `window_position`, and `mods_enabled` — with targeted
+regex replacements rather than a JSON round-trip, so keybinds and controller mappings stay
+byte-for-byte untouched. It keeps a one-time `settings.save.spirepvp-bak` beside each file.
+
+Placement flags on both launchers:
+
+| Flag | Effect |
+|---|---|
+| *(default)* | Tiles to half the screen at 16:9 — host left, client right |
+| `--width N` | Window width; height follows at 16:9 |
+| `--size WxH` | Exact size, overriding `--width` |
+| `--pos X,Y` | Exact position, overriding the tiling |
+| `--fullscreen` | Leave the display setting alone |
+
+**The flags are in points; `settings.save` is in backing pixels.** The scripts convert, and
+the conversion is the whole reason the first attempt produced a window a quarter of the screen
+wide: `DisplayServerMacOS::window_set_size` divides by `screen_get_max_scale()` before handing
+the size to AppKit, so a settings file saying `852` yields a 426-point window on a 2× display.
+`sts2_scale` derives the factor from the native resolution over the Finder's desktop bounds
+(3456/1728 = 2 here); override with `STS2_SCALE` if it ever guesses wrong. The default tiling
+is half the screen each — 852×479 points, written as 1704×958 pixels.
+
+`--custom` on the host boots into a **Custom** multiplayer lobby rather than the standard one.
+That matters: Custom is the only lobby exposing the modifier list, so it is the only way to
+configure a match (turn model + the two clocks). `--setup` launches with no `--fastmp` at all,
+which is what you need once per profile to accept the mod-loading warning.
+
+Profiles `1` (host) and `1001` (client) are separate save directories under
+`~/Library/Application Support/SlayTheSpire2/default/`, selected by `--clientId`.
+
 ## Gotchas
 
 - **Game updates**: Steam updating the game may not touch `mods/`, but a "verify integrity"

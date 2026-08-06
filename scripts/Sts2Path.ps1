@@ -40,6 +40,28 @@ function Get-PrimaryScreenSize {
 }
 
 <#
+Moves an existing log aside before a launch, keeping the last five.
+
+--log-file truncates on open, so every relaunch destroyed the previous run's evidence. That is
+not hypothetical: the `duel over` NRE was diagnosed 2026-08-06 from a client log that had
+seconds left to live, and the host's half of the same run was already gone - which is exactly
+the pairing you need when two clients disagree. Rotating costs nothing; logs/ is gitignored.
+#>
+function Move-Sts2Log {
+    param([string]$Path)
+
+    if (-not (Test-Path $Path)) { return }
+
+    $dir = Split-Path $Path
+    $base = [IO.Path]::GetFileNameWithoutExtension($Path)
+    $stamp = (Get-Item $Path).LastWriteTime.ToString("yyyyMMddTHHmmss")
+    Move-Item $Path (Join-Path $dir "$base.$stamp.log") -Force
+
+    Get-ChildItem (Join-Path $dir "$base.*.log") -ErrorAction SilentlyContinue |
+        Sort-Object LastWriteTime -Descending | Select-Object -Skip 5 | Remove-Item -Force
+}
+
+<#
 Configures a save profile for two-client dev: windowed, tiled to one half of the primary
 monitor, and mod loading pre-agreed.
 
