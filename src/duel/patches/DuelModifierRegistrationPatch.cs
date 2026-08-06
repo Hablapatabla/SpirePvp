@@ -17,9 +17,9 @@ namespace SpirePvp.Duel.Patches;
 /// so patching here covers the UI and any other reader at once.
 ///
 /// The exclusivity sets are what make the tickboxes behave as radio buttons: exactly one turn
-/// model and exactly one clock. That is vanilla's own mechanism
-/// (`NCustomRunModifiersList` consults `MutuallyExclusiveModifiers` on every toggle), so we
-/// declare the groups rather than policing them.
+/// model, one race clock and one duel clock — three groups, three decisions. That is vanilla's
+/// own mechanism (`NCustomRunModifiersList` consults `MutuallyExclusiveModifiers` on every
+/// toggle), so we declare the groups rather than policing them.
 /// </summary>
 [HarmonyPatch(typeof(ModelDb), "GoodModifiers", MethodType.Getter)]
 public static class DuelModifierListPatch
@@ -30,9 +30,15 @@ public static class DuelModifierListPatch
         {
             ModelDb.Modifier<DuelBlitz>(),
             ModelDb.Modifier<DuelTurnBased>(),
+            ModelDb.Modifier<RaceClockOne>(),
+            ModelDb.Modifier<RaceClockTen>(),
+            ModelDb.Modifier<RaceClockFifteen>(),
+            ModelDb.Modifier<RaceClockTwenty>(),
+            ModelDb.Modifier<RaceClockNone>(),
+            ModelDb.Modifier<DuelClockOne>(),
+            ModelDb.Modifier<DuelClockTwo>(),
             ModelDb.Modifier<DuelClockThree>(),
             ModelDb.Modifier<DuelClockFive>(),
-            ModelDb.Modifier<DuelClockTen>(),
             ModelDb.Modifier<DuelClockNone>()
         };
         __result = withDuel;
@@ -53,9 +59,18 @@ public static class DuelModifierExclusivityPatch
             },
             new HashSet<ModifierModel>
             {
+                ModelDb.Modifier<RaceClockOne>(),
+                ModelDb.Modifier<RaceClockTen>(),
+                ModelDb.Modifier<RaceClockFifteen>(),
+                ModelDb.Modifier<RaceClockTwenty>(),
+                ModelDb.Modifier<RaceClockNone>()
+            },
+            new HashSet<ModifierModel>
+            {
+                ModelDb.Modifier<DuelClockOne>(),
+                ModelDb.Modifier<DuelClockTwo>(),
                 ModelDb.Modifier<DuelClockThree>(),
                 ModelDb.Modifier<DuelClockFive>(),
-                ModelDb.Modifier<DuelClockTen>(),
                 ModelDb.Modifier<DuelClockNone>()
             }
         };

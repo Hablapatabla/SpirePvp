@@ -210,9 +210,10 @@ public static class DuelEntry
 
         RunManager.Instance.NetService.SendMessage(new DuelStartMessage
         {
-            // Derived from the run's modifiers via DuelMatch, not an independent setting -
-            // the lobby is the single source of truth for the match agreement.
-            clockMs = (int)DuelClockService.ConfiguredMs,
+            // The duel bank, not the race one: this message announces the fight. Derived from
+            // the run's modifiers via DuelMatch, not an independent setting - the lobby is the
+            // single source of truth for the match agreement.
+            clockMs = (int)DuelClockService.DuelBankMs,
             suddenDeath = true
         });
 

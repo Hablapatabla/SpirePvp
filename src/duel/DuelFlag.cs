@@ -26,6 +26,9 @@ public static class DuelFlag
 {
     private const int ReasonFlag = 1;
 
+    /// <summary>The race deadline passed with neither player at the arena. Always a draw.</summary>
+    private const int ReasonRaceExpired = 2;
+
     private static bool _armed;
 
     public static void Arm()
@@ -43,6 +46,14 @@ public static class DuelFlag
 
         net.RegisterMessageHandler<DuelResultMessage>(OnDuelResult);
         net.RegisterMessageHandler<ClockSyncMessage>(OnClockSync);
+
+        // Arming before the clocks exist subscribes to nothing and then sets `_armed`, so
+        // nobody ever loses on time and nothing says why. Callers must Start the clocks first.
+        if (DuelClockService.Enabled && DuelClockService.Local == null)
+        {
+            Log.Error("[SpirePvp] DuelFlag armed before the clocks were started — nothing is " +
+                      "watching for a flag. See DuelMatch.OnRunLaunched for the required order.");
+        }
 
         if (DuelClockService.Local != null)
         {
@@ -93,6 +104,25 @@ public static class DuelFlag
             return;
         }
 
+        // A race clock running out is a draw, not a loss. Both race banks start together and
+        // never pause (DESIGN §9: the race is a global countdown, not a chess clock), so they
+        // are equal by construction and empty in the same tick. Whichever one this happens to
+        // be, the other is at zero too — so "the opponent wins" was really "the service ticks
+        // the local clock first", and the host lost its own race every time.
+        if (DuelSession.Phase != DuelPhase.DuelActive)
+        {
+            Log.Warn("[SpirePvp] race clock expired for both players — draw, nobody reached the arena");
+
+            RunManager.Instance.NetService.SendMessage(new DuelResultMessage
+            {
+                winnerId = 0,
+                reason = ReasonRaceExpired
+            });
+
+            DuelResult.DeclareDraw();
+            return;
+        }
+
         ulong winner = flagged.PlayerId == DuelClockService.Local?.PlayerId
             ? DuelClockService.Opponent?.PlayerId ?? 0
             : DuelClockService.Local?.PlayerId ?? 0;
@@ -113,6 +143,14 @@ public static class DuelFlag
 
     private static void OnDuelResult(DuelResultMessage message, ulong senderId)
     {
+        if (message.reason == ReasonRaceExpired)
+        {
+            Disarm();
+            DuelClockService.Stop();
+            DuelResult.DeclareDraw();
+            return;
+        }
+
         Declare(message.winnerId);
     }
 

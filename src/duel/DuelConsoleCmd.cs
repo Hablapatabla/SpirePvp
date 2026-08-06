@@ -70,8 +70,9 @@ public class DuelConsoleCmd : AbstractConsoleCmd
         if (mode == "clock")
         {
             return new CmdResult(success: false,
-                "The clock is set in the lobby: host a Custom run and pick a 'Duel Clock' modifier. " +
-                "It starts when the run does and cannot be changed mid-match.");
+                "The clocks are set in the lobby: host a Custom run and pick a 'Race Clock' and a " +
+                "'Duel Clock' modifier. The race bank starts when the run does, the duel gets a fresh " +
+                "bank when it begins, and neither can be changed mid-match.");
         }
 
         if (mode == "start")

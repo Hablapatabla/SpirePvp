@@ -52,12 +52,69 @@ public sealed class DuelTurnBased : DuelModifierBase
 }
 
 /// <summary>
-/// Clock length. Separate mutually exclusive group from the turn model, so the two decisions
-/// stay independent — any turn model can be played at any time control.
+/// A time bank, in minutes. Zero means that phase is untimed and nobody can lose on time
+/// there — which is also what you get by picking no clock modifier at all, so the mod stays
+/// inert for anyone who has not opted in.
 /// </summary>
-public abstract class DuelClockModifier : DuelModifierBase
+public abstract class ClockModifierBase : DuelModifierBase
 {
     public abstract double Minutes { get; }
+}
+
+/// <summary>
+/// How long you have to reach the arena (DESIGN §9).
+///
+/// Its own mutually exclusive group, separate from the duel clock, because the two measure
+/// different things: an act is a long haul against a hard deadline, one duel is a handful of
+/// turns. A single shared number either rushed the race or made the duel interminable, which
+/// is the decision this group and the next exist to undo.
+/// </summary>
+public abstract class RaceClockModifier : ClockModifierBase;
+
+/// <summary>Short enough to flag on purpose. Kept in the real list so it needs no dev build.</summary>
+public sealed class RaceClockOne : RaceClockModifier
+{
+    public override double Minutes => 1;
+}
+
+public sealed class RaceClockTen : RaceClockModifier
+{
+    public override double Minutes => 10;
+}
+
+public sealed class RaceClockFifteen : RaceClockModifier
+{
+    public override double Minutes => 15;
+}
+
+public sealed class RaceClockTwenty : RaceClockModifier
+{
+    public override double Minutes => 20;
+}
+
+/// <summary>Untimed race: take as long as you like getting to the arena.</summary>
+public sealed class RaceClockNone : RaceClockModifier
+{
+    public override double Minutes => 0;
+}
+
+/// <summary>
+/// How long the duel itself gets (DESIGN §9).
+///
+/// A *fresh* bank granted when the duel begins, not the race's remainder — so arriving at the
+/// arena early no longer buys you duel time, and the two phases are timed independently.
+/// </summary>
+public abstract class DuelClockModifier : ClockModifierBase;
+
+/// <summary>Short enough to flag on purpose. Kept in the real list so it needs no dev build.</summary>
+public sealed class DuelClockOne : DuelClockModifier
+{
+    public override double Minutes => 1;
+}
+
+public sealed class DuelClockTwo : DuelClockModifier
+{
+    public override double Minutes => 2;
 }
 
 public sealed class DuelClockThree : DuelClockModifier
@@ -70,12 +127,7 @@ public sealed class DuelClockFive : DuelClockModifier
     public override double Minutes => 5;
 }
 
-public sealed class DuelClockTen : DuelClockModifier
-{
-    public override double Minutes => 10;
-}
-
-/// <summary>No clock: nobody can lose on time. Matches the mod's default of 0 (§9).</summary>
+/// <summary>Untimed duel: nobody can lose on time once the arena is reached.</summary>
 public sealed class DuelClockNone : DuelClockModifier
 {
     public override double Minutes => 0;

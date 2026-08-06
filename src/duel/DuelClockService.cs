@@ -11,25 +11,32 @@ namespace SpirePvp.Duel;
 /// <summary>
 /// Owns the chess clocks for a match (DESIGN §3.2).
 ///
-/// Run-scoped, not duel-scoped: the bank covers the whole run, so the clock starts at run
-/// start and survives room transitions. M5's race phase needs no retrofit — it is already
-/// running by then.
+/// Run-scoped, not duel-scoped: the clock starts at run start and survives room transitions.
+/// M5's race phase needs no retrofit — it is already running by then.
 ///
-/// Two phases, two meanings — settled 2026-08-05 by playing both:
-///   race — a global countdown. Reach the arena before the bank empties. Both clocks run
-///          continuously and never pause, so they stay identical. Stopping one while the
-///          other ran would measure nothing: the players are in separate combats and never
-///          wait on each other. Time spent racing is time you will not have in the duel.
-///   duel — a real chess clock. Here you *do* wait on each other, so ending your turn stops
-///          your clock while your opponent's keeps running.
+/// **Two phases, two banks, two meanings** — the phase rules settled 2026-08-05 by playing
+/// both; the split into two banks decided the same day (DESIGN §9):
+///   race — a global countdown on the race bank. Reach the arena before it empties. Both
+///          clocks run continuously and never pause, so they stay identical. Stopping one
+///          while the other ran would measure nothing: the players are in separate combats
+///          and never wait on each other.
+///   duel — a real chess clock on a *fresh* duel bank. Here you *do* wait on each other, so
+///          ending your turn stops your clock while your opponent's keeps running.
+///
+/// The duel bank is granted new at duel start rather than inherited from the race's
+/// remainder, so arriving at the arena early buys you nothing in the fight and the two phases
+/// are timed independently — a match is configured as, say, a 10-minute race followed by a
+/// 2-minute duel. One shared number could only rush the race or drag out the duel, because an
+/// act and a duel are not the same length of thing.
 ///
 /// Host-authoritative in both phases: nothing pauses during the race, and in the duel the
 /// host sees both players' end-turn state directly. Sync carries each clock's paused flag so
 /// a client's prediction stops when the owner's does, rather than counting a stopped clock
 /// down and snapping it back twice a second.
 ///
-/// Duration 0 disables the clock entirely; nobody can lose on time. That is the default, so
-/// the mod stays inert for anyone who has not opted in.
+/// Either bank may be 0, which makes that phase untimed — nobody can lose on time there, and
+/// the top bar shows nothing rather than a frozen zero. Both 0 is the default, so the mod
+/// stays inert for anyone who has not opted in.
 ///
 /// Time is measured from wall-clock deltas rather than accumulated ticks, so display
 /// granularity and flag accuracy do not depend on how often the UI refreshes, and slow
@@ -37,10 +44,35 @@ namespace SpirePvp.Duel;
 /// </summary>
 public static class DuelClockService
 {
-    /// <summary>Bank per player. Zero means no clock.</summary>
-    public static double ConfiguredMs { get; private set; }
+    /// <summary>Bank per player for reaching the arena. Zero means the race is untimed.</summary>
+    public static double RaceBankMs { get; private set; }
 
-    public static bool Enabled => ConfiguredMs > 0;
+    /// <summary>Bank per player for the duel, granted fresh at duel start. Zero means untimed.</summary>
+    public static double DuelBankMs { get; private set; }
+
+    /// <summary>True when either phase is timed, i.e. there is a clock worth running at all.</summary>
+    public static bool Enabled => RaceBankMs > 0 || DuelBankMs > 0;
+
+    /// <summary>
+    /// The bank the *current* phase runs on. Zero means this phase is untimed, and everything
+    /// downstream — ticking, flagging, the top bar, the host's sync broadcast — sits out.
+    ///
+    /// The deck review counts as duel: `DuelRendezvous` flips the phase before opening it,
+    /// precisely so that studying the opponent's deck is charged to the duel bank.
+    /// </summary>
+    public static double CurrentBankMs => _duelBankGranted ? DuelBankMs : RaceBankMs;
+
+    /// <summary>
+    /// Which bank we are on is `_duelBankGranted`, **not** the phase — they are not the same
+    /// question once a match can end during the race.
+    ///
+    /// A race clock running out moves the phase straight to `Complete` without ever passing
+    /// through `DuelActive`, so a phase test answers "duel" for a match whose duel never
+    /// happened. That is what put `YOU 0:00 · OPP 0:00` on the result screen after a race
+    /// timeout: two duel clocks reported for a duel nobody played. Keyed on the grant, the same
+    /// case reads as the single race countdown that actually expired.
+    /// </summary>
+    private static bool DuelPhaseStarted => DuelSession.Phase == DuelPhase.DuelActive;
 
     private const double SyncIntervalMs = 500;
 
@@ -49,23 +81,32 @@ public static class DuelClockService
     private static DateTime _lastTick;
     private static DateTime _lastSync;
     private static bool _running;
+    private static bool _duelBankGranted;
 
     public static DuelClock? Local => _local;
 
     public static DuelClock? Opponent => _opponent;
 
-    /// <summary>Set the bank, in minutes. 0 turns the clock off. Resets any running clocks.</summary>
-    public static void Configure(double minutes)
+    /// <summary>
+    /// Set both banks, in minutes. 0 in either turns that phase's clock off. Resets any
+    /// running clocks.
+    /// </summary>
+    public static void Configure(double raceMinutes, double duelMinutes)
     {
-        ConfiguredMs = Math.Max(0, minutes) * 60_000;
+        RaceBankMs = Math.Max(0, raceMinutes) * 60_000;
+        DuelBankMs = Math.Max(0, duelMinutes) * 60_000;
         _local = null;
         _opponent = null;
         _running = false;
+        _duelBankGranted = false;
     }
 
     /// <summary>
-    /// Begin the match clocks. Safe to call more than once; only the first call after a
-    /// Configure creates the banks.
+    /// Begin the match clocks on the race bank. Safe to call more than once; only the first
+    /// call after a Configure creates the banks.
+    ///
+    /// The clocks are created even when the race is untimed, because the duel may not be: they
+    /// sit at zero and untouched until <see cref="GrantDuelBankIfEntered"/> fills them.
     /// </summary>
     public static void Start(ulong localId, ulong opponentId)
     {
@@ -74,15 +115,46 @@ public static class DuelClockService
             return;
         }
 
-        _local = new DuelClock(localId, ConfiguredMs);
-        _opponent = new DuelClock(opponentId, ConfiguredMs);
+        _local = new DuelClock(localId, RaceBankMs);
+        _opponent = new DuelClock(opponentId, RaceBankMs);
         _lastTick = DateTime.UtcNow;
         _running = true;
 
-        _local.Start();
-        _opponent.Start();
+        if (RaceBankMs > 0)
+        {
+            _local.Start();
+            _opponent.Start();
+        }
 
-        Log.Warn($"[SpirePvp] clocks started at {ConfiguredMs / 60000:0.##} min each");
+        Log.Warn($"[SpirePvp] clocks started: race {RaceBankMs / 60000:0.##} min, " +
+                 $"duel {DuelBankMs / 60000:0.##} min each");
+    }
+
+    /// <summary>
+    /// Swap the race bank for a fresh duel bank the first time the duel phase is seen.
+    ///
+    /// Fresh, not a remainder (DESIGN §9): arriving at the arena early does not buy duel time,
+    /// and the race clock stands on its own as a deadline. Both clients grant it off the same
+    /// phase flip — which the host drives, and which both sides reach from the same rendezvous —
+    /// so this needs no message of its own; the host's ClockSyncMessage corrects the sliver of
+    /// skew between them like it corrects any other.
+    /// </summary>
+    private static void GrantDuelBankIfEntered()
+    {
+        // DuelActive only. `Complete` must not trigger it: a race timeout lands there without a
+        // duel, and granting a fresh duel bank onto the result screen would replace the expired
+        // race clock the player is looking at.
+        if (_duelBankGranted || !DuelPhaseStarted || _local == null || _opponent == null)
+        {
+            return;
+        }
+
+        _duelBankGranted = true;
+        _local.Refill(DuelBankMs);
+        _opponent.Refill(DuelBankMs);
+
+        Log.Warn($"[SpirePvp] duel begins: fresh bank of {DuelBankMs / 60000:0.##} min each" +
+                 (DuelBankMs > 0 ? "" : " (untimed)"));
     }
 
     public static void Stop()
@@ -101,10 +173,12 @@ public static class DuelClockService
     /// </summary>
     public static void Reset()
     {
-        ConfiguredMs = 0;
+        RaceBankMs = 0;
+        DuelBankMs = 0;
         _local = null;
         _opponent = null;
         _running = false;
+        _duelBankGranted = false;
     }
 
     /// <summary>
@@ -118,11 +192,30 @@ public static class DuelClockService
             return;
         }
 
+        // The run can end without a duel result — abandoning it, the host quitting, a
+        // disconnect — and none of those routes goes through DuelResult.DeclareWinner, which is
+        // the only thing that used to stop the clocks. Measured 2026-08-06: abandoning a race
+        // left the host broadcasting ClockSyncMessage twice a second for 21 seconds into a
+        // disconnected service, 46 error lines, and the client logging "no message handlers are
+        // registered" for each one. Stop on any run that is no longer in progress.
+        if (RunManager.Instance?.IsInProgress != true)
+        {
+            Stop();
+            return;
+        }
+
+        // Before the untimed bail-out below, so a match with an untimed race and a timed duel
+        // still gets its duel bank.
+        GrantDuelBankIfEntered();
+
         DateTime now = DateTime.UtcNow;
         double deltaMs = (now - _lastTick).TotalMilliseconds;
+
+        // Advanced even when this phase is untimed. Otherwise the whole untimed stretch would
+        // still be sitting in the delta and get charged to the next phase in a single tick.
         _lastTick = now;
 
-        if (deltaMs <= 0)
+        if (deltaMs <= 0 || CurrentBankMs <= 0)
         {
             return;
         }
@@ -146,7 +239,16 @@ public static class DuelClockService
     /// </summary>
     private static void BroadcastSyncIfHost(DateTime now)
     {
-        if (RunManager.Instance?.NetService?.Type != NetGameType.Host)
+        INetGameService? net = RunManager.Instance?.NetService;
+        if (net?.Type != NetGameType.Host)
+        {
+            return;
+        }
+
+        // A second belt to the Tick guard above, for the window where the run still reports
+        // in-progress but the transport has already gone. Sending then is a logged error per
+        // message, twice a second, and the peer is not there to receive it anyway.
+        if (!net.IsConnected)
         {
             return;
         }
@@ -158,7 +260,7 @@ public static class DuelClockService
 
         _lastSync = now;
 
-        RunManager.Instance.NetService.SendMessage(new ClockSyncMessage
+        net.SendMessage(new ClockSyncMessage
         {
             playerA = _local!.PlayerId,
             playerARemainingMs = (int)_local.RemainingMs,
@@ -232,7 +334,8 @@ public static class DuelClockService
         // and never wait on each other, so stopping one clock while the other runs would
         // measure nothing. Both simply count down: reach the arena before the bank empties.
         // Starting together and never pausing is what keeps the two values identical, which
-        // is what "global timer" means here. Time spent racing is time you lack in the duel.
+        // is what "global timer" means here. Spending it is not a duel cost — the duel gets a
+        // bank of its own — but running it out is still a loss.
         if (!DuelSession.IsDuelActive)
         {
             _local.Start();
@@ -306,15 +409,20 @@ public static class DuelClockService
     /// </summary>
     public static string? FormatForHud()
     {
-        if (!Enabled || _local == null || _opponent == null)
+        // CurrentBankMs, not Enabled: with the two banks split, half a match can be untimed —
+        // an untimed race followed by a 2-minute duel is a normal configuration — and showing
+        // a frozen 0:00 through the phase nobody agreed to time would read as a broken clock.
+        if (CurrentBankMs <= 0 || _local == null || _opponent == null)
         {
             return null;
         }
 
-        // Complete keeps the two-clock readout: the duel is over but its final times are the
-        // last thing worth showing, and dropping back to a single number on the result screen
-        // would silently relabel the winner's clock as a shared countdown.
-        if (DuelSession.Phase is not (DuelPhase.DuelActive or DuelPhase.Complete))
+        // Once the duel bank has been granted the two-clock readout stays up, result screen
+        // included: the duel is over but its final times are the last thing worth showing, and
+        // dropping back to a single number there would silently relabel the winner's clock as a
+        // shared countdown. A match that ended before the duel began never granted it, and
+        // correctly shows the one race clock that ran out.
+        if (!_duelBankGranted)
         {
             return Format(_local.RemainingMs);
         }
