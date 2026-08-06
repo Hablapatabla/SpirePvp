@@ -111,6 +111,19 @@ public static class DuelRendezvous
         TryOpenDeckReview();
     }
 
+    /// <summary>
+    /// The moment the second player clicks the arena, both sides leave the race behind.
+    ///
+    /// The duel phase begins here rather than at arena entry, because the deck review is
+    /// already part of the duel: the clocks switch to chess-clock semantics and the top bar
+    /// splits into YOU/OPP, so studying their deck visibly costs you time you will want in the
+    /// fight. Waiting until the arena loaded would have left the race's shared countdown on
+    /// screen through a decision that is no longer shared.
+    ///
+    /// The map is hidden at the same time. The deck screen is an overlay, so without this it
+    /// sits on top of a still-visible map — and the map is meaningless now that both players
+    /// have arrived.
+    /// </summary>
     private static void TryOpenDeckReview()
     {
         if (!_localArrived || !_remoteArrived)
@@ -118,8 +131,34 @@ public static class DuelRendezvous
             return;
         }
 
-        Log.Warn("[SpirePvp] arena: both players present — opening deck review");
+        Log.Warn("[SpirePvp] arena: both players present — entering duel, opening deck review");
+
+        DuelSession.ActivateDuel(OpponentNetId());
+
+        if (NMapScreen.Instance != null)
+        {
+            NMapScreen.Instance.Visible = false;
+        }
+
         DuelEntry.Open();
+    }
+
+    private static ulong OpponentNetId()
+    {
+        RunState? state = RunManager.Instance?.State;
+        if (state == null)
+        {
+            return 0;
+        }
+
+        foreach (Player player in state.Players)
+        {
+            if (!LocalContext.IsMe(player))
+            {
+                return player.NetId;
+            }
+        }
+        return 0;
     }
 
     /// <summary>
