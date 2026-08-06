@@ -1,0 +1,16 @@
+{
+  "SPIREPVP_AGGRESSOR.title": "Aggressor",
+  "SPIREPVP_AGGRESSOR.description": "Dealt more damage in the duel than your opponent.",
+  "SPIREPVP_EFFICIENT.title": "Efficient",
+  "SPIREPVP_EFFICIENT.description": "Won the duel having played fewer cards than your opponent.",
+  "SPIREPVP_FLAWLESS.title": "Flawless",
+  "SPIREPVP_FLAWLESS.description": "Won the duel without taking a single point of damage.",
+  "SPIREPVP_SURVIVOR.title": "Survivor",
+  "SPIREPVP_SURVIVOR.description": "Finished the match with more HP than your opponent.",
+  "SPIREPVP_ELITE_HUNTER.title": "Elite Hunter",
+  "SPIREPVP_ELITE_HUNTER.description": "Defeated more elites during the race than your opponent.",
+  "SPIREPVP_PROSPECTOR.title": "Prospector",
+  "SPIREPVP_PROSPECTOR.description": "Gathered more gold during the race than your opponent.",
+  "SPIREPVP_MINIMALIST.title": "Minimalist",
+  "SPIREPVP_MINIMALIST.description": "Reached the arena with a leaner deck than your opponent."
+}
