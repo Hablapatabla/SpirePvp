@@ -51,6 +51,11 @@ public static class DuelStatsTrackingPatch
     {
         public static void Prefix(Creature? dealer, DamageResult results, Creature target)
         {
+            // `dealer.Player` deliberately, not the pet-aware test used on the target below: a
+            // summon's damage is left uncredited to either player rather than credited to its
+            // owner. That is symmetric — it holds on both clients for both duelists — so the
+            // comparison stays honest either way, and "damage you dealt" reading as "damage your
+            // own creature dealt" is the simpler thing to explain on a result screen.
             if (!DuelSession.IsDuelActive || dealer?.Player == null || results == null)
             {
                 return;
@@ -58,7 +63,13 @@ public static class DuelStatsTrackingPatch
 
             // Damage *to the opponent*, not all damage. Self-damage and damage to your own pets
             // are real events that should not read as offence on a result screen.
-            if (!LocalContext.IsMe(dealer.Player) || target == null || LocalContext.IsMe(target.Player))
+            //
+            // Asked through DuelLayout.BelongsToOpponent rather than `target.Player`, because a
+            // pet's `Player` is null and its owner lives in `PetOwner` — so the plain test called
+            // every pet in the arena "not mine" and counted damage to your own summon as offence,
+            // which is the exact opposite of what the line above claims. Same trap the layout
+            // code already documents.
+            if (!LocalContext.IsMe(dealer.Player) || !DuelLayout.BelongsToOpponent(target))
             {
                 return;
             }

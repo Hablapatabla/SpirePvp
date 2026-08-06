@@ -1,8 +1,8 @@
 {
-  "SPIREPVP_LINE.damageDealt": "Damage dealt in the duel: [gold]{Amount}[/gold]",
-  "SPIREPVP_LINE.cardsPlayed": "Cards played in the duel: [gold]{Amount}[/gold]",
-  "SPIREPVP_LINE.hpRemaining": "HP remaining: [gold]{Amount}[/gold]",
-  "SPIREPVP_LINE.goldGained": "Gold gained in the race: [gold]{Amount}[/gold]",
-  "SPIREPVP_LINE.elitesKilled": "Elites defeated: [gold]{Amount}[/gold]",
-  "SPIREPVP_LINE.deckSize": "Cards in deck: [gold]{Amount}[/gold]"
+  "SPIREPVP_LINE.damageDealt": "Damage dealt in the duel: {Amount}",
+  "SPIREPVP_LINE.cardsPlayed": "Cards played in the duel: {Amount}",
+  "SPIREPVP_LINE.hpRemaining": "HP remaining: {Amount}",
+  "SPIREPVP_LINE.goldGained": "Gold gained in the race: {Amount}",
+  "SPIREPVP_LINE.elitesKilled": "Elites defeated: {Amount}",
+  "SPIREPVP_LINE.deckSize": "Cards in deck: {Amount}"
 }

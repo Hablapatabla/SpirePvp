@@ -30,6 +30,12 @@ namespace SpirePvp.Duel.Patches;
 /// Line labels come from `game_over_screen.json` in the mod's `.pck`. That filename is
 /// load-bearing: `LocManager` merges a mod's tables only into tables vanilla already has, by
 /// filename.
+///
+/// **No BBCode in those strings.** `NScoreLine.Create` puts both halves of a line into a
+/// `MegaLabel`, which is a plain Godot `Label` — so `[gold]…[/gold]` was drawn literally, tags
+/// and all, straight across the result screen. The rich-text labels on this screen
+/// (`_deathQuote`, `_victoryDamageLabel`, both `MegaRichTextLabel`) do take markup, which is
+/// exactly what makes the distinction easy to get wrong.
 /// </summary>
 [HarmonyPatch(typeof(NGameOverScreen), "AnimateScoreLines")]
 public static class DuelResultLinesPatch
@@ -51,6 +57,11 @@ public static class DuelResultLinesPatch
     {
         try
         {
+            // Vanilla's AnimateScoreLines opens with exactly this, and owning the method means
+            // owning its housekeeping too. Without it a screen that ever got its lines animated
+            // twice would animate the first set a second time.
+            screen._scoreLines.Clear();
+
             DuelStatsMessage mine = DuelStats.BuildLocal();
             DuelStatsMessage? theirs = DuelStats.Opponent;
 

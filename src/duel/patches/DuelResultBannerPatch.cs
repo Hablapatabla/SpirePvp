@@ -13,6 +13,19 @@ namespace SpirePvp.Duel.Patches;
 /// no localization files to edit.
 ///
 /// Keyed on DuelPhase.Complete so the normal end-of-run screen is untouched.
+///
+/// **Setting `_deathQuote.Text` is not enough, and that is why a duel loss reported the wrong
+/// killer.** `InitializeBannerAndQuote` also stashes `_encounterQuote` — the run-history death
+/// line — and `AnimateInQuote` fades our text out a moment later and writes that string in its
+/// place. So the screen briefly read "Your opponent won the duel" and then settled on
+/// *"The Silent was absorbed by a Skulking Colony"*: the last thing the **race** recorded, an
+/// elite the player had already beaten, named as the cause of a death that happened in the duel.
+/// Overwriting `_encounterQuote` too is what makes the correction stick.
+///
+/// The victory branch has the same shape one field over. It fills `_victoryDamageLabel` with
+/// `VICTORY_DAMAGE`, "you dealt N damage to the Architect", off `StatsManager` and the run score —
+/// a boss this run never fought, and a number that means nothing in a duel. Blanked rather than
+/// rewritten: the duel's own numbers are already on the screen, in the score lines.
 /// </summary>
 [HarmonyPatch(typeof(NGameOverScreen), "InitializeBannerAndQuote")]
 public static class DuelResultBannerPatch
@@ -24,23 +37,32 @@ public static class DuelResultBannerPatch
             return;
         }
 
+        string quote;
         switch (DuelSession.Outcome)
         {
             case DuelOutcome.Won:
                 __instance._banner.label.SetTextAutoSize("VICTORY");
-                __instance._deathQuote.Text = "You won the duel.";
+                quote = "You won the duel.";
                 break;
 
             // No duel was played: the race deadline passed with neither player at the arena.
             case DuelOutcome.Draw:
                 __instance._banner.label.SetTextAutoSize("DRAW");
-                __instance._deathQuote.Text = "Time ran out before either of you reached the arena.";
+                quote = "Time ran out before either of you reached the arena.";
                 break;
 
             default:
                 __instance._banner.label.SetTextAutoSize("DEFEATED");
-                __instance._deathQuote.Text = "Your opponent won the duel.";
+                quote = "Your opponent won the duel.";
                 break;
         }
+
+        // Both, or AnimateInQuote replaces the first with the second. See the note above.
+        __instance._deathQuote.Text = quote;
+        __instance._encounterQuote = quote;
+
+        // The Architect line. Empty on every outcome — vanilla only fills it on a win, but a
+        // stale value surviving from a previous screen would be worse than a redundant clear.
+        __instance._victoryDamageLabel.Text = string.Empty;
     }
 }
