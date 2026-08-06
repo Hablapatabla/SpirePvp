@@ -85,7 +85,20 @@ public record struct DuelReadyMessage : INetMessage
     }
 }
 
-/// <summary>Host → all: both players are ready, enter the duel with these parameters.</summary>
+/// <summary>
+/// Host → all: both players are ready, enter the duel.
+///
+/// Carries nothing. It once held `clockMs` and `suddenDeath`, from a design where the host
+/// chose the duel's parameters and announced them here. §5b replaced that: the clocks and the
+/// turn model are modifiers on the run, so both clients already hold identical values before
+/// the duel starts and reading them off the run is one source of truth instead of two. The
+/// fields were still being written and never read — a reader would reasonably conclude the
+/// clock was negotiated at duel start, which has not been true since the modifiers landed.
+///
+/// The message itself is still needed, and is the point: two clients independently deciding to
+/// enter a room is a race, so exactly one of them decides. M8 may add the turn model here when
+/// something actually reads it; a field nobody reads is worse than no field.
+/// </summary>
 public record struct DuelStartMessage : INetMessage
 {
     public bool ShouldBroadcast => true;
@@ -96,22 +109,12 @@ public record struct DuelStartMessage : INetMessage
 
     public bool ShouldBuffer => true;
 
-    /// <summary>Time bank per player, milliseconds.</summary>
-    public int clockMs;
-
-    /// <summary>True = flag means instant loss; false = flag means auto-pass each round.</summary>
-    public bool suddenDeath;
-
     public void Serialize(PacketWriter writer)
     {
-        writer.WriteInt(clockMs);
-        writer.WriteBool(suddenDeath);
     }
 
     public void Deserialize(PacketReader reader)
     {
-        clockMs = reader.ReadInt();
-        suddenDeath = reader.ReadBool();
     }
 }
 

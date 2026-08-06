@@ -8,7 +8,20 @@ using SpirePvp.Duel;
 namespace SpirePvp.Race;
 
 /// <summary>
-/// Shows the opponent's HP and deck size on your map during the race (DESIGN §6).
+/// Shows the opponent's HP and deck size on your map during the race — **a debugging tool, off
+/// by default** (`duel hud on`).
+///
+/// **It is deliberately not part of the game.** Built as a live HUD and rejected on sight
+/// 2026-08-06: a permanent readout of the opponent's HP and deck is visual clutter, and worse,
+/// it is a competitive change nobody asked for. Knowing their exact HP at every moment turns a
+/// race that should be run on your own judgement into one run against a status bar, and it
+/// hands both players information a real match should make them infer. DESIGN §6 listed a
+/// `RaceProgressHud`; play says the display belongs *after* the match, not during it.
+///
+/// What survives is the tracking, which is the genuinely useful half:
+/// <see cref="RaceProgress"/> retains the opponent's position, HP and deck size for the result
+/// screen and for post-match analysis. This class is what lets a developer see that data live
+/// while diagnosing the race, and nothing more.
 ///
 /// The map already shows *where* they are — `RaceProgress` moves their portrait onto the node
 /// they reached, reusing co-op's vote markers. What it could not show is how they are doing,
@@ -31,6 +44,29 @@ public static class RaceProgressHud
 {
     private const string NodeName = "SpirePvpRaceProgress";
 
+    /// <summary>
+    /// Off unless a developer turns it on with `duel hud on`. Not persisted and not networked:
+    /// it is a debugging aid, and one client showing it does not change the match.
+    /// </summary>
+    public static bool Enabled { get; private set; }
+
+    /// <summary>Toggle the debug readout. Returns the new state.</summary>
+    public static bool Toggle(bool enabled)
+    {
+        Enabled = enabled;
+
+        if (!enabled)
+        {
+            Clear();
+        }
+        else
+        {
+            Refresh();
+        }
+
+        return Enabled;
+    }
+
     /// <summary>Below the legend header, in the legend's own column on the right of the map.</summary>
     private static readonly Vector2 OffsetFromHeader = new Vector2(0f, 34f);
 
@@ -52,7 +88,8 @@ public static class RaceProgressHud
             return;
         }
 
-        if (!DuelMatch.IsPvpRun(MegaCrit.Sts2.Core.Runs.RunManager.Instance?.State) ||
+        if (!Enabled ||
+            !DuelMatch.IsPvpRun(MegaCrit.Sts2.Core.Runs.RunManager.Instance?.State) ||
             !RaceProgress.HasOpponentReport)
         {
             Hide(screen);

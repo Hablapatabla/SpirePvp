@@ -14,12 +14,21 @@ public enum DuelOutcome
     Draw
 }
 
+/// <summary>
+/// The phases a match actually has.
+///
+/// DESIGN §5 sketched `LocalReady` and `DuelPending` between the race and the duel. Neither was
+/// ever set: readiness turned out to belong to the two handshakes that own it — `DuelRendezvous`
+/// for "I am at the arena" and `DuelEntry` for "I have seen your deck" — each of which needs
+/// *both* players' state, which a single local enum cannot hold. They are removed rather than
+/// left unset, because several checks read "not `DuelActive`" as "still racing"
+/// (`DuelFlag.OnClockFlagged` decides a draw on it), and an unused phase sitting in the enum is
+/// an invitation to add a state that silently reroutes those.
+/// </summary>
 public enum DuelPhase
 {
     Inactive,
     RaceActive,
-    LocalReady,
-    DuelPending,
     DuelActive,
     Complete
 }

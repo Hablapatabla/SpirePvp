@@ -105,7 +105,13 @@ public static class DuelFlag
         // are equal by construction and empty in the same tick. Whichever one this happens to
         // be, the other is at zero too — so "the opponent wins" was really "the service ticks
         // the local clock first", and the host lost its own race every time.
-        if (DuelSession.Phase != DuelPhase.DuelActive)
+        //
+        // Asked of the bank, not the phase. Which clock just expired is a question about which
+        // bank was running, and those are not the same question — `DuelClockService` keys its
+        // own display on the grant for this reason, after a phase test reported two duel clocks
+        // for a match that ended during the race. Same test, same trap, and this branch decides
+        // a result rather than a label.
+        if (!DuelClockService.DuelBankGranted)
         {
             Log.Warn("[SpirePvp] race clock expired for both players — draw, nobody reached the arena");
 

@@ -18,8 +18,10 @@ namespace SpirePvp.Duel;
 /// around. Several early M1 bugs were artifacts of the mid-combat activation rather than of
 /// the duel itself.
 ///
-/// RoomType.Monster is a placeholder; when the arena becomes a real map node after the Act 1
-/// boss (M6, DESIGN §5), it likely wants its own MapPointType and room visuals.
+/// The arena became a real map node in M6, and the RoomType question that used to sit here is
+/// answered on the property below: Boss, because `SetSecondBossEncounter` requires it. No custom
+/// MapPointType was needed after all — riding vanilla's second-boss slot supplied the node, its
+/// placement and its presentation for free.
 /// </summary>
 public sealed class DuelEncounter : EncounterModel
 {

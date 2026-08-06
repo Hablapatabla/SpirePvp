@@ -34,7 +34,7 @@ public class DuelConsoleCmd : AbstractConsoleCmd
 {
     public override string CmdName => "duel";
 
-    public override string Args => "'on'|'off'";
+    public override string Args => "'start'|'now'|'on'|'off'|'hud' ['off']";
 
     public override string Description =>
         "SpirePvp: turn the current combat into a 1v1 duel — clears the enemy side and makes " +
@@ -75,6 +75,18 @@ public class DuelConsoleCmd : AbstractConsoleCmd
                 "bank when it begins, and neither can be changed mid-match.");
         }
 
+        // Debug only, and deliberately so: a live readout of the opponent's HP and deck was
+        // built as a feature and rejected on sight — it is clutter, and it changes the game by
+        // handing both players information a match should make them infer. The data is still
+        // tracked for the result screen; this just shows it while diagnosing the race.
+        if (mode == "hud")
+        {
+            bool on = args.Length < 2 || args[1].ToLowerInvariant() != "off";
+            SpirePvp.Race.RaceProgressHud.Toggle(on);
+            return new CmdResult(success: true,
+                $"Race progress debug HUD {(on ? "on" : "off")}.");
+        }
+
         if (mode == "start")
         {
             return StartDuelRoom();
@@ -88,7 +100,7 @@ public class DuelConsoleCmd : AbstractConsoleCmd
         if (mode != "on")
         {
             return new CmdResult(success: false,
-                "Invalid argument '" + args[0] + "'. Use 'start', 'on' or 'off'.");
+                "Invalid argument '" + args[0] + "'. Use 'start', 'now', 'hud', 'on' or 'off'.");
         }
 
         if (!CombatManager.Instance.IsInProgress)
@@ -202,7 +214,7 @@ public class DuelConsoleCmd : AbstractConsoleCmd
     {
         if (args.Length <= 1)
         {
-            return CompleteArgument(new List<string> { "on", "off" }, Array.Empty<string>(),
+            return CompleteArgument(new List<string> { "start", "now", "hud", "on", "off" }, Array.Empty<string>(),
                 args.FirstOrDefault() ?? "");
         }
 

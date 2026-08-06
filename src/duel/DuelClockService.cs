@@ -83,6 +83,15 @@ public static class DuelClockService
     private static bool _running;
     private static bool _duelBankGranted;
 
+    /// <summary>
+    /// True once the duel bank has replaced the race bank. **This, not the phase, is what
+    /// distinguishes a race-clock expiry from a duel-clock flag** — the two mean opposite
+    /// things (a draw versus a loss) and a match can reach `Complete` without ever passing
+    /// through `DuelActive`. Keying the top bar on the phase instead is exactly what put
+    /// `YOU 0:00 · OPP 0:00` on a result screen for a duel nobody played.
+    /// </summary>
+    public static bool DuelBankGranted => _duelBankGranted;
+
     public static DuelClock? Local => _local;
 
     public static DuelClock? Opponent => _opponent;

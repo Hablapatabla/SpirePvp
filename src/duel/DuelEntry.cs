@@ -208,14 +208,10 @@ public static class DuelEntry
             return;
         }
 
-        RunManager.Instance.NetService.SendMessage(new DuelStartMessage
-        {
-            // The duel bank, not the race one: this message announces the fight. Derived from
-            // the run's modifiers via DuelMatch, not an independent setting - the lobby is the
-            // single source of truth for the match agreement.
-            clockMs = (int)DuelClockService.DuelBankMs,
-            suddenDeath = true
-        });
+        // Empty by design. The clocks and turn model are modifiers on the run, so both clients
+        // already agree on them; this message exists only to make one client, not two, decide
+        // the moment the arena is entered. See DuelStartMessage.
+        RunManager.Instance.NetService.SendMessage(new DuelStartMessage());
 
         Begin();
     }
