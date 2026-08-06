@@ -116,6 +116,14 @@ public static class DuelResult
         // freezes the final values, which is what you want to read off the result screen.
         DuelClockService.Stop();
 
+        // Before OnEnded, and that ordering is the whole trick. The result screen wants to
+        // compare both players' numbers, but the run teardown that follows disposes the net
+        // service — so a stats broadcast sent afterwards goes into a dead transport, which is
+        // the failure already fixed twice here (the clocks, then the resignation). Every route
+        // to a result passes through this method, so sending here covers HP, flag, resignation
+        // and both kinds of draw without enumerating them.
+        DuelStats.Broadcast();
+
         // OnEnded writes the run history the screen reads; isVictory drives which banner
         // DuelResultBannerPatch then rewrites. A draw is not a victory — the banner text is
         // corrected from DuelSession.Outcome, not from this flag.

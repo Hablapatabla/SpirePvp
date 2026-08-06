@@ -261,6 +261,68 @@ public record struct DuelDrawOfferMessage : INetMessage
 }
 
 /// <summary>
+/// A player's race and duel numbers, broadcast as the match is decided so the result screen can
+/// compare the two players rather than score a run neither of them played.
+///
+/// Sent rather than read locally because the race deliberately decouples the clients: each
+/// one's `MapPointHistory` records only its own moves, so the opponent's gold and elites are not
+/// in local state to be looked up. Same reason `RaceProgressMessage` exists.
+///
+/// Appended at the end of the file, like `DuelDrawOfferMessage` — message ids are positional, so
+/// new types go at the bottom and leave the established ids alone.
+/// </summary>
+public record struct DuelStatsMessage : INetMessage
+{
+    public bool ShouldBroadcast => true;
+
+    public NetTransferMode Mode => NetTransferMode.Reliable;
+
+    public LogLevel LogLevel => LogLevel.Info;
+
+    public bool ShouldBuffer => true;
+
+    public int cardsPlayed;
+
+    public int damageDealt;
+
+    public int currentHp;
+
+    public int maxHp;
+
+    public int deckSize;
+
+    public int floorsClimbed;
+
+    public int goldGained;
+
+    public int elitesKilled;
+
+    public void Serialize(PacketWriter writer)
+    {
+        writer.WriteInt(cardsPlayed);
+        writer.WriteInt(damageDealt);
+        writer.WriteInt(currentHp);
+        writer.WriteInt(maxHp);
+        writer.WriteInt(deckSize);
+        writer.WriteInt(floorsClimbed);
+        writer.WriteInt(goldGained);
+        writer.WriteInt(elitesKilled);
+    }
+
+    public void Deserialize(PacketReader reader)
+    {
+        cardsPlayed = reader.ReadInt();
+        damageDealt = reader.ReadInt();
+        currentHp = reader.ReadInt();
+        maxHp = reader.ReadInt();
+        deckSize = reader.ReadInt();
+        floorsClimbed = reader.ReadInt();
+        goldGained = reader.ReadInt();
+        elitesKilled = reader.ReadInt();
+    }
+}
+
+/// <summary>
 /// "I have reached the arena and am waiting." Sent when a player clicks the arena node, which
 /// deliberately does not enter the room — the arena is the one rendezvous in an otherwise
 /// independent race (DESIGN §5b). When both have arrived, the deck-review screen opens on both
