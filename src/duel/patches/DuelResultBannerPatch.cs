@@ -24,15 +24,23 @@ public static class DuelResultBannerPatch
             return;
         }
 
-        if (DuelSession.LocalPlayerWon)
+        switch (DuelSession.Outcome)
         {
-            __instance._banner.label.SetTextAutoSize("VICTORY");
-            __instance._deathQuote.Text = "You won the duel.";
-        }
-        else
-        {
-            __instance._banner.label.SetTextAutoSize("DEFEATED");
-            __instance._deathQuote.Text = "Your opponent won the duel.";
+            case DuelOutcome.Won:
+                __instance._banner.label.SetTextAutoSize("VICTORY");
+                __instance._deathQuote.Text = "You won the duel.";
+                break;
+
+            // No duel was played: the race deadline passed with neither player at the arena.
+            case DuelOutcome.Draw:
+                __instance._banner.label.SetTextAutoSize("DRAW");
+                __instance._deathQuote.Text = "Time ran out before either of you reached the arena.";
+                break;
+
+            default:
+                __instance._banner.label.SetTextAutoSize("DEFEATED");
+                __instance._deathQuote.Text = "Your opponent won the duel.";
+                break;
         }
     }
 }

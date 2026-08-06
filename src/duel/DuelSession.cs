@@ -1,5 +1,19 @@
 namespace SpirePvp.Duel;
 
+/// <summary>
+/// How a match ended. `Draw` exists because the race clock cannot produce anything else:
+/// both race banks start together and never pause, so they are equal by construction and hit
+/// zero in the same tick. Declaring a winner there only reported which clock the service
+/// happened to tick first — the local one, so the host always "lost" its own race. Nobody
+/// reached the arena; nobody won.
+/// </summary>
+public enum DuelOutcome
+{
+    Won,
+    Lost,
+    Draw
+}
+
 public enum DuelPhase
 {
     Inactive,
@@ -30,6 +44,7 @@ public static class DuelSession
     {
         Phase = DuelPhase.Inactive;
         OpponentId = 0;
+        Outcome = DuelOutcome.Lost;
     }
 
     /// <summary>
@@ -53,13 +68,16 @@ public static class DuelSession
         Phase = DuelPhase.RaceActive;
     }
 
-    /// <summary>True when the local player won the duel that just finished.</summary>
-    public static bool LocalPlayerWon { get; private set; }
+    /// <summary>How the match ended, from this client's point of view.</summary>
+    public static DuelOutcome Outcome { get; private set; }
 
-    public static void CompleteDuel(bool localPlayerWon)
+    /// <summary>True when the local player won the duel that just finished.</summary>
+    public static bool LocalPlayerWon => Outcome == DuelOutcome.Won;
+
+    public static void CompleteDuel(DuelOutcome outcome)
     {
         Phase = DuelPhase.Complete;
-        LocalPlayerWon = localPlayerWon;
+        Outcome = outcome;
     }
 
     // TODO(M6): real phase transitions over DuelMessages (INetGameService.RegisterMessageHandler

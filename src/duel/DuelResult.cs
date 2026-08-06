@@ -87,7 +87,17 @@ public static class DuelResult
     /// calls are ignored, so a flag landing at the same moment as a kill cannot show two
     /// screens or overwrite the first result.
     /// </summary>
-    public static void DeclareWinner(bool localPlayerWon)
+    public static void DeclareWinner(bool localPlayerWon) =>
+        Declare(localPlayerWon ? DuelOutcome.Won : DuelOutcome.Lost);
+
+    /// <summary>
+    /// Ends the match with no winner. Only the race clock produces this: both race banks run
+    /// continuously and never pause, so they empty in the same tick and neither player reached
+    /// the arena. See <see cref="DuelOutcome"/>.
+    /// </summary>
+    public static void DeclareDraw() => Declare(DuelOutcome.Draw);
+
+    private static void Declare(DuelOutcome outcome)
     {
         if (DuelSession.Phase == DuelPhase.Complete)
         {
@@ -95,8 +105,8 @@ public static class DuelResult
         }
 
         Disarm();
-        DuelSession.CompleteDuel(localPlayerWon);
-        Log.Warn($"[SpirePvp] duel over — local player {(localPlayerWon ? "WON" : "LOST")}");
+        DuelSession.CompleteDuel(outcome);
+        Log.Warn($"[SpirePvp] duel over — {outcome.ToString().ToUpperInvariant()}");
 
         // The match is decided, so the clocks stop for good. Without this they fell out of the
         // duel's chess-clock rule the moment the phase left DuelActive, resumed under the race's
@@ -107,8 +117,9 @@ public static class DuelResult
         DuelClockService.Stop();
 
         // OnEnded writes the run history the screen reads; isVictory drives which banner
-        // DuelResultBannerPatch then rewrites.
-        SerializableRun run = RunManager.Instance.OnEnded(localPlayerWon);
+        // DuelResultBannerPatch then rewrites. A draw is not a victory — the banner text is
+        // corrected from DuelSession.Outcome, not from this flag.
+        SerializableRun run = RunManager.Instance.OnEnded(outcome == DuelOutcome.Won);
         NRun.Instance?.ShowGameOverScreen(run);
     }
 
