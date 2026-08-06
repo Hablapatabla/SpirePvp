@@ -70,7 +70,16 @@ public static class DuelRendezvous
         TryOpenDeckReview();
     }
 
-    private static void Arm()
+    /// <summary>
+    /// Register the arrival handler.
+    ///
+    /// Must happen at run start, not on local arrival. Arming lazily meant a client that had
+    /// not clicked the arena yet had no handler registered when the host's arrival message
+    /// came in, so it dropped it: the host's portrait never appeared on the client's map, and
+    /// the client's own arrival then found `_remoteArrived` still false and waited forever for
+    /// something that had already happened.
+    /// </summary>
+    public static void Arm()
     {
         if (_armed)
         {

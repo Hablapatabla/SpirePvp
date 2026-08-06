@@ -148,6 +148,13 @@ public static class DuelMatch
 
         RaceCoordinator.DeactivateRemotePlayerHooks(runState);
 
+        // Arm the duel handshake now rather than when the local player first acts. Both sides
+        // must be listening before *either* can announce anything, or the first announcement
+        // is simply lost.
+        DuelRendezvous.Reset();
+        DuelRendezvous.Arm();
+        DuelEntry.Arm();
+
         // The bank covers the whole run, not just the duel (DESIGN §9). During the race both
         // clocks simply run down — the players act continuously and simultaneously — and only
         // in the duel does it become a true chess clock that pauses on end turn. Ticking rides

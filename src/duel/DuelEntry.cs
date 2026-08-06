@@ -117,7 +117,12 @@ public static class DuelEntry
         TryStart();
     }
 
-    private static void Arm()
+    /// <summary>
+    /// Registers the ready/start handlers. Called at run start as well as on Open, because a
+    /// client that has not opened the screen yet still has to hear DuelStartMessage — arming
+    /// only on Open left it deaf to the very message that puts it in the arena.
+    /// </summary>
+    public static void Arm()
     {
         if (_armed)
         {
