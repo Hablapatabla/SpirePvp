@@ -217,3 +217,32 @@ public record struct DuelResultMessage : INetMessage
         reason = reader.ReadInt();
     }
 }
+
+/// <summary>
+/// "I have reached the arena and am waiting." Sent when a player clicks the arena node, which
+/// deliberately does not enter the room — the arena is the one rendezvous in an otherwise
+/// independent race (DESIGN §5b). When both have arrived, the deck-review screen opens on both
+/// clients and DuelEntry takes over from there.
+/// </summary>
+public record struct DuelArrivedMessage : INetMessage
+{
+    public bool ShouldBroadcast => true;
+
+    public NetTransferMode Mode => NetTransferMode.Reliable;
+
+    public LogLevel LogLevel => LogLevel.Info;
+
+    public bool ShouldBuffer => true;
+
+    public string modVersion;
+
+    public void Serialize(PacketWriter writer)
+    {
+        writer.WriteString(modVersion);
+    }
+
+    public void Deserialize(PacketReader reader)
+    {
+        modVersion = reader.ReadString();
+    }
+}

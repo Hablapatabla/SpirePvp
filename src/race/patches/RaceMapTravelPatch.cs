@@ -45,6 +45,15 @@ public static class RaceMapTravelPatch
             return true;
         }
 
+        // The arena is the exception to independent traversal: clicking it announces arrival
+        // and waits for the opponent rather than entering the room. DuelRendezvous opens the
+        // deck-review screen once both are present, and DuelEntry takes it from there.
+        if (DuelRendezvous.IsArenaCoord(point.Point.coord))
+        {
+            DuelRendezvous.ArriveLocal();
+            return false;
+        }
+
         Log.Info($"[SpirePvp] race: travelling locally to {point.Point.coord} (no vote)");
         TaskHelper.RunSafely(screen.TravelToMapCoord(point.Point.coord));
         return false;

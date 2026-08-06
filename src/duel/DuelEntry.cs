@@ -37,7 +37,7 @@ namespace SpirePvp.Duel;
 /// </summary>
 public static class DuelEntry
 {
-    private const string ModVersion = "0.1.0";
+    internal const string ModVersion = "0.1.0";
 
     private static bool _armed;
     private static bool _localReady;
@@ -52,8 +52,14 @@ public static class DuelEntry
     /// <summary>Opens the opponent's deck as the duel's entry screen.</summary>
     public static bool Open()
     {
+        // Openable from two places now, and they differ in what exists. The arena rendezvous
+        // opens this from the *map*, where there is no combat at all; the legacy `duel start`
+        // path opens it mid-combat. So resolve the opponent from the combat when there is one
+        // and fall back to the run otherwise.
         CombatState? state = CombatManager.Instance.DebugOnlyGetState();
-        Player? me = state != null ? LocalContext.GetMe(state) : null;
+        Player? me = state != null
+            ? LocalContext.GetMe(state)
+            : LocalContext.GetMe(RunManager.Instance?.State?.Players ?? (IEnumerable<Player>)Array.Empty<Player>());
         _opponent = FindOpponent(state, me);
 
         if (_opponent == null)
@@ -215,17 +221,35 @@ public static class DuelEntry
 
     private static Player? FindOpponent(ICombatState? state, Player? me)
     {
-        if (state == null || me == null)
+        if (me == null)
         {
             return null;
         }
 
-        foreach (Creature creature in state.PlayerCreatures)
+        if (state != null)
         {
-            Player? owner = creature.Player;
-            if (owner != null && owner.NetId != me.NetId)
+            foreach (Creature creature in state.PlayerCreatures)
             {
-                return owner;
+                Player? owner = creature.Player;
+                if (owner != null && owner.NetId != me.NetId)
+                {
+                    return owner;
+                }
+            }
+        }
+
+        // No combat — we are at the arena node on the map. The run still knows both players.
+        RunState? run = RunManager.Instance?.State;
+        if (run == null)
+        {
+            return null;
+        }
+
+        foreach (Player player in run.Players)
+        {
+            if (player.NetId != me.NetId)
+            {
+                return player;
             }
         }
 
