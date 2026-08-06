@@ -32,7 +32,7 @@ namespace SpirePvp.Duel.Patches;
 [HarmonyPatch(typeof(CombatManager), "EndCombatInternal", typeof(CombatTurnState))]
 public static class DuelEndCombatPatch
 {
-    public static bool Prefix(CombatManager __instance, CombatTurnState turnState)
+    public static bool Prefix(CombatManager __instance, CombatTurnState turnState, ref Task __result)
     {
         // Complete counts as well as DuelActive, and leaving it out cost exactly the NRE this
         // patch exists to prevent. Ending the duel runs DuelResult.DeclareWinner, which moves
@@ -58,6 +58,22 @@ public static class DuelEndCombatPatch
         RunManager.Instance.ActionQueueSynchronizer.SetCombatState(ActionSynchronizerCombatState.NotInCombat);
 
         DuelResult.ShowFor(turnState.State);
+
+        // **Required, and its absence was the `duel over` NullReferenceException.**
+        // EndCombatInternal is `async Task`. Skipping it without assigning __result leaves the
+        // caller holding null and doing `await null`, which throws — inside
+        // `CheckWinCondition`, with no EndCombatInternal frame on the stack, because the method
+        // never ran. That is why the trace looked like inlining had eaten the frames and why
+        // two sessions of reading CheckWinCondition found nothing wrong with it.
+        //
+        // It only ever appeared on duels decided by HP: a duel decided on the clock ends
+        // through DuelFlag -> DuelResult.DeclareWinner without IsCombatEnding ever going true,
+        // so EndCombatInternal is not called at all and there is nothing to skip.
+        //
+        // Harmless in practice — everything above already ran, so the result screen was up and
+        // the winner correct — but it threw once per duel on both clients and made every log
+        // read start by discounting a real exception.
+        __result = Task.CompletedTask;
 
         // Skip the original entirely.
         return false;
