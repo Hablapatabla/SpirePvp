@@ -339,8 +339,30 @@ truth, decided in the lobby.
 **Now:** the vanilla custom-run modifier list. Zero custom UI, and it gets the whole flow
 working end to end. Slightly buried — the host must know to choose a Custom run.
 
-**M7:** a dedicated PvP entry in the multiplayer menu that sets the same modifiers, so the
-mechanism does not change, only its presentation.
+**M7 — the dedicated Duel host menu.** *Scoped 2026-08-06; the next milestone.*
+
+A third entry beside **host normal** and **host custom**: **host duel**. The mechanism does not
+change — it still sets the same modifiers, which is exactly what makes this presentation work
+rather than a rewrite — but the route does.
+
+Why it is worth a milestone rather than a shortcut. Today a match is configured by knowing to
+pick a Custom run and tick one entry from each of three groups. That is buried, and it is the
+wrong *shape*: a flat list of nine tickboxes for what is really two or three coupled decisions,
+displayed identically to the run-altering modifiers it sits among. Nothing about the screen says
+these three go together, or that picking none of the clock entries silently means "off".
+
+What it should have:
+
+- **Direct controls for the clocks and the ruleset**, rather than radio-button modifiers.
+- **Presets on chess conventions.** `10 minute race + 2 minute duel` is the agreed starting
+  point for **blitz**. The existing 1-minute entries stay reachable somewhere, since they are
+  what makes flagging testable inside a single run.
+
+Art is wanted here and is Lucas's to draw; the inventory is in HANDOFF under "Art still wanted".
+
+Note the constraint that shaped §5b still holds: whatever this screen does, it must end in the
+same `ModifierModel`s on the `RunState`, because that is what makes a PvP run reload as a PvP
+run and what puts the settings in front of the joining player before they commit.
 
 ## 6. UI components (Godot side, via BaseLib node factories + our .pck)
 
@@ -348,8 +370,8 @@ mechanism does not change, only its presentation.
 |---|---|
 | `OpponentDeckPanel` | **Design settled 2026-08-05 — it is the duel's entry flow, not a panel.** Clicking the duel map node opens a full deck screen showing the *opponent's* deck (the campfire-style view), whose confirm button reads **START DUEL** instead of the usual label. Both players enter the arena once both have viewed and confirmed. This folds the information rule and the ready-handshake into one screen: you cannot start without having been shown the decklist, and the confirm doubles as `DuelReadyMessage`. Cheaper than it sounds — `NDeckViewScreen.ShowScreen(Player)` is static and takes any player, so rendering the opponent's deck is a one-liner; the custom work is the button label and the both-confirmed gate. Until the map node exists (M6), `duel start` opens this screen rather than entering the arena directly. |
 | `ClockHud` | **Done, and deliberately not a component.** Both clocks share the vanilla run-timer label in the top bar (`NRunTimer`, postfixed), rendered as `YOU 2:31 · OPP 1:47` in a stable `m:ss`. A separate two-element HUD was considered and dropped — one label reads fine and costs no scene work. Local prediction + host `ClockSyncMessage` at 2/sec. "Turns red < 30s" still unimplemented. |
-| `RaceProgressHud` | Opponent's map position, HP, deck count. Driven by `RaceProgressMessage`. |
-| `DuelResultScreen` | Winner, per-round damage stats, rematch button. |
+| `RaceProgressHud` | **Cut as a feature, 2026-08-06, after building it and looking at it.** A permanent readout of the opponent's HP and deck is clutter, and it is a competitive change nobody asked for: knowing their exact HP at every moment turns a race run on your own judgement into one run against a status bar, and hands both players information a match should make them infer. It survives as a debug tool (`duel hud on`, off by default). **The tracking stays and is the half that mattered** — `RaceProgress` retains position, HP and deck size for the result screen and post-match analysis. The opponent's *position* is still shown, via their portrait on your map, which is enough to feel like a race without being a dashboard. |
+| `DuelResultScreen` | Winner, per-round damage stats, rematch button. **Half built:** vanilla's run-score lines are suppressed (they score a run, not a match, and "+42 for floors climbed" invites the loser to think they were ahead). The stats meant to replace them need a damage tracker that does not exist yet — nothing accumulates damage across the duel. Rematch is deferred and milestone-sized; see HANDOFF. |
 | Entry-screen confirm feedback | *Wanted, not built.* A large green check on screen once **you** have confirmed, and a small portrait of the opponent on the confirm button once **they** have — so you can see their state without asking. Model it on the per-player icons the group-choice random events already show. |
 
 BaseLib (Workshop id 3737335127, NuGet `Alchyr.Sts2.BaseLib`) provides node factories and
@@ -452,9 +474,11 @@ mechanic. Note `HittableEnemies` is **not** patchable — it has no acting-playe
   already implements a genuine act-boundary rendezvous that the race deliberately left intact
   — worth reading before building a second waiting mechanism.
 
-- **M7 — Polish/knobs.** Dedicated PvP entry point in the multiplayer menu (sets the same
-  modifiers as §5b, so only presentation changes); balance knobs (§9); Workshop packaging;
-  spectator/obs support (stretch).
+- **M7 — Dedicated Duel host menu** (scoped in §5b: `host normal / custom / duel`, direct clock
+  and ruleset controls, chess-convention presets with blitz = 10 min race + 2 min duel). Then
+  balance knobs (§9); Workshop packaging; spectator/obs support (stretch).
+  *Accept: a match is configured without the host ever seeing the Custom modifier list, and the
+  joining player still sees the agreed settings before starting.*
 - **M8 — Simultaneous turn-based duel** (§3.1b model B). Introduce `IDuelTurnModel`, move the
   existing behaviour behind a `BlitzTurnModel` unchanged, then add the lock-in model beside
   it. Carry the choice on `DuelStartMessage`. **Use submission order and do not tune it** —
@@ -547,6 +571,19 @@ mechanic. Note `HittableEnemies` is **not** patchable — it has no acting-playe
   - **Fischer increment: deferred indefinitely, 2026-08-05.** Not merely unbuilt — it is not
     clear it is the right call for this game, and separate race/duel banks may remove the need
     it was meant to answer. Revisit only if play shows a problem it solves.
+- **Resigning and agreed draws** — **DECIDED and built 2026-08-06.** A match can end by consent,
+  as in chess.
+  - **Abandoning a PvP run is a resignation**: a loss for the abandoner, a win for the opponent.
+    Previously it tore the run down and told the other player "the host abandoned the game",
+    which is not a result and left no record of who won.
+  - **Either player may offer a draw** from the pause menu; the opponent accepts or declines.
+    Offers that cross on the wire count as agreement rather than as a conflict, and pressing
+    Offer Draw while the opponent's offer is outstanding is an acceptance — "we both want a
+    draw" should not require anyone to dismiss a prompt and find the button again.
+  - **Resigning is legal during the race**, not only the duel. Conceding a race you cannot win
+    is a real decision, and the alternative — walking to the arena in order to lose — is worse.
+  - A resignation deliberately **does not disconnect**. That is what leaves both players on
+    result screens with a live connection, which is what rematch will need.
 - **Host advantage**: host resolves ~½ RTT faster. Options: accept it; input-delay
   equalization (delay host's own enqueues by measured RTT/2); alternate hosting across a
   match series. Defer; measure first.

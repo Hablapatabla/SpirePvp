@@ -1,4 +1,4 @@
-# Handoff — state of the mod as of 2026-08-06
+# Handoff — state of the mod as of 2026-08-06 (evening)
 
 Written for someone (human or agent) picking this up cold, on any OS. Everything below was
 built and playtested against **Slay the Spire 2 v0.110.1**, on two local clients connected
@@ -20,11 +20,32 @@ flags, console commands and gotchas below are OS-neutral unless marked.
 | **M3** chess clock | **done**, playtested |
 | **M4** information rules | **done**, playtested |
 | **M5** race phase | **working, playtested 2026-08-05.** Two clients race the same seeded map independently — own combats, own rewards, advancing at their own pace — with mirrored RNG and a run-long clock |
-| **M6** full loop | **working, playtested 2026-08-06.** Lobby modifiers → race → arena node → rendezvous → deck review → duel → result screen, with checksums live, split race/duel clocks and Neow intact. Remaining: progress HUD, result screen, rematch |
-| M7 polish | not started |
+| **M6** full loop | **working, playtested 2026-08-06.** Lobby modifiers → race → arena node → rendezvous → deck review → duel → result screen, with checksums live, split race/duel clocks and Neow intact. Plus resignation and agreed draws. Remaining: rematch, and duel stats on the result screen |
+| M7 polish | **next milestone: a dedicated Duel host menu** (below) |
 
 A duel is fully playable end to end today: enter the arena, fight with real cards and
 statuses, win or lose on HP or on the clock, and land on a victory/defeat screen.
+
+**A match can also end by consent.** Added 2026-08-06 and playtested from both sides:
+
+- **Resigning.** Abandoning a PvP run is tipping your king over — a loss for you, a win for
+  your opponent. The pause menu's Give Up button is relabelled **Resign** and is *revealed to
+  the client*, which vanilla hides because `RunLobby.AbandonRun` throws for non-hosts. A
+  resignation skips vanilla's abandon entirely (see below), so the client never calls it.
+- **Agreed draws.** An **Offer Draw** button sits under Resign, tinted so it does not read as a
+  third way to quit. The opponent gets an accept/decline popup. Offers that cross on the wire
+  count as agreement rather than conflict, and pressing Offer Draw while theirs is outstanding
+  is an acceptance.
+
+**Why a resignation replaces vanilla's abandon rather than running alongside it.**
+`RunManager.Abandon` sends `RunAbandonedMessage` and then *disconnects*. Declaring the result
+before that would put a screen up for vanilla to tear down; declaring it after would be a send
+into a dead transport — the bug this project had just finished removing. So `DuelResignPatch`
+prefixes `RunManager.Abandon`, broadcasts, declares, and returns `false`, leaving the
+connection **up**. That is also what a rematch will need.
+
+**But the connection does not survive leaving the result screen** (`QuitGameOver`, observed
+twice in logs). So rematch has to be a button *on* that screen — there is no later moment.
 
 ---
 
@@ -56,6 +77,7 @@ abandons the rest, so one typo disables an arbitrary subset while the mod still 
 still logs "loaded". `SpirePvpInit` therefore applies each patch class independently and logs
 a count. **On every launch, confirm the log says `N patch classes applied cleanly`** — if it
 says `PATCH FAILED`, some of the mod is not running and in-game results mean nothing.
+**40 as of this handoff.**
 
 **Harmony resolves `[HarmonyPatch(typeof(X))]` against methods declared on `X` only.** Naming
 an inherited method throws "Undefined target method". This caused the above.
@@ -79,6 +101,14 @@ disconnected service for 21 seconds — 46 error lines on the host, a matching "
 handlers are registered" on the client. `DuelClockService.Tick` now stops on any run that is no
 longer `IsInProgress`, and the host's broadcast additionally checks `NetService.IsConnected`.
 Guard on the *condition*, not on each new route out; there is always another route.
+
+**Ask the condition you mean, not one that happens to correlate.** `DuelClockService` learned
+this the hard way: its top bar keyed the one-clock/two-clock choice on the *phase*, and a race
+timeout reaches `Complete` without ever passing through `DuelActive` — so it reported two duel
+clocks for a duel nobody played. It was fixed there to ask whether the duel bank had been
+granted. **The same test survived in `DuelFlag`**, in the branch that decides whether an expiry
+is a draw or a loss — the identical trap, one file over, deciding a result rather than a label.
+Both now ask `DuelClockService.DuelBankGranted`. When you fix a wrong predicate, grep for it.
 
 **Mod state is static; the run it belongs to is not.** Every `_armed` flag, the clocks and
 `DuelSession` all outlive a run, while the net service they were bound to is disposed with it.
@@ -255,9 +285,24 @@ seed. `--fastmp=host_custom` boots straight into a custom multiplayer host.
 Custom runs are gated behind `CustomAndSeedsEpoch`; `unlock all` clears it on a dev profile.
 
 **If the modifiers show up as raw keys like `DUEL_BLITZ.title`, the `.pck` is stale.** Names
-come from `SpirePvp/localization/en/modifiers.json`, which ships in the pack, not the DLL.
+come from `SpirePvp/localization/eng/modifiers.json`, which ships in the pack, not the DLL.
 `host.ps1` re-exports the pack when anything under `SpirePvp/` is newer, but a manual
-`dotnet build` alone will not.
+`dotnet build` alone will not. (The directory is `eng`, not `en` — this document said `en` for
+a while and it is the sort of detail that sends someone looking for a missing file.)
+
+**The pack is exported to a temp name and renamed into place, and both halves of that are
+load-bearing.** `client.ps1` does not build, so the client's startup read lands seconds after
+the host begins exporting — and writing the live pack directly let the client read a *half-
+written* one. Measured 2026-08-06: pack written 11:07:15, client launched 11:07:18, client died
+on `LocException: Failed to parse language file` with the filename itself truncated inside the
+pack's directory. It looked exactly like malformed JSON in the repo, which is where the
+investigation started; the JSON was fine. **A fresh clone or a `git pull` makes this likely
+rather than rare**, because it refreshes the mtimes that trigger the re-export.
+
+The temp name must end in `.pck` — Godot rejects any other extension outright and exports
+*nothing*, which then silently keeps the stale pack (that mistake cost a round trip too) — and
+must not be `SpirePvp.pck`, since `ModManager` loads exactly
+`Path.Combine(mod.path, modId + ".pck")` and ignores everything else. Hence `SpirePvp.new.pck`.
 
 ## Console commands
 
@@ -273,6 +318,7 @@ Mod commands:
 | `duel now` | Skips the entry screen, straight into the arena. Debug shortcut. |
 | ~~`duel clock <minutes>`~~ | **Removed.** The clocks are part of the match agreement, picked in the lobby as `Race Clock` and `Duel Clock`. The race bank runs from run creation and the duel gets a fresh one when it begins. A mid-run command could only hand someone a bank they never agreed to or reset one already spent — either silently invalidates the match. Pick the 1-minute options to test flagging. |
 | `duel on` / `duel off` | Converts the combat you are already in into a duel, and back. Legacy path from M1; `duel start` is the real flow. |
+| `duel hud` / `duel hud off` | **Debug only.** Shows the opponent's floor, HP and deck size on your map during the race. Off by default and deliberately not a feature — see M6 item 1. Useful when diagnosing the race; not something to leave on in a real match. |
 | `race on` / `race off` | **Debug shortcut only.** A real match is configured in the lobby (below); this forces race mode onto an already-running co-op run, which is useful for exercising the patches but leaves Neow and pre-existing seeds un-mirrored. |
 
 Useful vanilla ones for testing:
@@ -305,8 +351,17 @@ just stale.
 | `DuelEncounter` | A combat encounter with no monsters. Registered automatically: `ModelDb.AllAbstractModelSubtypes` scans mod assemblies, so custom models need **no BaseLib**. |
 | `DuelLayout` | Draws the opponent on the enemy side and mirrors their art. Presentation only — `CombatSide` is untouched. |
 | `DuelClockService` / `DuelClock` | Chess clocks. Wall-clock based, run-scoped by design. |
-| `DuelFlag` | Losing on time. Host-authoritative. |
-| `DuelResult` | Ends the duel on a victory/defeat screen. |
+| `DuelFlag` | Losing on time, and the receive side of every match result. Host-authoritative. |
+| `DuelResult` | Ends the match on a victory/defeat/draw screen. |
+| `DuelEndReason` | The `reason` codes on `DuelResultMessage`. **A wire format** — the host writes one and every client switches on it. |
+| `DuelResign` | Resigning, and offering/answering a draw. |
+| `DuelDrawPrompt` | The draw popups, built on vanilla's `NGenericPopup`. |
+
+**`DuelEndReason` exists because the codes had already drifted.** `DuelResultMessage.reason`
+was documented as "2 = concede" while `DuelFlag` used 2 for a race-clock expiry. Nothing broke
+only because resigning did not exist yet and nothing ever sent a concede — and adding resign is
+precisely the change that would have made them collide. Numbers that two files agree on by
+coincidence belong in one place.
 
 `src/duel/patches/` — one class per concern, each documenting *why* the patch exists and what
 the engine does that requires it. Those comments are the real documentation; read them before
@@ -332,15 +387,33 @@ Keep that split if you extend this.
 
 ## Immediate next step
 
-**First: verify four fixes made after the last playtest, all of them unplaytested.** One
-race-timeout run plus one HP-win duel covers every one. Each is detailed in Open Issues below.
+**The next milestone is M7's dedicated Duel host menu** (decided 2026-08-06). Today a match is
+configured by knowing to pick a *Custom* run and tick three modifiers, which is both buried and
+a poor fit — the modifier list is a flat set of tickboxes for something that is really two or
+three coupled choices. The wanted shape is a third entry beside **host normal** and **host
+custom**: **host duel**, with
 
-| Fix | What to expect |
+- clean controls for the race and duel clocks and for the ruleset, rather than radio-button
+  modifiers, and
+- **presets on chess conventions.** `10 minute race + 2 minute duel` is the agreed starting
+  point for a "blitz" preset.
+
+The mechanism does not change — it still sets the same modifiers, which is what makes this
+presentation work rather than a rewrite (DESIGN §5b). Art is wanted here and Lucas intends to
+draw it; see "Art still wanted" below.
+
+**Then: finish the duel result screen.** The meaningless run-score lines are gone; what should
+replace them is the match's own story. See the stats note under Open Issues.
+
+*Everything the previous handoff listed as unverified has now been playtested — the four fixes
+below, plus resignation from both sides and all three draw paths.*
+
+| Fix | Verified 2026-08-06 |
 |---|---|
-| `duel over` NRE — `DuelEndCombatPatch` skipped an `async Task` without `__result` | Zero error lines on an **HP win** (the flag path never triggered it) |
-| Race clock expiry is a **draw**, not a coin-flip loss | `DRAW` banner, "Time ran out before either of you reached the arena" |
-| Result screen after a race timeout showed `YOU 0:00 · OPP 0:00` | The single expired race clock instead — no duel was played |
-| Abandoning a run left the host broadcasting `ClockSyncMessage` for 21s | Abandon mid-race; expect no "not connected" errors |
+| `duel over` NRE — `DuelEndCombatPatch` skipped an `async Task` without `__result` | **Zero** NullReferenceExceptions on an HP win, both logs |
+| Race clock expiry is a **draw**, not a coin-flip loss | `race clock expired for both players — draw` → `duel over — DRAW` on both |
+| Result screen after a race timeout showed `YOU 0:00 · OPP 0:00` | Correct: no `duel begins: fresh bank` line, so the HUD took the single-race-clock branch |
+| Abandoning left the host broadcasting `ClockSyncMessage` for 21s | **0** `not connected` / `no message handlers`, down from 46 |
 
 One gap left from the clock split: **an untimed duel** (`Race Clock: 10` + `Duel Clock: Off`).
 The untimed *race* half is confirmed working — with `Race Clock: Off` you get the vanilla run
@@ -367,13 +440,20 @@ risky:
    arm-too-late trap the message handlers keep hitting — the ordering is now commented at both
    ends and `Arm` logs an error if it is ever called first again.
 
-1. **`RaceProgressHud`** — the messages already flow (`RaceProgressMessage`, and the opponent's
-   portrait moves on your map); what is missing is a real HUD showing their position, HP and
-   deck size while you wait at the arena.
-2. **`DuelResultScreen`** (DESIGN §6) — replaces the vanilla game-over screen, which currently
-   reports run score lines that mean nothing for a duel. Rematch lives here.
-3. **M7 entry point** — a dedicated PvP item in the multiplayer menu that sets the same
-   modifiers, so only the presentation changes.
+1. ~~**`RaceProgressHud`**~~ — **built, then deliberately cut to a debug tool** (`duel hud on`,
+   off by default). A permanent readout of the opponent's HP and deck is clutter, and it is a
+   competitive change nobody asked for: knowing their exact HP at every moment turns a race run
+   on your own judgement into one run against a status bar. **The tracking survives and is the
+   useful half** — `RaceProgress` retains their position, HP and deck size for the result screen
+   and post-match analysis. DESIGN §6 asked for a live HUD; play said the display belongs after
+   the match.
+2. **`DuelResultScreen`** (DESIGN §6) — half done. The vanilla run-score lines (floors climbed,
+   gold, elites, bosses, ascension) are suppressed, because after a duel they are meaningless at
+   best and misleading at worst: "+42 for floors climbed" invites the loser to think they were
+   ahead. What should stand in their place — the winner, and the match's own numbers — needs
+   damage tracked through the duel, which nothing does yet. **Rematch lives here** and is
+   deferred; see below.
+3. **M7 entry point** — now the next milestone and scoped above.
 
 Expect the co-located-party pattern to keep recurring as the race covers rest sites, shops and
 events — each has its own synchronizer assuming both players are present. Diagnose them the same
@@ -390,8 +470,26 @@ Smaller known gaps, none blocking:
   one shows up; only poison is fixed.
 - The duel entry screen's confirm feedback is a colour tint standing in for the intended
   green check + opponent portrait (DESIGN §6, wants an asset pass).
-- No `.pck` assets yet beyond the mod image. The duel map node icon (M6) is the first real
-  need, and the custom confirm button should be batched with it.
+### Art still wanted
+
+The `.pck` currently holds the mod image, the duel node texture and its outline, and two loc
+tables. Everything else in the mod is a borrowed vanilla node. In rough order of how much each
+would improve the thing:
+
+| Piece | Why, and what exists now |
+|---|---|
+| **Duel host menu** (M7) | The next milestone. Wants a menu entry and whatever framing the preset/clock controls sit in. Nothing exists. |
+| **Result screen** | The banner reads VICTORY / DEFEATED / DRAW in vanilla's frame with the score lines cut, so there is now visible empty space where a duel's own summary belongs. |
+| **Deck review background** | Currently the *boss* background, which is wrong and was flagged as wrong on sight. Anything plain — black, or the campfire — beats it; until then the fallback is whatever `NDeckCardSelectScreen` uses behind its grid. |
+| **Duel map node** | Exists (`SpirePvp/map/duel_node.png` + `_outline`). Now doubles as the top-bar boss icon via `DuelRoomIconPatch`, so it is being drawn at two sizes and may want a small variant. |
+| **Entry-screen confirm feedback** | Still a colour tint standing in for the intended green check plus opponent portrait (DESIGN §6). |
+| **Flame effect for the deck-review transition** | Wanted, not built. `NRestSiteFireVfx` is a scene child with no static `Create` so it cannot be reused standalone; `NRestSmokeVfx.Create()` and `NDesaturateTransitionVfx.Create()` are standalone and parameterless. A real flame is scene work. |
+
+**Loc tables are assets too, and their filenames are load-bearing.** `LocManager` merges a mod's
+tables only into tables vanilla already has, *by filename* — so a new table called
+`spirepvp.json` would never be read at all. Modifier names ride in `modifiers.json`; the
+resign/draw strings ride in `gameplay_ui.json`. Anything new must pick an existing vanilla table
+to live in.
 
 ---
 
@@ -519,10 +617,27 @@ decision before it is coded.
 like the campfire. Lucas is drawing something; until then the fix is whatever `NDeckCardSelectScreen`
 uses behind the grid.
 
-**The result screen is vanilla's game-over screen**, so its score lines talk about run progress —
-"damage to the Architect" and similar — which is meaningless for a duel. `DuelResultBannerPatch`
-rewrites the banner only. The real fix is M6's `DuelResultScreen` (DESIGN §6: winner, per-round
-damage, rematch), not more banner patching.
+**The result screen is still vanilla's game-over screen**, with the banner rewritten
+(`DuelResultBannerPatch`) and the run-score lines suppressed (`DuelResultScoreLinesPatch`).
+What is missing is what should stand in their place. `RaceProgress` already retains the
+opponent's final HP and deck size; **per-round damage needs a tracker that does not exist** —
+nothing accumulates damage across the duel. That tracker is the prerequisite for DESIGN §6's
+stats, and it is also what would make post-match analysis possible, which is the stated reason
+the race HUD's data was kept.
+
+**Rematch: deliberately deferred, 2026-08-06, and it is milestone-sized rather than a button.**
+The run is already over by the time the result screen is up: `RunManager.CleanUp` has fired,
+`DuelRunCleanupPatch` has released every handler, the clocks are reset. Starting a fresh match
+means getting both clients into a `StartRunLobby` carrying the same modifiers, seed and player
+set and launching, *without* passing through the main menu — which is where the connection
+drops. So it needs a rematch handshake, a route back into a lobby that skips the menu, and
+teardown ordering that keeps the transport alive across a run boundary the mod has never
+crossed. Every one of those is the shape of bug that has cost this project multi-session hunts.
+
+One design question is open and should be settled before building it: **does a rematch replay
+the same seed or roll a new one?** Same-seed is the truer rematch — both players have seen the
+map, so the second run is pure decision-making — and it is *strictly easier*, because the seed
+is already in the run being ended.
 
 **A flame effect for the deck-review transition** (wanted, not built). The rest site's fire is
 `NRestSiteFireVfx`, a scene child of `NRestSiteRoom` with no static `Create`, so it cannot be
@@ -530,7 +645,19 @@ reused standalone. The pieces of the rest animation that *are* standalone and pa
 `NRestSmokeVfx.Create()` and `NDesaturateTransitionVfx.Create()`. A real flame is scene work,
 best batched with the M6 asset pass.
 
-**Run-history icon load failure.** The UI looks for `images/ui/run_history/duel_encounter.png`
-and `_outline.png`, vanilla paths the mod cannot write to, so it logs an error once per run.
-Cosmetic. Fix by pointing `ImageHelper.GetRoomIconSuffix` at an existing boss icon for our
-encounter.
+**~~Run-history icon load failure.~~ FIXED 2026-08-06, and it was not cosmetic.** Recorded here
+as "logs an error once per run"; measured, it was **19 failures per client per session**, and
+the mechanism is why: `AssetCache` logs a cache *miss*, attempts the load, fails, and **never
+caches the failure** — so every repaint of the top-bar boss icon re-attempted a resource lookup
+that threw, synchronously, on the UI path. `NTopBarBossIcon.RefreshBossIcon` does it twice per
+call and again for the second boss slot, which is us. This is the best available explanation for
+in-game hitching that was initially put down to failing hardware.
+
+`DuelRoomIconPatch` redirects to the duel node art already in the `.pck`. Note it patches the
+public `GetRoomIconPath` / `GetRoomIconOutlinePath` rather than the shared private
+`GetRoomIconSuffix` the old note suggested: a suffix is concatenated into vanilla's
+`ui/run_history/` directory, so changing it could only ever name a different missing file in a
+directory the mod still cannot write to.
+
+**The lesson generalises:** "it only logs an error" is a claim worth measuring. Count the lines
+before believing it, and check whether the failure is cached.
