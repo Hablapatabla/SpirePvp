@@ -415,12 +415,17 @@ below, plus resignation from both sides and all three draw paths.*
 | Result screen after a race timeout showed `YOU 0:00 · OPP 0:00` | Correct: no `duel begins: fresh bank` line, so the HUD took the single-race-clock branch |
 | Abandoning left the host broadcasting `ClockSyncMessage` for 21s | **0** `not connected` / `no message handlers`, down from 46 |
 
-One gap left from the clock split: **an untimed duel** (`Race Clock: 10` + `Duel Clock: Off`).
-The untimed *race* half is confirmed working — with `Race Clock: Off` you get the vanilla run
-timer counting up, and the duel clock appears correctly at the deck review. The reverse was
-started on 2026-08-06 but abandoned before the arena, so the duel bank at 0 has never been
-reached: expect the clock to disappear at the deck review rather than freeze at the race's
-remainder.
+**~~One gap left from the clock split: an untimed duel.~~ CLOSED, playtested 2026-08-06.**
+`Race Clock: 10` + `Duel Clock: Off` behaves correctly end to end: the race counts down from
+10:00, and at the deck review the top bar swaps to the vanilla run timer counting up — the same
+presentation the untimed *race* already had, so both untimed halves look alike. Nobody can lose
+on time in the duel (`flag fell`: 0), the duel plays out to an HP finish, and both clients log
+`duel begins: fresh bank of 0 min each (untimed)`.
+
+Worth knowing why it cannot flag, since granting a zero bank sets `HasFlagged` true
+immediately: two independent guards stop it. `DuelClock.Tick` returns early when the clock is
+not running (`Refill` leaves it paused), and `DuelClockService.Tick` bails on
+`CurrentBankMs <= 0` before reaching it.
 
 Then M6 is feature-complete except for the three items below. Content and polish, none of it
 risky:

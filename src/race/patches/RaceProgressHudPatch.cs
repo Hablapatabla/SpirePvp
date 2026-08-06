@@ -14,9 +14,14 @@ namespace SpirePvp.Race.Patches;
 ///
 /// The HUD creates its label lazily and no-ops outside a PvP run, so a postfix that simply asks
 /// it to refresh is the whole integration.
+///
+/// **Passes `__instance` rather than letting the HUD find the screen itself.** During `_Ready`
+/// the singleton is not yet assigned, and `NMapScreen.Instance`'s *getter* throws rather than
+/// returning null — so the obvious version threw a NullReferenceException on every map screen
+/// built. The instance being constructed is right here; there is no reason to go looking for it.
 /// </summary>
 [HarmonyPatch(typeof(NMapScreen), "_Ready")]
 public static class RaceProgressHudPatch
 {
-    public static void Postfix() => RaceProgressHud.Refresh();
+    public static void Postfix(NMapScreen __instance) => RaceProgressHud.Refresh(__instance);
 }

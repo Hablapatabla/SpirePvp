@@ -80,30 +80,41 @@ public static class RaceProgressHud
     /// mismatch between mod lifetime and node lifetime being the failure this codebase keeps
     /// paying for.
     /// </summary>
-    public static void Refresh()
+    public static void Refresh(NMapScreen? screen = null)
     {
-        NMapScreen? screen = NMapScreen.Instance;
-        if (screen == null)
+        // **`Enabled` first, before anything is dereferenced.** This is a debug tool that is off
+        // in every real run, and the version that resolved the map screen before checking it
+        // threw a NullReferenceException twice a run *while disabled* — a switched-off feature
+        // has no business producing errors, and those two lines sat in a log that is supposed to
+        // read clean.
+        if (!Enabled)
         {
-            return;
-        }
-
-        if (!Enabled ||
-            !DuelMatch.IsPvpRun(MegaCrit.Sts2.Core.Runs.RunManager.Instance?.State) ||
-            !RaceProgress.HasOpponentReport)
-        {
-            Hide(screen);
             return;
         }
 
         try
         {
+            screen ??= NMapScreen.Instance;
+            if (screen == null ||
+                !DuelMatch.IsPvpRun(MegaCrit.Sts2.Core.Runs.RunManager.Instance?.State) ||
+                !RaceProgress.HasOpponentReport)
+            {
+                if (screen != null)
+                {
+                    Hide(screen);
+                }
+
+                return;
+            }
+
             MegaLabel? label = EnsureLabel(screen);
             label?.SetTextAutoSize(BuildText());
         }
         catch (Exception e)
         {
-            // A HUD is never worth taking the map screen down for.
+            // A HUD is never worth taking the map screen down for. Note the try covers resolving
+            // the screen as well as using it: `NMapScreen.Instance` is not merely null during
+            // `_Ready`, its *getter* throws, so a null check around it is not enough.
             Log.Error($"[SpirePvp] race HUD: {e.Message}");
         }
     }
