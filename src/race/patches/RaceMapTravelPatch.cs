@@ -55,6 +55,7 @@ public static class RaceMapTravelPatch
         }
 
         Log.Info($"[SpirePvp] race: travelling locally to {point.Point.coord} (no vote)");
+        RaceProgress.ReportLocalMove(point.Point.coord);
         TaskHelper.RunSafely(screen.TravelToMapCoord(point.Point.coord));
         return false;
     }
