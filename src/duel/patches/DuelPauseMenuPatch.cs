@@ -46,6 +46,19 @@ public static class DuelPauseMenuPatch
 {
     private const string DrawButtonName = "SpirePvpOfferDraw";
 
+    /// <summary>
+    /// Offer Draw is tinted so it does not read as a third way to quit. It sits between Resign
+    /// and the exit buttons and is the only one of them that does not end your run on the spot.
+    ///
+    /// Applied as <c>Modulate</c> on the button, which multiplies the whole node, and set
+    /// *after* <c>Enable()</c> — `NPauseMenuButton.Enable` assigns `Modulate = Colors.White` and
+    /// would wipe a tint applied before it. The label's own font colour is not touched: vanilla
+    /// tweens it to gold on focus and cream off it, so overriding it would fight the hover
+    /// animation every time the mouse crossed the button. Multiplying leaves that tween intact
+    /// and simply tints its result.
+    /// </summary>
+    private static readonly Color DrawButtonTint = new Color(0.72f, 0.51f, 1.0f);
+
     public static void Postfix(NPauseMenu __instance)
     {
         // Read the run directly rather than caching a flag: the pause menu is built once per
@@ -121,6 +134,10 @@ public static class DuelPauseMenuPatch
 
         draw.Visible = true;
         draw.Enable();
+
+        // After Enable, which resets Modulate to white. See DrawButtonTint.
+        draw.Modulate = DrawButtonTint;
+
         draw.GetNode<MegaLabel>("Label")
             .SetTextAutoSize(new LocString("gameplay_ui", "PAUSE_MENU.SPIREPVP_OFFER_DRAW").GetFormattedText());
 
