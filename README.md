@@ -4,7 +4,35 @@
 
 ## Status
 
-Environment verified 2026-08-04: DLL builds, `.pck` exports, game's mod loader discovers and sorts the manifest. In-game init log line not yet observed (game was closed mid-load) — confirm `[SpirePvp] loaded` in the log on next launch.
+**The full loop works** (playtested 2026-08-05, two local clients): lobby modifiers → race Act 1 → arena node → rendezvous → deck review → duel → result screen, with desync detection live. One blocking regression open (Neow offers no blessings) — see `docs/HANDOFF.md`.
+
+## Agent handover prompt
+
+Paste this to start a fresh agent session on this project.
+
+> You're picking up SpirePvp, a 1v1 PvP mod for Slay the Spire 2, at `<repo path>` (developed on a Windows desktop and a MacBook — see `docs/MAC_SETUP.md`).
+>
+> Read first, in this order: `docs/HANDOFF.md` → `CLAUDE.md` → `docs/DESIGN.md`. HANDOFF's "Open issues" section is your starting point. Decompiled game source lives outside the repo (regenerate per README if missing; game is v0.110.1).
+>
+> **State:** the whole loop is playable. Two players configure the match with custom-run modifiers (turn model + clock), race the same seeded map independently with mirrored RNG, converge on an arena node placed back-to-back after the Act 1 boss, review each other's decks, and duel. Checksums and pre-combat state sync are live through the duel, and a match now runs end to end without a desync.
+>
+> **Your first task — the blocking regression:** Neow presents no blessings, so the room looks skipped. HANDOFF's open-issues section has the log evidence and four specific things to check, in order. The short version: `Neow.GenerateInitialOptions` returns an empty list when the run carries modifiers, `DuelNeowOptionsPatch` exists to hide our modifiers for the duration of that call, and on the last run it did not. It gained a `DuelMatch.MaskedModifiers` interaction this session — suspect that first.
+>
+> **Then the next feature, already specified in DESIGN §9:** split the clock into a separate race bank and duel bank (e.g. a 10-minute race followed by a 2-minute duel). Two lobby modifier groups; the duel starts on a fresh bank, not the race's remainder.
+>
+> **Rules that cost this project real time — don't relearn them:**
+>
+> * Read the logs yourself (`logs/host.log`, `logs/client.log`) rather than asking for symptoms. Check the log's timestamp against the installed DLL — a stale log looks identical to a patch that stopped applying. When two clients disagree, the host dumps *both* full state dumps on divergence: diff them and the answer is the lines that differ.
+> * Confirm `N patch classes applied cleanly` after every change. Never use `Harmony.PatchAll`.
+> * Arm all message handlers at run start, never lazily on first local use — the peer can announce something before you act, and the message is silently dropped. This bit three separate times. Release them on run teardown for the same reason (`DuelRunCleanupPatch`).
+> * A prefix that skips an async method must assign `__result = Task.CompletedTask`, or the caller NREs on `await null`.
+> * `RunManager.EnterRoom` is the *last step* of entering a room, not the whole thing. Vanilla's real entry points run a preamble in front of it; skipping any of it fails silently and differently each time. `DuelArena.EnterRoom` mirrors `EnterMapPointInternal` step for step — keep the two in sync.
+> * Never kill the user's running game processes; `host.ps1` stops instances itself before building.
+> * The recurring root cause of the whole race phase: the engine assumes the party is co-located, and each assumption fails differently — a hang, a silent freeze, a crash. Its content-level twin: the engine reads `Players.Count > 1` as "co-op", so a PvP run gets offered co-op-only cards and relics.
+>
+> **Build/test:** `.\scripts\host.ps1` (pwsh 7 — stops instances, builds, re-exports the `.pck` if assets changed, launches), then `.\scripts\client.ps1` in a second tab. Console opens with `'`; `travel` unlocks clicking any map node; `unlock all` is needed per dev profile.
+>
+> Lucas playtests every change — hand him one specific thing to try with specific things to watch, then read the logs.
 
 ## Toolchain
 

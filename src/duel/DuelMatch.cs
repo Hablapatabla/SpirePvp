@@ -21,17 +21,32 @@ namespace SpirePvp.Duel;
 public static class DuelMatch
 {
     /// <summary>
+    /// The run's modifiers as *we* should see them.
+    ///
+    /// `DuelNeowOptionsPatch` temporarily empties `RunState.Modifiers` so vanilla takes its
+    /// normal Neow branch, and everything here reads that same list — so for the duration of
+    /// that call the run stopped looking like a PvP match to its own mod. That is not
+    /// theoretical: it is why Massive Scroll, the co-op-only Neow blessing, kept being offered.
+    /// `RaceNoCoopCardsPatch` asks `IsPvpRun` from inside `MassiveScroll.IsAllowed`, which Neow
+    /// calls from inside exactly that window, so the answer came back "not a PvP run" and the
+    /// blessing survived the filter. Taking it then threw, because the *card* filters ran later
+    /// with the modifiers restored and left its pool empty.
+    ///
+    /// The patch is lying to vanilla on purpose. It should not be able to lie to us, so it
+    /// parks the real list here and this is the only place that knows.
+    /// </summary>
+    internal static IReadOnlyList<ModifierModel>? MaskedModifiers { get; set; }
+
+    private static IEnumerable<ModifierModel> EffectiveModifiers(IRunState? runState) =>
+        MaskedModifiers ?? runState?.Modifiers ?? (IEnumerable<ModifierModel>)Array.Empty<ModifierModel>();
+
+    /// <summary>
     /// True when this run was configured as a PvP match. Safe to call at any time, including
     /// during seeding, before RunManager has a State.
     /// </summary>
     public static bool IsPvpRun(IRunState? runState)
     {
-        if (runState?.Modifiers == null)
-        {
-            return false;
-        }
-
-        foreach (ModifierModel modifier in runState.Modifiers)
+        foreach (ModifierModel modifier in EffectiveModifiers(runState))
         {
             if (modifier is DuelBlitz or DuelTurnBased)
             {
@@ -44,12 +59,7 @@ public static class DuelMatch
     /// <summary>The agreed turn model; blitz unless the turn-based modifier is present.</summary>
     public static bool IsTurnBased(IRunState? runState)
     {
-        if (runState?.Modifiers == null)
-        {
-            return false;
-        }
-
-        foreach (ModifierModel modifier in runState.Modifiers)
+        foreach (ModifierModel modifier in EffectiveModifiers(runState))
         {
             if (modifier is DuelTurnBased)
             {
@@ -66,12 +76,7 @@ public static class DuelMatch
     /// </summary>
     public static double ClockMinutes(IRunState? runState)
     {
-        if (runState?.Modifiers == null)
-        {
-            return 0;
-        }
-
-        foreach (ModifierModel modifier in runState.Modifiers)
+        foreach (ModifierModel modifier in EffectiveModifiers(runState))
         {
             if (modifier is DuelClockModifier clock)
             {
@@ -79,6 +84,39 @@ public static class DuelMatch
             }
         }
         return 0;
+    }
+
+    /// <summary>
+    /// Drops everything that belonged to the run that just finished.
+    ///
+    /// All of this mod's state is static, so it outlives a run — and the net service it is bound
+    /// to does not. Playing a second match in the same process therefore breaks in two ways,
+    /// both silent:
+    ///
+    /// - Handlers armed against the old service are gone, but the `_armed` flags still say
+    ///   armed, so `Arm()` no-ops and nothing re-registers. The peer's messages are then
+    ///   dropped without a word. This is the third time this project has been bitten by a
+    ///   handler that was not listening.
+    /// - The clocks keep running. Measured 2026-08-05: after a duel ended, the host went on
+    ///   broadcasting `ClockSyncMessage` twice a second into an ordinary co-op run, and the
+    ///   client logged "no message handlers are registered for that type" for every one.
+    ///
+    /// Hooked on run *teardown*, not run start, because the obvious alternative does not work:
+    /// `OnRunCreated` runs inside `CreateForNewRun` and `OnRunLaunched` after it, so a reset in
+    /// either would wipe what the other had just installed. Teardown has no such ordering to get
+    /// wrong — and it fires for a non-PvP next run too, which is precisely the case that
+    /// produced the flood.
+    /// </summary>
+    public static void OnRunEnded()
+    {
+        DuelSession.Reset();
+        DuelClockService.Reset();
+        DuelFlag.Disarm();
+        DuelEntry.Disarm();
+        DuelRendezvous.Disarm();
+        DuelResult.Disarm();
+        RaceProgress.Disarm();
+        MaskedModifiers = null;
     }
 
     /// <summary>

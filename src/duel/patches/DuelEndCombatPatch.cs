@@ -34,7 +34,16 @@ public static class DuelEndCombatPatch
 {
     public static bool Prefix(CombatManager __instance, CombatTurnState turnState)
     {
-        if (!DuelSession.IsDuelActive)
+        // Complete counts as well as DuelActive, and leaving it out cost exactly the NRE this
+        // patch exists to prevent. Ending the duel runs DuelResult.DeclareWinner, which moves
+        // the phase to Complete — so the *second* time anything asks, this guard said "not a
+        // duel" and handed vanilla the arena it cannot cope with. Something always asks again:
+        // the room is not exited while the result screen is up, so a trailing action in
+        // ActionExecutor re-runs CheckWinCondition, IsCombatEnding is still true with the loser
+        // dead, and EndCombatInternal fires a second time.
+        //
+        // "The duel is over" is not the same question as "this is not a duel".
+        if (DuelSession.Phase is not (DuelPhase.DuelActive or DuelPhase.Complete))
         {
             return true;
         }

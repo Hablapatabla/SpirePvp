@@ -21,10 +21,12 @@ public static class RaceCoordinator
 {
     private static bool _combatSyncWasDisabled;
     private static bool _checksumsWereEnabled;
+    private static bool _raceActive;
 
     public static void BeginRace()
     {
         RunManager run = RunManager.Instance;
+        _raceActive = true;
 
         // Remember vanilla's values rather than assuming, so EndRace restores rather than
         // guesses — the duel needs both of these back on to stay deterministic.
@@ -144,12 +146,68 @@ public static class RaceCoordinator
         }
     }
 
+    /// <summary>
+    /// Puts the shared-state machinery back the way BeginRace found it. The duel is fully
+    /// coupled and depends on the pre-combat state sync the race turned off, so this must run
+    /// before `DuelArena` starts that sync — not after the arena has loaded.
+    ///
+    /// Idempotent, and a no-op when no race ran. That guard matters: the legacy `duel start`
+    /// path enters the arena from an ordinary co-op run, where "restore the saved values" would
+    /// mean writing the defaults of two fields BeginRace never filled in — switching checksums
+    /// off for a duel that had them on.
+    /// </summary>
     public static void EndRace()
     {
+        if (!_raceActive)
+        {
+            return;
+        }
+
+        _raceActive = false;
         RunManager run = RunManager.Instance;
         run.CombatStateSynchronizer.IsDisabled = _combatSyncWasDisabled;
         run.ChecksumTracker.IsEnabled = _checksumsWereEnabled;
         ReactivateAllPlayerHooks(run);
+        ResetSynchronizerCounters(run);
         Log.Warn("[SpirePvp] race mode OFF — state sync and player hooks restored");
+    }
+
+    /// <summary>
+    /// Zeroes the run-level synchronizer counters that the race pulled apart.
+    ///
+    /// `CombatStateSynchronizer` reconciles each player's serialized state, the run RNG and the
+    /// shared relic grab bag — and nothing else. These four counters live on the *synchronizers*,
+    /// not on the run: each one is bumped locally whenever a client reserves a choice, generates
+    /// a reward set, enqueues an action or mints a hook action. Two clients playing their own
+    /// runs therefore drift apart by construction, and nothing in the duel's state sync brings
+    /// them back.
+    ///
+    /// The drift is invisible while checksums are off and fatal the moment they come back on: the
+    /// first checksum of the duel compares them and the host drops the client for
+    /// StateDivergence. Measured 2026-08-05 — the two state dumps were identical in every
+    /// creature, card, pile, HP and RNG seed, and differed only in `Choice IDs 1,1` vs `0,2` and
+    /// `Reward IDs 1,0` vs `0,1`. Action and hook ids are in the same dump and would have
+    /// diverged on the first card played, so they are reset here too rather than found later.
+    ///
+    /// Zeroed rather than adopting the host's values: both sides reach the same answer with no
+    /// message and no ordering hazard, and it covers the console duel paths for free. The
+    /// counters only need to agree with each other from here on — the duel is a fresh combat
+    /// entered with empty queues, so nothing is still holding one of the old ids.
+    /// </summary>
+    private static void ResetSynchronizerCounters(RunManager run)
+    {
+        int playerCount = run.State?.Players.Count ?? 0;
+        run.PlayerChoiceSynchronizer.FastForwardChoiceIds(Enumerable.Repeat(0u, playerCount).ToList());
+
+        // Sized off the synchronizer's own state rather than the player count: FastForward
+        // indexes into _rewardStates, so a longer list would throw.
+        int rewardStateCount = run.RewardsSetSynchronizer.GetNextRewardIds().Count();
+        run.RewardsSetSynchronizer.FastForwardRewardIds(Enumerable.Repeat(0, rewardStateCount).ToList());
+
+        run.ActionQueueSet.FastForwardNextActionId(0);
+        run.ActionQueueSynchronizer.FastForwardHookId(0);
+
+        Log.Warn($"[SpirePvp] duel: reset {playerCount} choice / {rewardStateCount} reward / action / hook " +
+                 "counters — the race diverged them and the state sync does not cover them");
     }
 }

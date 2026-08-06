@@ -59,6 +59,13 @@ public static class DuelFlag
 
     public static void Disarm()
     {
+        // Unregister as well as unsubscribe: a run ending drops the net service these were
+        // bound to, and leaving _armed set would stop the next run re-registering on the new
+        // one. See DuelMatch.OnRunEnded.
+        INetGameService? net = RunManager.Instance?.NetService;
+        net?.UnregisterMessageHandler<DuelResultMessage>(OnDuelResult);
+        net?.UnregisterMessageHandler<ClockSyncMessage>(OnClockSync);
+
         if (DuelClockService.Local != null)
         {
             DuelClockService.Local.Flagged -= OnClockFlagged;

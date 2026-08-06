@@ -53,6 +53,14 @@ public static class RaceProgress
         _armed = true;
     }
 
+    /// <summary>Releases the handler and the armed flag so the next run re-arms. See DuelMatch.OnRunEnded.</summary>
+    public static void Disarm()
+    {
+        RunManager.Instance?.NetService?.UnregisterMessageHandler<RaceProgressMessage>(OnProgress);
+        _opponentCoord = null;
+        _armed = false;
+    }
+
     /// <summary>Announce that we have moved to <paramref name="coord"/>.</summary>
     public static void ReportLocalMove(MapCoord coord)
     {

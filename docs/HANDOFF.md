@@ -19,9 +19,9 @@ flags, console commands and gotchas below are OS-neutral unless marked.
 | **M2** round loop | **done**, playtested |
 | **M3** chess clock | **done**, playtested |
 | **M4** information rules | **done**, playtested |
-| **M5** race phase | **working, playtested 2026-08-05.** Two clients race the same seeded map independently — own combats, own rewards, advancing at their own pace — with mirrored RNG and a run-long clock. Remaining: progress HUD, duel handshake |
-| **M6** match setup | lobby configuration **done** (modifiers for turn model + clock); duel map node not started |
-| M6 full loop, M7 polish | not started |
+| **M5** race phase | **working, playtested 2026-08-05.** Two clients race the same seeded map independently — own combats, own rewards, advancing at their own pace — with mirrored RNG and a run-long clock |
+| **M6** full loop | **working, playtested 2026-08-05.** Lobby modifiers → race → arena node → rendezvous → deck review → duel → result screen, with checksums live. Remaining: progress HUD, result screen, rematch |
+| M7 polish | not started |
 
 A duel is fully playable end to end today: enter the arena, fight with real cards and
 statuses, win or lose on HP or on the clock, and land on a victory/defeat screen.
@@ -62,6 +62,21 @@ an inherited method throws "Undefined target method". This caused the above.
 
 **Verify in game after every patch change.** Several sessions' worth of confusing symptoms
 were patches that had never applied.
+
+**Mod state is static; the run it belongs to is not.** Every `_armed` flag, the clocks and
+`DuelSession` all outlive a run, while the net service they were bound to is disposed with it.
+Play a second match in the same process and handlers silently fail to re-register (the flag
+still says armed) while the old match's clocks keep ticking — the host was caught broadcasting
+`ClockSyncMessage` twice a second into an unrelated co-op run. `DuelRunCleanupPatch` hooks
+`RunManager.CleanUp` and lets go of everything; add to `DuelMatch.OnRunEnded` when you add
+state. It is a **prefix**, because CleanUp disconnects the net service and nulls the run state,
+so a postfix would have nothing left to unregister from.
+
+**`DuelNeowOptionsPatch` blanks `RunState.Modifiers` while Neow rolls its blessings**, so for the
+duration of that call the run does not look like a PvP match to its own mod. Anything asking
+`DuelMatch.IsPvpRun` from inside Neow's option generation gets the wrong answer unless it goes
+through `DuelMatch` (which consults `MaskedModifiers`). This is why the co-op-only Massive
+Scroll blessing survived a filter that was working perfectly everywhere else.
 
 **With this mod installed you cannot join an unmodded friend's multiplayer game.** Confirmed
 2026-08-05. The mod is inert at *runtime* — every patch is guarded behind `DuelSession`, which
@@ -274,20 +289,29 @@ Keep that split if you extend this.
 
 ## Immediate next step
 
-**The M5 spike passed** (DESIGN I3 has the four blockers and why they all share one root
-cause), so decoupling is viable and the v1.5 fallback is off the table. What is left is race
-*content*, roughly in dependency order:
+Fix the Neow regression in Open Issues first — it is the only thing currently broken. Then, in
+the order Lucas asked for (2026-08-05):
 
-1. **Mirrored per-player RNG** (I4) — a one-line change to `Player.InitializeSeed`, and the
-   thing that makes the race a fair mirror match rather than two different runs.
-2. **The duel as a real map node** — see M6's note in DESIGN §7. Worth pulling forward: it
-   deletes the wholesale `EndCombatInternal` replacement, which is the most brittle patch in
-   the mod, and it is how the race actually *ends*.
-3. `RaceProgressMessage` + HUD, then the `DuelReadyMessage` handshake.
+0. **Split the clock into a race bank and a duel bank** (DESIGN §9). The single shared bank is
+   wrong: an act needs far more time than one duel. Two lobby modifier groups, and the duel
+   starts on a *fresh* bank rather than the race's remainder. This is the next feature.
 
-Expect the blocker-4 pattern to recur as the race covers rest sites, shops, events and
-rewards — each has its own synchronizer assuming both players are present. Diagnose them the
-same way: find where the code assumes every run player is there.
+Then content and polish, none of it risky:
+
+1. **`RaceProgressHud`** — the messages already flow (`RaceProgressMessage`, and the opponent's
+   portrait moves on your map); what is missing is a real HUD showing their position, HP and
+   deck size while you wait at the arena.
+2. **`DuelResultScreen`** (DESIGN §6) — replaces the vanilla game-over screen, which currently
+   reports run score lines that mean nothing for a duel. Rematch lives here.
+3. **M7 entry point** — a dedicated PvP item in the multiplayer menu that sets the same
+   modifiers, so only the presentation changes.
+
+Expect the co-located-party pattern to keep recurring as the race covers rest sites, shops and
+events — each has its own synchronizer assuming both players are present. Diagnose them the same
+way: find where the code assumes every run player is there. And note its content-level twin,
+which cost this session too: the engine reads `Players.Count > 1` as "co-op" in card selection,
+so a PvP run was being offered ally-targeting co-op cards and Massive Scroll's co-op-only Neow
+blessing (`RaceNoCoopCardsPatch`).
 
 Smaller known gaps, none blocking:
 
@@ -302,27 +326,112 @@ Smaller known gaps, none blocking:
 
 ---
 
+## The full loop works (2026-08-05, playtested)
+
+Lobby → race Act 1 → both reach the arena → deck review → duel → victory/defeat screen, on two
+clients, with checksums live and no state divergence.
+
+### The lesson that cost this session: `RunManager.EnterRoom` is not how you enter a room
+
+It is the *last step* of entering one. Every vanilla entry point — `EnterMapPointInternal` for
+map → room, `EnterRoomDebug` for dev commands — runs a preamble in front of it, and calling
+`EnterRoom` alone silently skips all of it. The arena is the first room this mod enters that was
+not reached through a map point, so it was the first to need that preamble spelled out.
+
+Four omissions, four unrelated-looking symptoms, none of them loud:
+
+| Missing step | Symptom |
+|---|---|
+| `ClearScreens()` | **Cards frozen, uninteractable.** `DuelRendezvous` hid the map with `Visible = false`, which leaves `NMapScreen.IsOpen` true — and `ActiveScreenContext.GetCurrentScreen` tests `IsOpen` *before* the combat room. The invisible map stayed the active screen, so `NCombatRoom.OnActiveScreenUpdated` called `Ui.Disable()`: piles off, end-turn off, every card play cancelled as it began. |
+| `StartSync`/`WaitForSync` | `RaceCoordinator.EndRace()` was never called at all, so the duel ran with the race's state sync still disabled. |
+| `CombatReplayWriter.RecordInitialState` | **Turn loop died mid-start**, hand left half-dealt in the middle of the screen. The replay writer records every checksum and throws without an initial state. Only surfaced once checksums came back on, because `StartTurn`'s first act is `GenerateChecksum("After player turn start")`. |
+| the fade | Purely cosmetic, but the cut from map to full-screen card grid read as a glitch. |
+
+`duel start` never hit any of them: it entered from inside a live combat, where the map is
+already closed and the previous combat's replay is still open.
+
+`DuelArena.EnterRoom` now reproduces `EnterMapPointInternal`'s preamble step for step, with a
+comment listing each one and what it broke. **Keep the two in sync.**
+
+### The other half: what the state sync does *not* cover
+
+Re-enabling `ChecksumTracker` immediately produced a `StateDivergence` and a kicked client. The
+two state dumps were identical in every creature, card, pile, HP and RNG seed, and differed only
+in `Choice IDs 1,1` vs `0,2` and `Reward IDs 1,0` vs `0,1`.
+
+`CombatStateSynchronizer` reconciles each player's serialized state, the run RNG and the shared
+relic grab bag — **and nothing else**. The choice, reward, action and hook counters live on the
+*synchronizers*, are bumped locally by every choice / reward set / enqueued action, and so drift
+apart by construction during a race. `RaceCoordinator.EndRace` now zeroes all four through the
+engine's own public `FastForward*` APIs (they exist for replay playback). Action and hook ids
+were not in the observed diff only because nothing had executed yet — they are in the same
+checksum and would have diverged on the first card played.
+
+If a divergence ever reappears, the host logs both full state dumps: diff them and the answer is
+in the two lines that differ.
+
 ## Open issues (2026-08-05, end of session)
 
-**Cards frozen in the arena after the deck review.** The rendezvous flow reaches the arena
-correctly and both players load in, but cards cannot be interacted with. This is the blocking
-bug. It did *not* happen on the legacy `duel start` path, so suspect what changed: the arena is
-now entered from the **map** rather than from inside an existing combat, and the duel phase
-now begins at the deck review rather than at arena entry. Things worth checking in order:
+**BLOCKING — Neow offers no blessings at all; the room looks skipped.** A regression from this
+session, and the first thing to fix.
 
-- `RaceCoordinator.EndRace()` is never called, so `CombatStateSynchronizer.IsDisabled` is still
-  true and `ChecksumTracker.IsEnabled` still false when the duel starts. The design says both
-  must be back on for the duel — the duel is fully coupled and depends on the pre-combat state
-  sync it is currently skipping.
-- `ActionSynchronizerCombatState` / whether the action queue is paused; frozen cards look a lot
-  like a queue that never entered the play phase.
-- Whether `NMapScreen.Instance.Visible = false` (set in `DuelRendezvous`) is ever restored, and
-  whether an invisible map still captures input. `DuelEntry` has a comment about a prior bug of
-  exactly this shape — an overlay left on top swallowing every click.
+The log is unambiguous:
+
+```
+[EventSynchronizer] Beginning event EVENT.NEOW, shared: False
+[EventSynchronizer] Event EVENT.NEOW began for player 1 with options:
+[EventSynchronizer] Event EVENT.NEOW began for player 1001 with options:
+```
+
+Empty option lists, both players. `Neow.GenerateInitialOptions` branches on
+`RunState.Modifiers.Count <= 0`: with no modifiers you get the three blessings, with any modifier
+you get only what those modifiers supply — and ours supply none, so it returns `Array.Empty`.
+`DuelNeowOptionsPatch` exists precisely to blank `RunState.Modifiers` for the duration of that
+call so vanilla takes its normal branch. **On this run it did not.** Start there:
+
+- Did the prefix run at all, and did its guard pass? It returns early unless
+  `__instance.Owner?.RunState is RunState`, `_modifiersField != null`, `DuelMatch.IsPvpRun` is
+  true, and *every* modifier is a `DuelModifierBase`. Log inside it rather than reasoning about
+  it — that guard has four independent ways to opt out silently.
+- `_modifiersField` is `AccessTools.Field(typeof(RunState), "<Modifiers>k__BackingField")`. If
+  `Modifiers` ever stops being an auto-property, that lookup returns null and the whole patch
+  no-ops without a word. Check it is non-null at load.
+- The patch gained `DuelMatch.MaskedModifiers` this session (so the mod's own `IsPvpRun` keeps
+  answering "yes" while vanilla is being lied to). Suspect the interaction: `IsPvpRun` now reads
+  `MaskedModifiers ?? runState.Modifiers`, and a stale non-null `MaskedModifiers` would make the
+  guard see a run whose modifiers are not the ones it is about to blank.
+- This is a per-player event (`shared: False`), so the option generation runs once per player.
+  Confirm the patch covers both passes, not just the local one.
+
+**The `duel over` NullReferenceException, still unpinned.** Thrown once per duel, on both
+clients, from `CombatManager.CheckWinCondition` between `duel over` and the game-over screen
+loading. Harmless so far — the result screen is already up and the outcome is correct.
+`DuelEndCombatPatch` was widened to cover `DuelPhase.Complete`, which removed one route into it
+(vanilla `EndCombatInternal` running against the synthetic arena); the remaining candidates are
+`ProcessPendingLoss` and `IsCombatEnding`, and inlining has eaten the frames that would say
+which. Add logging inside the patch rather than guessing.
+
+**Should the opponent's pet be attackable?** Open *design* question, deliberately not decided.
+`DuelLayout` now draws the opponent's pets on the enemy side (`BelongsToOpponent` resolves
+`Player ?? PetOwner`), but they are still mechanically on `CombatSide.Player`, so they are
+scenery: you cannot hit the opponent's Osty and it cannot be killed. That is a real matchup
+question, not a rendering one — it belongs in `DuelOpponentsPatch` / `GetOpponentsOf` and wants a
+decision before it is coded.
 
 **Deck review background is the boss background.** Should be plain black or something simple
 like the campfire. Lucas is drawing something; until then the fix is whatever `NDeckCardSelectScreen`
 uses behind the grid.
+
+**The result screen is vanilla's game-over screen**, so its score lines talk about run progress —
+"damage to the Architect" and similar — which is meaningless for a duel. `DuelResultBannerPatch`
+rewrites the banner only. The real fix is M6's `DuelResultScreen` (DESIGN §6: winner, per-round
+damage, rematch), not more banner patching.
+
+**A flame effect for the deck-review transition** (wanted, not built). The rest site's fire is
+`NRestSiteFireVfx`, a scene child of `NRestSiteRoom` with no static `Create`, so it cannot be
+reused standalone. The pieces of the rest animation that *are* standalone and parameterless are
+`NRestSmokeVfx.Create()` and `NDesaturateTransitionVfx.Create()`. A real flame is scene work,
+best batched with the M6 asset pass.
 
 **Run-history icon load failure.** The UI looks for `images/ui/run_history/duel_encounter.png`
 and `_outline.png`, vanilla paths the mod cannot write to, so it logs an error once per run.

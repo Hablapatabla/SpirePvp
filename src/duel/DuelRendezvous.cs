@@ -1,5 +1,7 @@
+using MegaCrit.Sts2.Core.Commands;
 using MegaCrit.Sts2.Core.Context;
 using MegaCrit.Sts2.Core.Entities.Players;
+using MegaCrit.Sts2.Core.Helpers;
 using MegaCrit.Sts2.Core.Logging;
 using MegaCrit.Sts2.Core.Map;
 using MegaCrit.Sts2.Core.Multiplayer.Game;
@@ -90,6 +92,14 @@ public static class DuelRendezvous
         _armed = true;
     }
 
+    /// <summary>Releases the handler and the armed flag so the next run re-arms. See DuelMatch.OnRunEnded.</summary>
+    public static void Disarm()
+    {
+        RunManager.Instance?.NetService?.UnregisterMessageHandler<DuelArrivedMessage>(OnArrived);
+        Reset();
+        _armed = false;
+    }
+
     private static void OnArrived(DuelArrivedMessage message, ulong senderId)
     {
         if (message.modVersion != DuelEntry.ModVersion)
@@ -120,9 +130,19 @@ public static class DuelRendezvous
     /// fight. Waiting until the arena loaded would have left the race's shared countdown on
     /// screen through a decision that is no longer shared.
     ///
-    /// The map is hidden at the same time. The deck screen is an overlay, so without this it
+    /// The map is closed at the same time. The deck screen is an overlay, so without this it
     /// sits on top of a still-visible map — and the map is meaningless now that both players
     /// have arrived.
+    ///
+    /// `Close(animateOut: false)`, not `Visible = false`. Hiding the node leaves
+    /// `NMapScreen.IsOpen` true, and `ActiveScreenContext.GetCurrentScreen` tests `IsOpen`
+    /// *before* the combat room — so an invisible map goes on being the active screen and the
+    /// arena's combat UI stays disabled. That is what froze the cards in the arena. Close does
+    /// the hiding as well, so nothing is lost by going through it.
+    ///
+    /// The swap happens behind the run's own room transition (`RunManager.FadeOut`/`FadeIn`),
+    /// the same fade every map → room move uses. Cutting straight from the map to a full-screen
+    /// card grid read as a glitch rather than as arriving somewhere.
     /// </summary>
     private static void TryOpenDeckReview()
     {
@@ -133,14 +153,29 @@ public static class DuelRendezvous
 
         Log.Warn("[SpirePvp] arena: both players present — entering duel, opening deck review");
 
+        // Phase first and synchronously: the clocks switch to chess-clock semantics here, so
+        // the fade must be charged to the duel, not to the race.
         DuelSession.ActivateDuel(OpponentNetId());
 
-        if (NMapScreen.Instance != null)
+        TaskHelper.RunSafely(OpenDeckReviewBehindFade());
+    }
+
+    private static async Task OpenDeckReviewBehindFade()
+    {
+        RunManager? run = RunManager.Instance;
+        if (run == null)
         {
-            NMapScreen.Instance.Visible = false;
+            return;
         }
 
+        // The wipe sfx belongs to this fade — NMapScreen.TravelToMapCoord plays it against the
+        // same FadeOut on every ordinary map → room move.
+        SfxCmd.Play("event:/sfx/ui/wipe_map");
+
+        await run.FadeOut();
+        NMapScreen.Instance?.Close(animateOut: false);
         DuelEntry.Open();
+        await run.FadeIn();
     }
 
     private static ulong OpponentNetId()

@@ -1,6 +1,4 @@
 using HarmonyLib;
-using MegaCrit.Sts2.Core.Context;
-using MegaCrit.Sts2.Core.Entities.Creatures;
 using MegaCrit.Sts2.Core.Nodes.Combat;
 
 namespace SpirePvp.Duel.Patches;
@@ -16,6 +14,10 @@ namespace SpirePvp.Duel.Patches;
 /// Patching AnimateOut rather than OnUnfocus is deliberate: OnUnfocus also tears down the
 /// select reticle, hover tips and target-manager state, so skipping it wholesale would leak
 /// UI. Suppressing just the hide leaves all of that intact.
+///
+/// Covers the opponent's *pets* as well as the opponent — vanilla's own flag here is
+/// `_isRemotePlayerOrPet`, so a summon's bar hides on the same rule, and the opponent's Osty
+/// sitting across the arena with no visible HP is the same missing information.
 /// </summary>
 [HarmonyPatch(typeof(NCreatureStateDisplay), nameof(NCreatureStateDisplay.AnimateOut))]
 public static class DuelHealthBarPatch
@@ -27,8 +29,7 @@ public static class DuelHealthBarPatch
             return true;
         }
 
-        Creature? creature = __instance._creature;
-        if (creature == null || !creature.IsPlayer || LocalContext.IsMe(creature.Player))
+        if (!DuelLayout.BelongsToOpponent(__instance._creature))
         {
             return true;
         }

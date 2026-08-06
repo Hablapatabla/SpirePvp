@@ -49,6 +49,12 @@ public static class DuelEntry
 
     public static bool LocalReady => _localReady;
 
+    /// <summary>
+    /// Whether the opponent has confirmed. Read by <see cref="DuelClockService"/>: the host owns
+    /// both clocks, so it needs their readiness as well as ours to stop the right one.
+    /// </summary>
+    public static bool OpponentReady => _opponentReady;
+
     /// <summary>Opens the opponent's deck as the duel's entry screen.</summary>
     public static bool Open()
     {
@@ -133,6 +139,21 @@ public static class DuelEntry
         net.RegisterMessageHandler<DuelReadyMessage>(OnReady);
         net.RegisterMessageHandler<DuelStartMessage>(OnStart);
         _armed = true;
+    }
+
+    /// <summary>Releases the handlers and the armed flag so the next run re-arms. See DuelMatch.OnRunEnded.</summary>
+    public static void Disarm()
+    {
+        INetGameService? net = RunManager.Instance?.NetService;
+        net?.UnregisterMessageHandler<DuelReadyMessage>(OnReady);
+        net?.UnregisterMessageHandler<DuelStartMessage>(OnStart);
+
+        _localReady = false;
+        _opponentReady = false;
+        _opponent = null;
+        _screen = null;
+        IsChoosing = false;
+        _armed = false;
     }
 
     private static void OnReady(DuelReadyMessage message, ulong senderId)

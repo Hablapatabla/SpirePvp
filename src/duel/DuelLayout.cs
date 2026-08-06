@@ -2,6 +2,7 @@ using Godot;
 using MegaCrit.Sts2.Core.Combat;
 using MegaCrit.Sts2.Core.Context;
 using MegaCrit.Sts2.Core.Entities.Creatures;
+using MegaCrit.Sts2.Core.Entities.Players;
 using MegaCrit.Sts2.Core.Entities.UI;
 using MegaCrit.Sts2.Core.Logging;
 using MegaCrit.Sts2.Core.Nodes.Combat;
@@ -28,8 +29,26 @@ namespace SpirePvp.Duel;
 public static class DuelLayout
 {
     /// <summary>
+    /// Which side of the screen a creature belongs on.
+    ///
+    /// Pets are the reason this is not simply `creature.Player`. A summon — the Necrobinder's
+    /// Osty, say — is a creature in its own right with a **null `Player`** and its owner in
+    /// `PetOwner`, so asking only about players quietly left the opponent's summon standing on
+    /// your side of the arena, fighting for the wrong team as far as the screen was concerned.
+    /// </summary>
+    public static bool BelongsToOpponent(Creature? creature)
+    {
+        Player? owner = creature?.Player ?? creature?.PetOwner;
+        return owner != null && !LocalContext.IsMe(owner);
+    }
+
+    /// <summary>
     /// Reparents the local player's opponent(s) into the enemy container and re-runs the
     /// vanilla positioning for both sides. Safe to call when there is no combat room yet.
+    ///
+    /// Walks `Allies` rather than `PlayerCreatures`: everything on the player side has to be
+    /// sorted onto one screen half or the other, and pets are on that side without being
+    /// players.
     /// </summary>
     public static void MoveOpponentToEnemySide(ICombatState state)
     {
@@ -42,7 +61,7 @@ public static class DuelLayout
         List<NCreature> moved = new List<NCreature>();
         List<NCreature> remainingAllies = new List<NCreature>();
 
-        foreach (Creature creature in state.PlayerCreatures)
+        foreach (Creature creature in state.Allies)
         {
             NCreature? node = room.GetCreatureNode(creature);
             if (node == null)
@@ -50,7 +69,7 @@ public static class DuelLayout
                 continue;
             }
 
-            if (LocalContext.IsMe(creature.Player))
+            if (!BelongsToOpponent(creature))
             {
                 remainingAllies.Add(node);
                 continue;
@@ -61,8 +80,9 @@ public static class DuelLayout
             node.Reparent(room._enemyContainer, keepGlobalTransform: true);
             FaceLeft(node, faceLeft: true);
 
-            // Remote players start with their bar hidden (co-op shows it on hover only).
-            // Bring it up now; DuelHealthBarPatch stops it going away again.
+            // Remote players and their pets start with their bar hidden (co-op shows it on
+            // hover only, gated on the same _isRemotePlayerOrPet flag). Bring it up now;
+            // DuelHealthBarPatch stops it going away again.
             node._stateDisplay.AnimateIn(HealthBarAnimMode.FromHidden);
             node._stateDisplay.ZIndex = 1;
 
@@ -79,7 +99,8 @@ public static class DuelLayout
         NCombatRoom.PositionPlayersAndPets(remainingAllies, scaling, room._visuals.Encounter.FullyCenterPlayers);
         room.UpdateCreatureNavigation();
 
-        Log.Warn($"[SpirePvp] duel layout: moved {moved.Count} opponent creature(s) to the enemy side");
+        Log.Warn($"[SpirePvp] duel layout: moved {moved.Count} opponent creature(s) to the enemy side, " +
+                 $"{remainingAllies.Count} stayed on yours");
     }
 
     /// <summary>
@@ -105,8 +126,11 @@ public static class DuelLayout
     }
 
     /// <summary>
-    /// Puts every player creature back in the ally container, so `duel off` really does
+    /// Puts every player-side creature back in the ally container, so `duel off` really does
     /// restore normal presentation instead of stranding the opponent on the right.
+    ///
+    /// `Allies`, to match what MoveOpponentToEnemySide moved — otherwise an opponent's pet is
+    /// left behind on the enemy side with nothing to bring it home.
     /// </summary>
     public static void RestoreAllySide(ICombatState state)
     {
@@ -117,7 +141,7 @@ public static class DuelLayout
         }
 
         List<NCreature> allies = new List<NCreature>();
-        foreach (Creature creature in state.PlayerCreatures)
+        foreach (Creature creature in state.Allies)
         {
             NCreature? node = room.GetCreatureNode(creature);
             if (node == null)

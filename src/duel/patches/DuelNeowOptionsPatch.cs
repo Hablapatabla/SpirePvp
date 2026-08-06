@@ -56,6 +56,11 @@ public static class DuelNeowOptionsPatch
 
         __state = runState.Modifiers;
         _modifiersField.SetValue(runState, Array.Empty<ModifierModel>());
+
+        // The lie is for vanilla only. Without this the mod's own IsPvpRun goes false for the
+        // duration — and Neow rolls its blessings inside that window, so the co-op-only Massive
+        // Scroll stopped being filtered out. See DuelMatch.MaskedModifiers.
+        DuelMatch.MaskedModifiers = __state;
     }
 
     public static void Finalizer(Neow __instance, IReadOnlyList<ModifierModel>? __state)
@@ -64,6 +69,8 @@ public static class DuelNeowOptionsPatch
         {
             return;
         }
+
+        DuelMatch.MaskedModifiers = null;
 
         if (__instance.Owner?.RunState is RunState runState)
         {

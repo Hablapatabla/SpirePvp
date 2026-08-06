@@ -458,8 +458,12 @@ mechanic. Note `HittableEnemies` is **not** patchable — it has no acting-playe
 - **M8 — Simultaneous turn-based duel** (§3.1b model B). Introduce `IDuelTurnModel`, move the
   existing behaviour behind a `BlitzTurnModel` unchanged, then add the lock-in model beside
   it. Carry the choice on `DuelStartMessage`. **Use submission order and do not tune it** —
-  resolution order is M9's problem. Best done after a real blitz duel has been played end to
-  end, so the comparison is against something known rather than imagined.
+  resolution order is M9's problem.
+  **Explicitly on hold, 2026-08-05: do not start this until real-time blitz is polished end to
+  end.** The comparison is only worth making against a finished thing, and there is real work
+  left on blitz. Note the consequence that has to be lived with meanwhile: the lobby already
+  offers `1v1 Duel: Turn-Based`, and picking it plays blitz — `DuelMatch.IsTurnBased` is read in
+  exactly one place, a log line. Either accept that or hide the modifier until M8 lands.
   *Accept: the same duel is playable under both models, chosen at duel start.*
 - **M9 — Turn-model tuning.** Revisit resolution order (§3.1b) now that both modes are
   playable and can be compared by feel rather than argument; per-round planning timer for
@@ -500,6 +504,17 @@ mechanic. Note `HittableEnemies` is **not** patchable — it has no acting-playe
   - **The bank covers the whole run, not just the duel.** The clock is therefore
     *run-scoped*, started at run start and surviving room transitions — not created when the
     duel begins. Built that way from the outset so M5's race phase needs no retrofit.
+  - **The race bank and the duel bank are two separate settings.** *Decided 2026-08-05, and
+    not yet implemented.* One shared number was wrong: playing a whole act needs far more time
+    than one duel does, so a single bank either rushes the race or makes the duel interminable.
+    A match is configured as, say, **a 10-minute race followed by a 2-minute duel**.
+    - Two modifier groups in the lobby, not one: `Race Clock: …` and `Duel Clock: …`.
+    - Mechanically the duel bank is a *fresh* bank granted at duel start, not a remainder — so
+      arriving at the arena early no longer buys you duel time. That reverses the old "time
+      spent racing is time you will not have in the duel" line above; the race clock now stands
+      on its own as a deadline to reach the arena, and the duel is timed independently.
+    - Reaching the arena late still costs you: the race clock is a hard deadline, and running it
+      out is still a loss.
   - **Race is a global countdown; the duel is a chess clock** (settled 2026-08-05 after
     playing both). During the race both clocks run continuously and never pause — reach the
     arena before the bank empties. Pausing per-player was tried and is meaningless there: the
@@ -508,7 +523,9 @@ mechanic. Note `HittableEnemies` is **not** patchable — it has no acting-playe
     stops your clock while theirs runs.
   - Host-authoritative in both phases. Sync carries a paused flag per clock so client-side
     prediction matches the owner rather than rubber-banding on each correction.
-  - Fischer increment still unimplemented (M7).
+  - **Fischer increment: deferred indefinitely, 2026-08-05.** Not merely unbuilt — it is not
+    clear it is the right call for this game, and separate race/duel banks may remove the need
+    it was meant to answer. Revisit only if play shows a problem it solves.
 - **Host advantage**: host resolves ~½ RTT faster. Options: accept it; input-delay
   equalization (delay host's own enqueues by measured RTT/2); alternate hosting across a
   match series. Defer; measure first.
@@ -523,8 +540,11 @@ mechanic. Note `HittableEnemies` is **not** patchable — it has no acting-playe
 - **Potions, powers that reference "monsters"**: audit pass in M2 for mechanics that
   hard-reference `MonsterModel` (e.g. on-kill effects, `ContainsMonster<T>`); most Creature-
   level mechanics are fine.
-- **HP carryover**: duel starts at race-end HP (racing risky = arrive hurt) or full heal?
-  Start with full heal for clean testing; knob later.
+- **HP carryover** — **DECIDED 2026-08-05: no heal. The duel starts at race-end HP.** Damage you
+  took from the Act 1 boss is damage you bring to the duel. This is what the code already does
+  (`DuelArena` never heals), so the decision closes the knob rather than opening work. It is also
+  what makes the race a real risk/reward: rushing the boss on low HP is a choice you pay for in
+  the fight that decides the match. No longer a knob.
 
 ## 10. Open investigations (I#) — do these inside their milestone
 

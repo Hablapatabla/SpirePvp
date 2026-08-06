@@ -98,6 +98,14 @@ public static class DuelResult
         DuelSession.CompleteDuel(localPlayerWon);
         Log.Warn($"[SpirePvp] duel over — local player {(localPlayerWon ? "WON" : "LOST")}");
 
+        // The match is decided, so the clocks stop for good. Without this they fell out of the
+        // duel's chess-clock rule the moment the phase left DuelActive, resumed under the race's
+        // "both simply run" rule, and the host went on broadcasting ClockSyncMessage twice a
+        // second at a peer that had already torn its run down — hundreds of "no message handlers
+        // are registered" errors on the client and "not connected" on the host. Stopping also
+        // freezes the final values, which is what you want to read off the result screen.
+        DuelClockService.Stop();
+
         // OnEnded writes the run history the screen reads; isVictory drives which banner
         // DuelResultBannerPatch then rewrites.
         SerializableRun run = RunManager.Instance.OnEnded(localPlayerWon);

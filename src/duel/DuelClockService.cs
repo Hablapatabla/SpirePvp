@@ -92,8 +92,16 @@ public static class DuelClockService
         _opponent?.Pause();
     }
 
+    /// <summary>
+    /// Back to inert. Clears the configured bank as well as the clocks, so a run that never
+    /// configures one — an ordinary co-op run started after a duel — cannot inherit the last
+    /// match's. `Enabled` staying true was enough on its own to keep the top bar showing a
+    /// clock and, on the host, to keep broadcasting ClockSyncMessage into a run that had no
+    /// idea what it was.
+    /// </summary>
     public static void Reset()
     {
+        ConfiguredMs = 0;
         _local = null;
         _opponent = null;
         _running = false;
@@ -232,44 +240,55 @@ public static class DuelClockService
             return;
         }
 
+        // DECK REVIEW — the duel phase has begun but the arena has not loaded. Confirming the
+        // review is the same commitment as ending a turn — you are done deciding and are waiting
+        // on them — so it stops your clock while theirs keeps running. Without this, confirming
+        // early bought you nothing and the review was a pure loss of time to whoever read faster.
+        //
+        // Checked *before* the combat state, not as its null case. An earlier version keyed this
+        // on `state == null` and never fired: finishing a combat does not exit its room —
+        // `ProceedFromTerminalRewardsScreen` just opens the map screen over it — so the boss
+        // combat's turn state is still hanging around while the review is on screen. That sent
+        // the review down the branch below, which read end-turn readiness off a combat that had
+        // already ended, found nobody ready, and dutifully ran both clocks forever.
+        if (DuelEntry.IsChoosing)
+        {
+            ApplyReadyState(_local, DuelEntry.LocalReady);
+
+            // The host owns both clocks, so it has to stop theirs too when they confirm —
+            // otherwise the player who reads faster is still charged for the wait.
+            ApplyReadyState(_opponent, DuelEntry.OpponentReady);
+            return;
+        }
+
         // DUEL — now a real chess clock, because now you *do* wait on each other. Ending your
         // turn stops your clock while your opponent's keeps running.
         CombatState? state = CombatManager.Instance.DebugOnlyGetState();
-        if (state == null)
+        if (state == null || !CombatManager.Instance.IsInProgress)
         {
-            // Deck review: duel phase has begun but the arena has not loaded, so there is no
-            // combat to read readiness from. Confirming the review is the same commitment as
-            // ending a turn — you are done deciding and are waiting on them — so it stops your
-            // clock while theirs keeps running. Without this, confirming early bought you
-            // nothing and the review was a pure loss of time to whoever read faster.
-            if (DuelEntry.IsChoosing)
-            {
-                if (DuelEntry.LocalReady)
-                {
-                    _local.Pause();
-                }
-                else
-                {
-                    _local.Start();
-                }
-
-                _opponent.Start();
-            }
-
+            // Between confirming the review and the arena finishing its load. Nothing live to
+            // read readiness from, so leave both clocks exactly as the review left them rather
+            // than restarting one for the length of a room transition.
             return;
         }
 
         foreach (Player player in state.Players)
         {
             DuelClock clock = LocalContext.IsMe(player) ? _local : _opponent;
-            if (CombatManager.Instance.IsPlayerReadyToEndTurn(player))
-            {
-                clock.Pause();
-            }
-            else
-            {
-                clock.Start();
-            }
+            ApplyReadyState(clock, CombatManager.Instance.IsPlayerReadyToEndTurn(player));
+        }
+    }
+
+    /// <summary>Declared done ⇒ clock stops; still deciding ⇒ clock runs.</summary>
+    private static void ApplyReadyState(DuelClock clock, bool isReady)
+    {
+        if (isReady)
+        {
+            clock.Pause();
+        }
+        else
+        {
+            clock.Start();
         }
     }
 
@@ -292,7 +311,10 @@ public static class DuelClockService
             return null;
         }
 
-        if (!DuelSession.IsDuelActive)
+        // Complete keeps the two-clock readout: the duel is over but its final times are the
+        // last thing worth showing, and dropping back to a single number on the result screen
+        // would silently relabel the winner's clock as a shared countdown.
+        if (DuelSession.Phase is not (DuelPhase.DuelActive or DuelPhase.Complete))
         {
             return Format(_local.RemainingMs);
         }
