@@ -40,13 +40,9 @@ public static class DuelMatch
     private static IEnumerable<ModifierModel> EffectiveModifiers(IRunState? runState) =>
         MaskedModifiers ?? runState?.Modifiers ?? (IEnumerable<ModifierModel>)Array.Empty<ModifierModel>();
 
-    /// <summary>
-    /// True when this run was configured as a PvP match. Safe to call at any time, including
-    /// during seeding, before RunManager has a State.
-    /// </summary>
-    public static bool IsPvpRun(IRunState? runState)
+    private static bool HasTurnModel(IEnumerable<ModifierModel> modifiers)
     {
-        foreach (ModifierModel modifier in EffectiveModifiers(runState))
+        foreach (ModifierModel modifier in modifiers)
         {
             if (modifier is DuelBlitz or DuelTurnBased)
             {
@@ -55,6 +51,23 @@ public static class DuelMatch
         }
         return false;
     }
+
+    /// <summary>
+    /// True when this run was configured as a PvP match. Safe to call at any time, including
+    /// during seeding, before RunManager has a State.
+    /// </summary>
+    public static bool IsPvpRun(IRunState? runState) => HasTurnModel(EffectiveModifiers(runState));
+
+    /// <summary>
+    /// The same question asked of what the run itself declares, ignoring <see cref="MaskedModifiers"/>.
+    ///
+    /// Only `DuelNeowOptionsPatch` should need this, and it needs it badly: it is the thing that
+    /// installs the mask, so it must decide from the list it is about to hide rather than from
+    /// one it — or a call still in flight — has already been told to pretend. Asking the masked
+    /// question there is circular, and answers about the wrong list.
+    /// </summary>
+    internal static bool IsPvpRunUnmasked(IRunState? runState) =>
+        HasTurnModel(runState?.Modifiers ?? (IEnumerable<ModifierModel>)Array.Empty<ModifierModel>());
 
     /// <summary>The agreed turn model; blitz unless the turn-based modifier is present.</summary>
     public static bool IsTurnBased(IRunState? runState)
@@ -70,15 +83,26 @@ public static class DuelMatch
     }
 
     /// <summary>
-    /// The agreed per-player time bank, in minutes. Zero means no clock, which is also the
-    /// answer when no clock modifier was picked — silently giving someone a timer they did not
-    /// agree to would be worse than giving them none.
+    /// The agreed per-player bank for reaching the arena, in minutes.
+    ///
+    /// Zero means no clock, which is also the answer when no clock modifier was picked —
+    /// silently giving someone a timer they did not agree to would be worse than giving them
+    /// none.
     /// </summary>
-    public static double ClockMinutes(IRunState? runState)
+    public static double RaceClockMinutes(IRunState? runState) => MinutesOf<RaceClockModifier>(runState);
+
+    /// <summary>
+    /// The agreed per-player bank for the duel, in minutes. Granted fresh when the duel begins
+    /// rather than carried over from the race (DESIGN §9), so the two are wholly independent:
+    /// a match is configured as, say, a 10-minute race followed by a 2-minute duel.
+    /// </summary>
+    public static double DuelClockMinutes(IRunState? runState) => MinutesOf<DuelClockModifier>(runState);
+
+    private static double MinutesOf<T>(IRunState? runState) where T : ClockModifierBase
     {
         foreach (ModifierModel modifier in EffectiveModifiers(runState))
         {
-            if (modifier is DuelClockModifier clock)
+            if (modifier is T clock)
             {
                 return clock.Minutes;
             }
@@ -128,13 +152,14 @@ public static class DuelMatch
     public static void OnRunCreated(RunState runState)
     {
         Log.Warn($"[SpirePvp] PvP match: turnModel={(IsTurnBased(runState) ? "turn-based" : "blitz")}, " +
-                 $"clock={ClockMinutes(runState)} min, seed '{runState.Rng.StringSeed}'");
+                 $"raceClock={RaceClockMinutes(runState)} min, duelClock={DuelClockMinutes(runState)} min, " +
+                 $"seed '{runState.Rng.StringSeed}'");
 
         DuelSession.ActivateRace();
         RaceCoordinator.BeginRace();
 
-        // Bank size only — the clocks cannot start yet, see OnRunLaunched.
-        DuelClockService.Configure(ClockMinutes(runState));
+        // Bank sizes only — the clocks cannot start yet, see OnRunLaunched.
+        DuelClockService.Configure(RaceClockMinutes(runState), DuelClockMinutes(runState));
 
         InstallArenaNode(runState);
     }
@@ -194,11 +219,11 @@ public static class DuelMatch
         DuelEntry.Arm();
         RaceProgress.Reset();
         RaceProgress.Arm();
-        DuelFlag.Arm();
 
-        // The bank covers the whole run, not just the duel (DESIGN §9). During the race both
-        // clocks simply run down — the players act continuously and simultaneously — and only
-        // in the duel does it become a true chess clock that pauses on end turn. Ticking rides
+        // Started at run creation because the *race* bank is already counting (DESIGN §9): it
+        // is the deadline for reaching the arena. During the race both clocks simply run down —
+        // the players act continuously and simultaneously — and only in the duel does it become
+        // a true chess clock that pauses on end turn, on a fresh bank of its own. Ticking rides
         // the vanilla run timer, which is alive for the whole run.
         Player? me = LocalContext.GetMe(runState.Players);
         Player? opponent = null;
@@ -219,5 +244,12 @@ public static class DuelMatch
         {
             Log.Error($"[SpirePvp] clock configured but not started: me={me?.NetId}, opponent={opponent?.NetId}");
         }
+
+        // **After the clocks exist**, and load-bearing: `DuelFlag.Arm` subscribes to their
+        // `Flagged` events, and there is no second arming pass. Armed before Start, it found
+        // both clocks null, subscribed to nothing, and set `_armed` anyway — so the banks ran
+        // to zero and no one ever lost on time. That is the same shape of failure as arming a
+        // message handler too late: nothing throws, the feature is simply absent.
+        DuelFlag.Arm();
     }
 }

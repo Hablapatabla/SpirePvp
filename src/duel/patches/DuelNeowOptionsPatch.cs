@@ -1,5 +1,6 @@
 using System.Reflection;
 using HarmonyLib;
+using MegaCrit.Sts2.Core.Logging;
 using MegaCrit.Sts2.Core.Models;
 using MegaCrit.Sts2.Core.Models.Events;
 using MegaCrit.Sts2.Core.Runs;
@@ -28,6 +29,15 @@ namespace SpirePvp.Duel.Patches;
 ///
 /// Deliberately conditional: a run mixing duel modifiers with real ones (say Draft) keeps
 /// vanilla's behaviour, because those genuinely do have Neow options worth offering.
+///
+/// **The guard reads the run's declared modifiers, never the masked view.** `DuelMatch.IsPvpRun`
+/// answers from `MaskedModifiers ?? runState.Modifiers`, and this patch is what sets the mask —
+/// so asking it here is circular. Concretely: if a mask is ever in place when this runs, the
+/// list this patch would blank is already `Array.Empty`, so it would park *that* in
+/// `MaskedModifiers` and every `IsPvpRun` from then on answers "not a PvP run" — including the
+/// next player's Neow, which then falls into vanilla's modifier branch and offers nothing at
+/// all. Every bail-out below therefore names itself in the log, because an empty option list is
+/// indistinguishable in game from Neow being skipped.
 /// </summary>
 [HarmonyPatch(typeof(Neow), "GenerateInitialOptions")]
 public static class DuelNeowOptionsPatch
@@ -39,9 +49,38 @@ public static class DuelNeowOptionsPatch
     {
         __state = null;
 
+        // Each guard below is a silent opt-out, and an opt-out here is indistinguishable in game
+        // from Neow being skipped entirely — so each one says which it was. This is a per-player
+        // event, so expect one line per player, per run.
         RunState? runState = __instance.Owner?.RunState as RunState;
-        if (runState == null || _modifiersField == null || !DuelMatch.IsPvpRun(runState))
+        if (runState == null)
         {
+            Log.Error($"[SpirePvp] Neow: owner has no RunState ({__instance.Owner?.RunState?.GetType().Name ?? "null"}); " +
+                      "leaving vanilla's modifier branch alone.");
+            return;
+        }
+
+        if (_modifiersField == null)
+        {
+            Log.Error("[SpirePvp] Neow: RunState.<Modifiers>k__BackingField did not resolve — " +
+                      "Modifiers is no longer an auto-property. Neow will offer nothing.");
+            return;
+        }
+
+        // Ask what the run *declares*, not what it is currently pretending. Using the masked
+        // answer here is circular: this patch is what installs the mask.
+        if (!DuelMatch.IsPvpRunUnmasked(runState))
+        {
+            return;
+        }
+
+        // A mask already in place means either a call still in flight or one that leaked. Either
+        // way, overwriting it with the list we are about to blank would park an *empty* list in
+        // MaskedModifiers, and every IsPvpRun after that answers "not a PvP run".
+        if (DuelMatch.MaskedModifiers != null)
+        {
+            Log.Error("[SpirePvp] Neow: modifiers are already masked on entry — a previous " +
+                      "GenerateInitialOptions did not restore them. Skipping to avoid masking an empty list.");
             return;
         }
 
@@ -50,11 +89,14 @@ public static class DuelNeowOptionsPatch
         {
             if (modifier is not DuelModifierBase)
             {
+                Log.Warn($"[SpirePvp] Neow: run carries a non-duel modifier ({modifier.GetType().Name}); " +
+                         "leaving vanilla's modifier branch alone, as designed.");
                 return;
             }
         }
 
         __state = runState.Modifiers;
+        Log.Warn($"[SpirePvp] Neow: hiding {__state.Count} duel modifier(s) so vanilla rolls its blessings.");
         _modifiersField.SetValue(runState, Array.Empty<ModifierModel>());
 
         // The lie is for vanilla only. Without this the mod's own IsPvpRun goes false for the
@@ -75,6 +117,13 @@ public static class DuelNeowOptionsPatch
         if (__instance.Owner?.RunState is RunState runState)
         {
             _modifiersField.SetValue(runState, __state);
+        }
+        else
+        {
+            // Nothing to restore them onto. The run is now carrying an empty modifier list: not a
+            // PvP match any more as far as every downstream reader is concerned, and silently so.
+            Log.Error("[SpirePvp] Neow: could not restore the duel modifiers — the event's owner " +
+                      "lost its RunState. This run is no longer a PvP match; abandon it.");
         }
     }
 }
