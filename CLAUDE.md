@@ -30,7 +30,7 @@ side comparison before suspecting the mechanic. DESIGN §7 has the symptom → c
 - `dotnet build` must stay green; it auto-installs the mod into the local game.
 - **Never use `Harmony.PatchAll`.** It throws on the first bad target and silently abandons the
   rest. `SpirePvpInit` patches per class and logs a count — confirm `N patch classes applied
-  cleanly` in the log on every launch, or in-game results are meaningless. **40 as of
+  cleanly` in the log on every launch, or in-game results are meaningless. **44 as of
   2026-08-06.**
 - **Read the logs yourself** (`logs/host.log`, `logs/client.log`) rather than asking for
   symptoms, and check the log's timestamp against the installed DLL — a stale log is

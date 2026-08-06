@@ -4,7 +4,7 @@
 
 ## Status
 
-**The full loop works** (playtested 2026-08-06, two local clients): lobby modifiers → race Act 1 → arena node → rendezvous → deck review → duel → result screen, with desync detection live. No blocking issues. The clock is two banks — a race deadline and a fresh duel bank. A match can also end by **resignation** (abandoning is a loss and a win for the opponent) or by **agreed draw**. M6's remaining work is rematch, plus playtesting the result-screen stats and badges. See `docs/HANDOFF.md`.
+**The full loop works** (playtested 2026-08-06, two local clients): lobby modifiers → race Act 1 → arena node → rendezvous → deck review → duel → result screen, with desync detection live. No blocking issues. The clock is two banks — a race deadline and a fresh duel bank. A match can also end by **resignation** (abandoning is a loss and a win for the opponent) or by **agreed draw**. The result screen shows the match's own statistics and badges, compared against your opponent rather than scored as a run. M6's remaining work is rematch. See `docs/HANDOFF.md` for what is built but not yet playtested.
 
 ## Agent handover prompt
 
@@ -30,7 +30,8 @@ Paste this to start a fresh agent session on this project.
 > * **Ask the condition you mean, not one that merely correlates** — and when you fix a wrong predicate, grep for it. A phase test standing in for "has the duel bank been granted" was fixed in one file and left standing in another, where it decided a match result rather than a label.
 > * **"It only logs an error" is a claim worth measuring.** The arena's missing room icon was recorded as one line per run; it was 19 per client per session, because `AssetCache` never caches a failed load and every repaint retried it. Count the lines, and check whether the failure is cached.
 > * Mod state is static; the run it belongs to is not. Anything surviving a run must be released in `DuelMatch.OnRunEnded`, or the next match silently fails to re-register it.
-> * `RunManager.EnterRoom` is the *last step* of entering a room, not the whole thing. `DuelArena.EnterRoom` mirrors `EnterMapPointInternal` step for step — keep the two in sync.
+> * `RunManager.EnterRoom` is the *last step* of entering a room, not the whole thing. `DuelArena` mirrors `EnterMapPointInternal` step for step — **keep the two in sync**. Six omissions found so far, each failing differently and none loudly; the two most recent were the map coord (which left the clients at different `RunLocation`s, so the host's arbitration messages were buffered forever and the client froze mid-turn while the host played on) and the map-point-history entry (which made an elite killed en route count as zero and become the reported cause of death).
+> * **A message the peer needs must be sent, not looked up.** The race decouples the two runs, so your copy of the opponent's `Player`, `MapPointHistory` and deck all stop updating — the pre-combat state sync only fixes it at arena entry, which is *after* the deck review. Anything read about the opponent before that point is stale and will look plausible.
 > * Loc filenames are load-bearing: `LocManager` merges a mod's tables only into tables vanilla already has, **by filename**. A new `spirepvp.json` would never be read. New strings must ride in an existing vanilla table.
 > * Never kill the user's running game processes; the launch scripts stop instances themselves.
 > * The recurring root cause of the whole race phase: the engine assumes the party is co-located, and each assumption fails differently — a hang, a silent freeze, a crash. Its content-level twin: the engine reads `Players.Count > 1` as "co-op", so a PvP run gets offered co-op-only cards and relics.

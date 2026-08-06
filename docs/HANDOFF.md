@@ -1,4 +1,4 @@
-# Handoff — state of the mod as of 2026-08-06 (evening)
+# Handoff — state of the mod as of 2026-08-06 (late evening, handed Mac → Windows)
 
 Written for someone (human or agent) picking this up cold, on any OS. Everything below was
 built and playtested against **Slay the Spire 2 v0.110.1**, on two local clients connected
@@ -20,7 +20,7 @@ flags, console commands and gotchas below are OS-neutral unless marked.
 | **M3** chess clock | **done**, playtested |
 | **M4** information rules | **done**, playtested |
 | **M5** race phase | **working, playtested 2026-08-05.** Two clients race the same seeded map independently — own combats, own rewards, advancing at their own pace — with mirrored RNG and a run-long clock |
-| **M6** full loop | **working, playtested 2026-08-06.** Lobby modifiers → race → arena node → rendezvous → deck review → duel → result screen, with checksums live, split race/duel clocks and Neow intact. Plus resignation and agreed draws. Result-screen stats and badges are **built but unplaytested**. Remaining: rematch |
+| **M6** full loop | **working, playtested 2026-08-06.** Lobby modifiers → race → arena node → rendezvous → deck review → duel → result screen, with checksums live, split race/duel clocks and Neow intact. Plus resignation and agreed draws. Result-screen stats and badges **reach the screen and compare correctly**; six fixes on top of them are **built and unplaytested** — see "Immediate next step". Remaining: rematch |
 | M7 polish | **next milestone: a dedicated Duel host menu** (below) |
 
 A duel is fully playable end to end today: enter the arena, fight with real cards and
@@ -109,6 +109,71 @@ clocks for a duel nobody played. It was fixed there to ask whether the duel bank
 granted. **The same test survived in `DuelFlag`**, in the branch that decides whether an expiry
 is a draw or a loss — the identical trap, one file over, deciding a result rather than a label.
 Both now ask `DuelClockService.DuelBankGranted`. When you fix a wrong predicate, grep for it.
+
+**The duel needs both clients at the same `RunLocation`, and nothing was establishing that.**
+FOUND AND FIXED 2026-08-06, unplaytested at time of writing. Symptom: **the host plays the duel
+normally while the client is frozen — cards hang in mid-air, the end-turn button clicks but the
+turn never ends.**
+
+Every `ActionEnqueuedMessage` is an `IRunLocationTargetedMessage` tagged with the sender's
+location, and `RunLocationTargetedMessageBuffer` holds any message for a location the receiver has
+never visited. The duel is host-arbitrated: the client *requests* a play and the host broadcasts
+the ordering. Two different locations therefore buffer every arbitration message bound for the
+client, forever — while the host, which arbitrates for itself, notices nothing. Measured: 28 stuck
+messages, host at `coord (1, 12) room 1`, client at `coord (3, 0) room 1`.
+
+The arena is a real map node, but nothing ever travelled to it: `DuelRendezvous` deliberately does
+not enter the node on click — it announces arrival and waits, which is what makes it a rendezvous.
+So each client entered the arena room while still standing wherever it happened to be. **It
+survived every previous playtest because both players had walked to the Act 1 boss, and all paths
+converge there** — so the coords matched by accident. `travel` breaks the accident instantly,
+which is why a dev shortcut exposed what months of real play did not.
+
+The trap, again: *"both players walked to the boss" is a correlate; the condition is "both clients
+are at the same RunLocation."* `DuelArena.MoveRunToArenaCoord` now moves both to the arena's own
+coord — the one coord they agree on by definition. Note it runs **before the `CombatRoom` is
+constructed**: `RunLocation` is (coord, room id), `AbstractRoom` takes its Id from `NextRoomId` in
+its constructor, and `AddVisitedMapCoord` is what resets that counter — do it afterwards and you
+fix half of `RunLocation` and leave the other half divergent.
+
+**Read that error rather than scrolling past it.** `RunLocationTargetedMessageBuffer` logs `there
+are still N messages for other locations` on every transition, and the per-message `enqueueing it
+because we are currently at location ...` lines name both locations outright. It is noisy and
+harmless during the race — that traffic is the opponent's own race actions, which
+`RaceIgnoreRemoteActionsPatch` discards — so it reads as background. Once the phase flips to the
+duel it is a hard failure. DESIGN §I3 predicted exactly this signal and called it "useful signal
+during the spike".
+
+**The result screen reads a *run*, and a duel is not one.** Three separate places had to be told
+so, all found in one playtest on 2026-08-06 and all fixed:
+
+- **The death line named the wrong killer.** A duel loss read *"The Silent was absorbed by a
+  Skulking Colony"* — an elite from the race, already beaten. `DuelResultBannerPatch` was setting
+  `_deathQuote.Text`, but `InitializeBannerAndQuote` also stashes `_encounterQuote`, and
+  `AnimateInQuote` fades our text out a second later and writes that one in its place. Set both.
+- **A win still reported damage to the Architect** (`_victoryDamageLabel`, from `StatsManager` and
+  the run score) — a boss the run never fought. Blanked.
+- **Elites defeated read 0 after killing an elite**, and the run-history breakdown named that
+  elite as the cause of death. Both because `DuelArena` never called `AppendToMapPointHistory`, so
+  the last room the run recorded was the last room of the *race* — and
+  `ScoreUtility.GetElitesKilledCount` subtracts the final room when it is an elite, on the
+  assumption that is what killed you. Now recorded, like every other room.
+
+**No BBCode in score lines.** `[gold]…[/gold]` was drawn literally, tags and all, across every
+result line: `NScoreLine` puts its text in a `MegaLabel`, which is a plain Godot `Label`. The
+other labels on that same screen — `_deathQuote`, `_victoryDamageLabel` — are `MegaRichTextLabel`
+and *do* take markup, which is exactly what makes it easy to get wrong.
+
+**The opponent's decklist on the entry screen was stale, and stale is worse than absent.** It
+showed their deck as of the *start* of the race, missing every card they had picked up — cards
+they then played in the duel, in front of you, having never appeared in the reveal. The race
+decouples the two runs, so your copy of their `Player` stops updating; the pre-combat state sync
+does fix it, but that runs on arena entry, **after** the deck review. The decklist reveal is a
+core information rule (DESIGN §1), so a quietly wrong one undermines the thing it exists for.
+`DuelArrivedMessage` now carries the sender's deck as `List<SerializableCard>`, and
+`DuelRendezvous` rebuilds it with `CardModel.FromSerializable`. Carried on *arrival* rather than
+in a message of its own precisely so the ordering is free — the review opens once both arrivals
+are in hand, so the deck is always there, with no second handler to arm and no race to lose.
 
 **Mod state is static; the run it belongs to is not.** Every `_armed` flag, the clocks and
 `DuelSession` all outlive a run, while the net service they were bound to is disposed with it.
@@ -389,27 +454,54 @@ Keep that split if you extend this.
 
 ## Immediate next step
 
-### First: the result screen is built but UNPLAYTESTED
+### First: re-run the result-screen playtest
 
-Everything else in this handoff has been played. The duel **statistics** and **badges** have
-not — they compile, the `.pck` is exported and verified to contain their loc tables, and no
-part of them has been seen on screen. Do this before building anything on top.
+**Run 1 (2026-08-06) froze the client in the duel** — the arena `RunLocation` bug above. Fixed;
+**run 2 played end to end and the screen came up**, which is what found everything below.
 
-**One deliberately lopsided duel proves all of it.** `Race Clock: 10` · `Duel Clock: 3`. Send
-one player on a detour for an elite and gold while the other goes more or less straight to the
-arena; in the duel, have one spam cheap cards and the other play as few as possible, then finish
-with `damage 200 1`. The asymmetry is the test — identical play would hide the bugs.
+Confirmed working in run 2, from both logs: same arena coord on both clients, zero buffered
+messages after `duel arena ready`, `stats sent:` and `stats received from` on both sides, badges
+awarded on both (3 to the winner, 1 to the loser), the six comparison lines present and
+correctly mirrored between the two screens.
 
-| Check | Failure means |
+**Five fixes went in after that run and none of them are playtested:**
+
+| Fix | Watch for |
 |---|---|
-| Six comparison lines, each `yours · theirs` | — |
-| The two columns **disagree**, and match what you actually did | If each player sees their own totals *doubled*, the local-player filter in `DuelStatsTrackingPatch` is wrong. Every client executes every player's actions, so that filter is the whole reason the numbers are per-player |
-| No `—` in the opponent column | Their `DuelStatsMessage` lost the race with the screen. Should not happen over local ENet; it is the one timing dependency here. Log will say `opponent stats had not arrived` |
-| Badges appear, winner gets more | — |
-| No Architect text, no `+42` score lines | — |
+| Score-line `[gold]` tags drawn literally | Six clean lines, no visible markup |
+| Duel loss named a race elite as the killer | "Your opponent won the duel." *stays* — it is overwritten a second after the screen opens if this regressed |
+| Duel win reported damage to the Architect | No Architect line at all |
+| Elites defeated read 0 after killing one | Kill an elite on the way; it counts, and the breakdown does not call it your cause of death |
+| Opponent decklist was stale on the entry screen | Take a card from an elite on the client; **it is in the deck the host sees** |
 
-Log lines that settle it: `stats sent:` and `stats received from` on **both** clients, and
-`duel badges: N awarded`.
+That last one is the important one. `arena: opponent N arrived with M cards` should appear on both
+logs with M matching the deck they actually have, and `duel entry — opponent deck: M cards
+(reported on arrival)` — if it says `(local copy)` the message did not arrive and you are looking
+at the stale deck again.
+
+Still worth checking, because run 2 could not reach them: `Elites defeated` non-zero on **one**
+side only, and an `Elite Hunter` badge going to that player alone.
+
+**One deliberately lopsided duel proves all of it.** `Race Clock: 10` · `Duel Clock: 3`. Send one
+player on a **detour to fight an elite** — genuinely fight it, not `kill`, and take the card
+reward, since that one detour is what exercises the elite count, the deck reveal and two badges —
+while the other goes more or less straight to the arena. In the duel, have one spam cheap cards
+and the other play as few as possible, then finish with `damage 200 1`. The asymmetry is the test;
+identical play would hide all of it.
+
+**Reach the arena from two different map coords** — one player walking, the other jumping with
+`travel`. Matching coords is what hid the freeze for months, so a test where both walk to the boss
+is not testing the fix.
+
+Log lines that settle it: `duel: run moved to arena coord` with the **same coord on both**, no
+`enqueueing it because we are currently at location` after `duel arena ready`, `arena: opponent N
+arrived with M cards` on both, `duel entry — opponent deck: M cards (reported on arrival)`,
+`stats sent:` / `stats received from` on both, and `duel badges: N awarded`.
+
+Two smaller fixes rode along and were not specifically exercised: the damage tracker now asks
+`DuelLayout.BelongsToOpponent` instead of `target.Player`, so damage to your *own* pet no longer
+counts as offence (needs a character with a summon to show), and `DuelResultLinesPatch` now clears
+`_scoreLines` the way vanilla's `AnimateScoreLines` does.
 
 Two known judgement calls, neither a bug, both worth a second opinion after seeing them:
 

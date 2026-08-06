@@ -694,6 +694,16 @@ mechanic. Note `HittableEnemies` is **not** patchable — it has no acting-playe
   Open questions the playtest must answer, in order:
   - Does `RunLocationTargetedMessageBuffer` stay transient as predicted, or does
     `OnLocationChanged` start logging its "still buffered" error?
+    **ANSWERED 2026-08-06, and the answer is the second one.** It logs the error, routinely,
+    and during the race that is harmless — the held traffic is the opponent's own race actions,
+    which `RaceIgnoreRemoteActionsPatch` discards anyway. The real finding is what happens at
+    the *end* of the race: the two clients entered the duel arena at their own map coords, so
+    the buffer went on holding every host `ActionEnqueuedMessage` through the duel and froze the
+    client mid-turn. Fixed by `DuelArena.MoveRunToArenaCoord`, which moves both runs to the
+    arena node's coord before the room is built. Full write-up in HANDOFF. The research note
+    below — "in a race over a shared map both players visit the same coords, so buffering should
+    be transient" — is true of the race and **false of the arena**, which nothing was travelling
+    to.
   - Does anything else read the remote player's state during the race and get stale data?
   - Does the duel still start correctly *after* a divergent race — i.e. does
     `CombatStateSynchronizer` genuinely reconcile the two runs on duel entry, as §4 bets?
