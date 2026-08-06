@@ -20,7 +20,7 @@ flags, console commands and gotchas below are OS-neutral unless marked.
 | **M3** chess clock | **done**, playtested |
 | **M4** information rules | **done**, playtested |
 | **M5** race phase | **working, playtested 2026-08-05.** Two clients race the same seeded map independently — own combats, own rewards, advancing at their own pace — with mirrored RNG and a run-long clock |
-| **M6** full loop | **working, playtested 2026-08-06.** Lobby modifiers → race → arena node → rendezvous → deck review → duel → result screen, with checksums live, split race/duel clocks and Neow intact. Plus resignation and agreed draws. Remaining: rematch, and duel stats on the result screen |
+| **M6** full loop | **working, playtested 2026-08-06.** Lobby modifiers → race → arena node → rendezvous → deck review → duel → result screen, with checksums live, split race/duel clocks and Neow intact. Plus resignation and agreed draws. Result-screen stats and badges are **built but unplaytested**. Remaining: rematch |
 | M7 polish | **next milestone: a dedicated Duel host menu** (below) |
 
 A duel is fully playable end to end today: enter the arena, fight with real cards and
@@ -77,7 +77,7 @@ abandons the rest, so one typo disables an arbitrary subset while the mod still 
 still logs "loaded". `SpirePvpInit` therefore applies each patch class independently and logs
 a count. **On every launch, confirm the log says `N patch classes applied cleanly`** — if it
 says `PATCH FAILED`, some of the mod is not running and in-game results mean nothing.
-**40 as of this handoff.**
+**44 as of this handoff.**
 
 **Harmony resolves `[HarmonyPatch(typeof(X))]` against methods declared on `X` only.** Naming
 an inherited method throws "Undefined target method". This caused the above.
@@ -353,6 +353,8 @@ just stale.
 | `DuelClockService` / `DuelClock` | Chess clocks. Wall-clock based, run-scoped by design. |
 | `DuelFlag` | Losing on time, and the receive side of every match result. Host-authoritative. |
 | `DuelResult` | Ends the match on a victory/defeat/draw screen. |
+| `DuelStats` | Counts the duel, reconstructs the race half, and exchanges both with the peer. |
+| `DuelBadges` | Which badges a match earned, decided by comparing the two players. |
 | `DuelEndReason` | The `reason` codes on `DuelResultMessage`. **A wire format** — the host writes one and every client switches on it. |
 | `DuelResign` | Resigning, and offering/answering a draw. |
 | `DuelDrawPrompt` | The draw popups, built on vanilla's `NGenericPopup`. |
@@ -387,7 +389,41 @@ Keep that split if you extend this.
 
 ## Immediate next step
 
-**The next milestone is M7's dedicated Duel host menu** (decided 2026-08-06). Today a match is
+### First: the result screen is built but UNPLAYTESTED
+
+Everything else in this handoff has been played. The duel **statistics** and **badges** have
+not — they compile, the `.pck` is exported and verified to contain their loc tables, and no
+part of them has been seen on screen. Do this before building anything on top.
+
+**One deliberately lopsided duel proves all of it.** `Race Clock: 10` · `Duel Clock: 3`. Send
+one player on a detour for an elite and gold while the other goes more or less straight to the
+arena; in the duel, have one spam cheap cards and the other play as few as possible, then finish
+with `damage 200 1`. The asymmetry is the test — identical play would hide the bugs.
+
+| Check | Failure means |
+|---|---|
+| Six comparison lines, each `yours · theirs` | — |
+| The two columns **disagree**, and match what you actually did | If each player sees their own totals *doubled*, the local-player filter in `DuelStatsTrackingPatch` is wrong. Every client executes every player's actions, so that filter is the whole reason the numbers are per-player |
+| No `—` in the opponent column | Their `DuelStatsMessage` lost the race with the screen. Should not happen over local ENet; it is the one timing dependency here. Log will say `opponent stats had not arrived` |
+| Badges appear, winner gets more | — |
+| No Architect text, no `+42` score lines | — |
+
+Log lines that settle it: `stats sent:` and `stats received from` on **both** clients, and
+`duel badges: N awarded`.
+
+Two known judgement calls, neither a bug, both worth a second opinion after seeing them:
+
+- **Cards played counts auto-plays.** Hellraiser-style effects inflate it, which makes
+  "Efficient" losable through no real choice. Left counting everything because the right answer
+  depends on how the number actually looks; `CardPlay.IsAutoPlay` is the filter if it reads
+  badly.
+- **Badge icons are borrowed vanilla art**, mapped by meaning (`damage_leader` → Aggressor,
+  `perfect` → Flawless). They will look like real badges and be recognisable as other badges.
+  `DuelBadgeIconPatch` is the one-line-per-badge seam when real art exists.
+
+---
+
+**Then: M7's dedicated Duel host menu** (decided 2026-08-06). Today a match is
 configured by knowing to pick a *Custom* run and tick three modifiers, which is both buried and
 a poor fit — the modifier list is a flat set of tickboxes for something that is really two or
 three coupled choices. The wanted shape is a third entry beside **host normal** and **host

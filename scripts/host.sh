@@ -44,7 +44,14 @@ if [ "$no_build" -eq 0 ]; then
     fi
 
     echo "Building..."
-    dotnet build "$SCRIPT_DIR/../SpirePvp.csproj" --nologo -v minimal
+    # Abort rather than launch, matching host.ps1. Launching after a failed build starts the
+    # game against the *previous* DLL, which looks exactly like a working build whose patches
+    # mysteriously stopped applying — the most expensive kind of wrong signal this project
+    # produces, and the reason HANDOFF says to check the log's timestamp against the DLL.
+    if ! dotnet build "$SCRIPT_DIR/../SpirePvp.csproj" --nologo -v minimal; then
+        echo "Build failed — not launching." >&2
+        exit 1
+    fi
 
     # Godot assets (the modifier names, the map node art) live in the .pck, which dotnet does
     # not produce. Re-export when anything under SpirePvp/ is newer than the installed pack —
