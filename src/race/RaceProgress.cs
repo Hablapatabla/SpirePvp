@@ -32,9 +32,29 @@ public static class RaceProgress
     /// <summary>The opponent's last known node, or null before they have moved.</summary>
     public static MapCoord? OpponentCoord => _opponentCoord;
 
+    /// <summary>
+    /// The opponent's last reported HP and deck size.
+    ///
+    /// These arrive on every `RaceProgressMessage` and were previously read straight into a log
+    /// line and dropped. Retaining them is the whole of what `RaceProgressHud` needed from the
+    /// network — the message has carried them since M5, so the HUD costs no new traffic and no
+    /// change to a wire format whose ids are positional.
+    /// </summary>
+    public static int OpponentCurrentHp { get; private set; }
+
+    public static int OpponentMaxHp { get; private set; }
+
+    public static int OpponentDeckSize { get; private set; }
+
+    /// <summary>False until the opponent's first move, when there is nothing to report yet.</summary>
+    public static bool HasOpponentReport => OpponentMaxHp > 0;
+
     public static void Reset()
     {
         _opponentCoord = null;
+        OpponentCurrentHp = 0;
+        OpponentMaxHp = 0;
+        OpponentDeckSize = 0;
     }
 
     /// <summary>
@@ -101,6 +121,10 @@ public static class RaceProgress
         MapCoord now = new MapCoord(message.mapCol, message.mapRow);
         _opponentCoord = now;
 
+        OpponentCurrentHp = message.currentHp;
+        OpponentMaxHp = message.maxHp;
+        OpponentDeckSize = message.deckSize;
+
         // Passing the previous coord is what clears the old portrait; without it they would
         // accumulate a trail of markers down the map.
         NMapScreen.Instance?.OnPlayerVoteChangedInternal(
@@ -110,5 +134,7 @@ public static class RaceProgress
 
         Log.Info($"[SpirePvp] race: opponent {senderId} now at {now} " +
                  $"({message.currentHp}/{message.maxHp} hp, {message.deckSize} cards)");
+
+        RaceProgressHud.Refresh();
     }
 }

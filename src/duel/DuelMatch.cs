@@ -141,6 +141,7 @@ public static class DuelMatch
         DuelResult.Disarm();
         DuelResign.Disarm();
         RaceProgress.Disarm();
+        RaceProgressHud.Clear();
         MaskedModifiers = null;
     }
 
