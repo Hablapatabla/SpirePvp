@@ -5,6 +5,7 @@ using MegaCrit.Sts2.Core.Entities.Creatures;
 using MegaCrit.Sts2.Core.Entities.Players;
 using MegaCrit.Sts2.Core.Helpers;
 using MegaCrit.Sts2.Core.Logging;
+using MegaCrit.Sts2.Core.Map;
 using MegaCrit.Sts2.Core.Models;
 using MegaCrit.Sts2.Core.Multiplayer.Game;
 using MegaCrit.Sts2.Core.Rooms;
@@ -38,6 +39,12 @@ public static class DuelArena
             return false;
         }
 
+        // Before the room is constructed. See the note on MoveRunToArenaCoord: the room takes its
+        // Id from NextRoomId in its constructor, and moving to the coord is what resets that
+        // counter, so doing this afterwards would fix half of RunLocation and leave the other
+        // half divergent.
+        MoveRunToArenaCoord(runState);
+
         EncounterModel encounter = (EncounterModel)ModelDb.Encounter<DuelEncounter>().ToMutable();
         CombatRoom room = new CombatRoom(encounter, runState);
 
@@ -47,6 +54,98 @@ public static class DuelArena
 
         Log.Warn("[SpirePvp] entering duel arena");
         return true;
+    }
+
+    /// <summary>
+    /// Moves the run onto the arena's own map coord, so both clients duel at the same
+    /// <c>RunLocation</c>.
+    ///
+    /// **This is not bookkeeping — it decides whether the client can play at all.** Every
+    /// `ActionEnqueuedMessage` is an `IRunLocationTargetedMessage`, tagged with the sender's
+    /// location, and `RunLocationTargetedMessageBuffer` holds any message addressed to a location
+    /// the receiver has never visited. The duel is host-arbitrated: the client requests a play,
+    /// the host orders it and broadcasts the enqueue. If the two runs sit at different locations,
+    /// every one of those broadcasts is buffered instead of delivered, so the client's cards hang
+    /// in mid-air and its end turn does nothing — while the host, which arbitrates for itself,
+    /// plays on perfectly normally. Measured 2026-08-06: 28 messages stuck in the buffer, host at
+    /// `coord (1, 12) room 1` and client at `coord (3, 0) room 1`.
+    ///
+    /// The arena is a real map node — the act's second boss — but nothing was ever travelling to
+    /// it. `DuelRendezvous` deliberately does not enter the node on click: it announces arrival
+    /// and waits, which is what makes the arena a rendezvous rather than a room. So each client
+    /// entered the arena room while still standing wherever it happened to be.
+    ///
+    /// That went unnoticed through every previous playtest because both players had *walked* to
+    /// the Act 1 boss, and all paths converge there — so both were at the boss's coord and the
+    /// locations matched by accident. It reproduces the moment they do not, which `travel` makes
+    /// trivial. **"Both players walked to the boss" is a correlate; the condition is "both clients
+    /// are at the same RunLocation."** Moving both to the arena coord — the one coord they agree
+    /// on by definition — establishes that condition outright, wherever either was standing.
+    ///
+    /// `RunLocation` is (map coord, room id) and both halves are settled here.
+    /// `AddVisitedMapCoord` makes the arena the current coord (`CurrentMapCoord` is simply the
+    /// last visited) *and* resets `NextRoomId` to 0, which is what makes the room ids agree too —
+    /// hence the call site above, before the `CombatRoom` is constructed and takes its Id.
+    /// Adding to the visited set also releases anything the buffer was holding for this location.
+    /// </summary>
+    private static void MoveRunToArenaCoord(RunState runState)
+    {
+        MapPoint? arena = runState.Map?.SecondBossMapPoint;
+        if (arena == null)
+        {
+            // The legacy `duel on` / `duel start` path can run in a plain co-op run that never
+            // had an arena node installed. There the party is co-located anyway, which is the
+            // property this method exists to guarantee.
+            Log.Info("[SpirePvp] duel: no arena node on this map — leaving the run where it is");
+            return;
+        }
+
+        if (!runState.AddVisitedMapCoord(arena.coord))
+        {
+            // Already visited, so NextRoomId was not reset and the room ids may not line up.
+            // Worth a line rather than silence: this is exactly the shape of the bug above.
+            Log.Warn($"[SpirePvp] duel: arena coord {arena.coord} was already visited — room ids " +
+                     "may differ between clients");
+            return;
+        }
+
+        Log.Warn($"[SpirePvp] duel: run moved to arena coord {arena.coord} " +
+                 "(both clients converge here, so host arbitration reaches the client)");
+    }
+
+    /// <summary>
+    /// Records the arena as a room the player actually entered.
+    ///
+    /// `EnterMapPointInternal` calls `AppendToMapPointHistory` between pausing the executor and
+    /// entering the room; the arena never did, so as far as the run was concerned the last place
+    /// anybody went was the final room of the *race*. Three things read that history and all three
+    /// were wrong:
+    ///
+    /// - **Elites defeated showed 0 after beating an elite.** `ScoreUtility.GetElitesKilledCount`
+    ///   counts elite rooms and then subtracts one if the *last* room in the history is an elite —
+    ///   vanilla's way of saying "you died in that one, so you did not kill it". Fight an elite on
+    ///   the way to the arena and it was always the last room recorded, so the kill cancelled
+    ///   itself out.
+    /// - **The run-history breakdown named the elite as the cause of death**, for the same reason:
+    ///   the last room recorded is where the run looks like it ended.
+    /// - The duel never appeared in run history at all, so a match left no trace of the room it
+    ///   was actually decided in.
+    ///
+    /// This is the same omission as the map coord above and it comes from the same place: the
+    /// arena is the one room this mod enters that was not reached through a map point, so every
+    /// step the map path performs has to be spelled out.
+    /// </summary>
+    private static void RecordArenaInMapPointHistory(RunState? runState, CombatRoom room)
+    {
+        if (runState == null)
+        {
+            return;
+        }
+
+        // The arena node's own type when there is one; Boss is what DuelEncounter.RoomType has to
+        // be anyway, since SetSecondBossEncounter rejects anything else.
+        MapPointType pointType = runState.Map?.SecondBossMapPoint?.PointType ?? MapPointType.Boss;
+        runState.AppendToMapPointHistory(pointType, room.RoomType, room.ModelId);
     }
 
     /// <summary>
@@ -75,6 +174,15 @@ public static class DuelArena
     ///   is `GenerateChecksum("After player turn start")`, well before the play phase opens.
     ///   `duel start` never hit it either, because entering from inside a live combat leaves the
     ///   previous combat's replay open — combat *end* is what calls `StopRecording`.
+    ///
+    /// - **the map coord** — see <see cref="MoveRunToArenaCoord"/>, which now runs before the room
+    ///   is even constructed. Vanilla's `EnterMapCoord` calls `AddVisitedMapCoord` *before*
+    ///   `EnterMapPointInternal`; skipping it left the two clients duelling at different
+    ///   `RunLocation`s, which silently buffered every host arbitration message bound for the
+    ///   client and froze it mid-turn.
+    /// - **the map point history entry** — see <see cref="RecordArenaInMapPointHistory"/>. Without
+    ///   it the run's last recorded room was the last room of the race, which made an elite killed
+    ///   on the way to the arena count as zero and made that elite the reported cause of death.
     ///
     /// The through-line: this arena is the first room the mod enters that was not reached through
     /// a map point, and every one of these is something the map path does for you.
@@ -112,6 +220,11 @@ public static class DuelArena
             }
 
             runManager.ActionExecutor.Pause();
+
+            // Vanilla appends here, between the pause and the entry, and skipping it had three
+            // visible consequences — see RecordArenaInMapPointHistory.
+            RecordArenaInMapPointHistory(runManager.State, room);
+
             await runManager.EnterRoom(room);
 
             CombatState? state = CombatManager.Instance.DebugOnlyGetState();
