@@ -299,3 +299,32 @@ Smaller known gaps, none blocking:
   green check + opponent portrait (DESIGN §6, wants an asset pass).
 - No `.pck` assets yet beyond the mod image. The duel map node icon (M6) is the first real
   need, and the custom confirm button should be batched with it.
+
+---
+
+## Open issues (2026-08-05, end of session)
+
+**Cards frozen in the arena after the deck review.** The rendezvous flow reaches the arena
+correctly and both players load in, but cards cannot be interacted with. This is the blocking
+bug. It did *not* happen on the legacy `duel start` path, so suspect what changed: the arena is
+now entered from the **map** rather than from inside an existing combat, and the duel phase
+now begins at the deck review rather than at arena entry. Things worth checking in order:
+
+- `RaceCoordinator.EndRace()` is never called, so `CombatStateSynchronizer.IsDisabled` is still
+  true and `ChecksumTracker.IsEnabled` still false when the duel starts. The design says both
+  must be back on for the duel — the duel is fully coupled and depends on the pre-combat state
+  sync it is currently skipping.
+- `ActionSynchronizerCombatState` / whether the action queue is paused; frozen cards look a lot
+  like a queue that never entered the play phase.
+- Whether `NMapScreen.Instance.Visible = false` (set in `DuelRendezvous`) is ever restored, and
+  whether an invisible map still captures input. `DuelEntry` has a comment about a prior bug of
+  exactly this shape — an overlay left on top swallowing every click.
+
+**Deck review background is the boss background.** Should be plain black or something simple
+like the campfire. Lucas is drawing something; until then the fix is whatever `NDeckCardSelectScreen`
+uses behind the grid.
+
+**Run-history icon load failure.** The UI looks for `images/ui/run_history/duel_encounter.png`
+and `_outline.png`, vanilla paths the mod cannot write to, so it logs an error once per run.
+Cosmetic. Fix by pointing `ImageHelper.GetRoomIconSuffix` at an existing boss icon for our
+encounter.

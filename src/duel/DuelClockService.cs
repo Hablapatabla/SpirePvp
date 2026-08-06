@@ -237,6 +237,25 @@ public static class DuelClockService
         CombatState? state = CombatManager.Instance.DebugOnlyGetState();
         if (state == null)
         {
+            // Deck review: duel phase has begun but the arena has not loaded, so there is no
+            // combat to read readiness from. Confirming the review is the same commitment as
+            // ending a turn — you are done deciding and are waiting on them — so it stops your
+            // clock while theirs keeps running. Without this, confirming early bought you
+            // nothing and the review was a pure loss of time to whoever read faster.
+            if (DuelEntry.IsChoosing)
+            {
+                if (DuelEntry.LocalReady)
+                {
+                    _local.Pause();
+                }
+                else
+                {
+                    _local.Start();
+                }
+
+                _opponent.Start();
+            }
+
             return;
         }
 
