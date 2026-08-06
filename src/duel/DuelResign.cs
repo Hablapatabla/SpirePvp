@@ -51,6 +51,12 @@ public static class DuelResign
     public static bool DrawOfferPending { get; private set; }
 
     /// <summary>
+    /// True when the opponent has offered a draw and we have not answered. Pressing Offer Draw
+    /// in that state means "yes", not "here is a competing offer" — see <see cref="OfferDraw"/>.
+    /// </summary>
+    public static bool IncomingOfferPending { get; private set; }
+
+    /// <summary>
     /// Register the draw-offer handler at run start.
     ///
     /// At run start, not when the local player first opens the pause menu — the opponent can
@@ -87,6 +93,7 @@ public static class DuelResign
     public static void Reset()
     {
         DrawOfferPending = false;
+        IncomingOfferPending = false;
     }
 
     /// <summary>
@@ -127,11 +134,23 @@ public static class DuelResign
         return true;
     }
 
-    /// <summary>Offer the opponent a draw. Ends nothing on its own — they have to accept.</summary>
+    /// <summary>
+    /// Offer the opponent a draw. Ends nothing on its own — they have to accept.
+    ///
+    /// Except when they have already offered: then this button is the accept. Making the player
+    /// dismiss their opponent's prompt and hunt for the same button they just pressed would be
+    /// a worse answer to "we both want a draw" than simply agreeing.
+    /// </summary>
     public static void OfferDraw()
     {
         if (!CanResign || DrawOfferPending)
         {
+            return;
+        }
+
+        if (IncomingOfferPending)
+        {
+            RespondToDraw(accept: true);
             return;
         }
 
@@ -152,6 +171,8 @@ public static class DuelResign
         {
             return;
         }
+
+        IncomingOfferPending = false;
 
         Log.Warn($"[SpirePvp] draw offer {(accept ? "accepted" : "declined")}");
 
@@ -178,11 +199,31 @@ public static class DuelResign
         if (!message.isResponse)
         {
             Log.Warn($"[SpirePvp] opponent {senderId} offers a draw");
+
+            // Offers crossing on the wire is agreement, not a conflict: we each said we would
+            // take a draw. Resolving it here means neither player has to answer a prompt for a
+            // question they had just asked themselves. Observed in play 2026-08-06, where both
+            // players offering left each staring at the other's prompt.
+            if (DrawOfferPending)
+            {
+                Log.Warn("[SpirePvp] offers crossed — both players want a draw");
+                DrawOfferPending = false;
+                DuelDrawPrompt.DismissNotice();
+                DuelFlagDisarmAndStop();
+                DuelResult.DeclareDraw();
+                return;
+            }
+
+            IncomingOfferPending = true;
             DuelDrawPrompt.Show();
             return;
         }
 
         DrawOfferPending = false;
+
+        // The answer is here, so the "waiting for your opponent" notice has served its purpose.
+        // Down first, before the result screen goes up behind it.
+        DuelDrawPrompt.DismissNotice();
 
         if (message.accepted)
         {

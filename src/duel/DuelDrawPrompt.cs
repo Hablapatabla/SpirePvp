@@ -67,6 +67,21 @@ public static class DuelDrawPrompt
         ShowNotice("SPIREPVP_DRAW_SENT.header", "SPIREPVP_DRAW_SENT.body");
 
     /// <summary>
+    /// Take down whatever notice is on screen because the thing it was waiting for has happened.
+    ///
+    /// The "waiting for your opponent" notice has an OK button and nothing else, so it sits
+    /// there until dismissed by hand — which meant the answer arriving resolved the match
+    /// *behind* it: the offering player watched the draw screen appear underneath a popup still
+    /// asking them to wait, and had to close it to reach the result. A notice about a pending
+    /// thing has to be cancellable by that thing happening.
+    ///
+    /// `Clear()` is what the popup's own close button calls, so this is the sanctioned way out.
+    /// It clears any modal, not just ours — acceptable, because the only caller is a match
+    /// ending, at which point no other modal is worth preserving.
+    /// </summary>
+    public static void DismissNotice() => NModalContainer.Instance?.Clear();
+
+    /// <summary>
     /// A one-button popup. `WaitForConfirmation` hides the No button when the no-label is null,
     /// so the same call serves both a question and a notice.
     /// </summary>

@@ -154,6 +154,14 @@ public static class DuelPauseMenuPatch
         }
 
         DuelResign.OfferDraw();
-        DuelDrawPrompt.ShowSent();
+
+        // Only when the press actually sent an offer. If the opponent had already offered, the
+        // press was an acceptance and the match is over — putting "waiting for your opponent"
+        // on screen at that point would be telling the player to wait for something that has
+        // already happened.
+        if (DuelResign.DrawOfferPending)
+        {
+            DuelDrawPrompt.ShowSent();
+        }
     }
 }
