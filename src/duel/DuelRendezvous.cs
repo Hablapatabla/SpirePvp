@@ -4,7 +4,9 @@ using MegaCrit.Sts2.Core.Entities.Players;
 using MegaCrit.Sts2.Core.Helpers;
 using MegaCrit.Sts2.Core.Logging;
 using MegaCrit.Sts2.Core.Map;
+using MegaCrit.Sts2.Core.Models;
 using MegaCrit.Sts2.Core.Multiplayer.Game;
+using MegaCrit.Sts2.Core.Saves.Runs;
 using MegaCrit.Sts2.Core.Nodes.Screens.Map;
 using MegaCrit.Sts2.Core.Runs;
 using SpirePvp.Net;
@@ -35,10 +37,18 @@ public static class DuelRendezvous
 
     public static bool RemoteArrived => _remoteArrived;
 
+    /// <summary>
+    /// The opponent's deck as it stood when they arrived, rebuilt from their arrival message.
+    /// Null until they arrive. Read by <see cref="DuelEntry"/>, which cannot use the local copy
+    /// of their `Player` — see the note on <see cref="DuelArrivedMessage.deck"/>.
+    /// </summary>
+    public static IReadOnlyList<CardModel>? OpponentDeck { get; private set; }
+
     public static void Reset()
     {
         _localArrived = false;
         _remoteArrived = false;
+        OpponentDeck = null;
     }
 
     /// <summary>True when <paramref name="coord"/> is this run's arena node.</summary>
@@ -65,7 +75,8 @@ public static class DuelRendezvous
 
         RunManager.Instance.NetService.SendMessage(new DuelArrivedMessage
         {
-            modVersion = DuelEntry.ModVersion
+            modVersion = DuelEntry.ModVersion,
+            deck = LocalDeckSnapshot()
         });
 
         ShowWaitingPortrait();
@@ -115,10 +126,62 @@ public static class DuelRendezvous
         }
 
         _remoteArrived = true;
-        Log.Warn($"[SpirePvp] arena: opponent {senderId} arrived");
+        OpponentDeck = RebuildDeck(message.deck);
+        Log.Warn($"[SpirePvp] arena: opponent {senderId} arrived with {OpponentDeck?.Count ?? 0} cards");
 
         ShowWaitingPortrait();
         TryOpenDeckReview();
+    }
+
+    /// <summary>This client's deck, in the form the wire takes.</summary>
+    private static List<SerializableCard> LocalDeckSnapshot()
+    {
+        List<SerializableCard> cards = new List<SerializableCard>();
+        Player? me = LocalContext.GetMe(RunManager.Instance?.State?.Players
+                                        ?? (IEnumerable<Player>)Array.Empty<Player>());
+        if (me == null)
+        {
+            return cards;
+        }
+
+        foreach (CardModel card in me.Deck.Cards)
+        {
+            cards.Add(card.ToSerializable());
+        }
+
+        return cards;
+    }
+
+    /// <summary>
+    /// Rebuild the opponent's cards for display.
+    ///
+    /// `CardModel.FromSerializable` warns that callers should eventually put the card into an
+    /// `ICardScope`. These deliberately go into none: they exist to be *drawn* on the entry screen
+    /// and nothing else, they belong to a player who is not us, and the real cards arrive with the
+    /// pre-combat state sync a moment later. Adding them to a scope is what would make them real.
+    /// </summary>
+    private static List<CardModel> RebuildDeck(List<SerializableCard>? cards)
+    {
+        List<CardModel> rebuilt = new List<CardModel>();
+        if (cards == null)
+        {
+            return rebuilt;
+        }
+
+        foreach (SerializableCard card in cards)
+        {
+            try
+            {
+                rebuilt.Add(CardModel.FromSerializable(card));
+            }
+            catch (Exception e)
+            {
+                // One unreadable card should cost that card, not the entry screen.
+                Log.Warn($"[SpirePvp] arena: could not rebuild an opponent card ({e.Message})");
+            }
+        }
+
+        return rebuilt;
     }
 
     /// <summary>

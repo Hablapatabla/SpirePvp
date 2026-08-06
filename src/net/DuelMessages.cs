@@ -1,6 +1,7 @@
 using MegaCrit.Sts2.Core.Logging;
 using MegaCrit.Sts2.Core.Multiplayer.Serialization;
 using MegaCrit.Sts2.Core.Multiplayer.Transport;
+using MegaCrit.Sts2.Core.Saves.Runs;
 
 namespace SpirePvp.Net;
 
@@ -340,13 +341,34 @@ public record struct DuelArrivedMessage : INetMessage
 
     public string modVersion;
 
+    /// <summary>
+    /// The sender's deck, as it stands on arrival.
+    ///
+    /// **The decklist has to travel, because the reader's copy of it is a lie.** The race
+    /// decouples the two runs — that is the whole of M5 — so the opponent's `Player` in your local
+    /// run state is frozen at whatever it was when the race began. Their rewards, their upgrades,
+    /// their removals all happened on their client and nowhere else. The pre-combat state sync
+    /// does reconcile it, but that runs on *arena entry*, and the deck review opens before then:
+    /// so the entry screen was showing a stale deck, missing every card the opponent had picked up
+    /// — cards they then played in the duel, because by then the sync had happened. A decklist
+    /// that is quietly wrong is worse than none at all; the reveal is a core information rule
+    /// (DESIGN §1) and the whole point is that you can trust what it says.
+    ///
+    /// Carried on *arrival* rather than in a message of its own, which is what makes the ordering
+    /// free: the review opens when both arrivals are in hand, so the deck is there by construction
+    /// with no second handler to arm and no race to lose.
+    /// </summary>
+    public List<SerializableCard> deck;
+
     public void Serialize(PacketWriter writer)
     {
         writer.WriteString(modVersion);
+        writer.WriteList<SerializableCard>(deck ?? new List<SerializableCard>());
     }
 
     public void Deserialize(PacketReader reader)
     {
         modVersion = reader.ReadString();
+        deck = reader.ReadList<SerializableCard>();
     }
 }

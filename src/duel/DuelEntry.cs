@@ -4,6 +4,7 @@ using MegaCrit.Sts2.Core.Context;
 using MegaCrit.Sts2.Core.Entities.Creatures;
 using MegaCrit.Sts2.Core.Entities.Players;
 using MegaCrit.Sts2.Core.Logging;
+using MegaCrit.Sts2.Core.Models;
 using MegaCrit.Sts2.Core.Multiplayer.Game;
 using MegaCrit.Sts2.Core.CardSelection;
 using MegaCrit.Sts2.Core.Localization;
@@ -89,7 +90,20 @@ public static class DuelEntry
             Cancelable = false
         };
 
-        NDeckCardSelectScreen screen = NDeckCardSelectScreen.Create(_opponent.Deck.Cards.ToList(), prefs);
+        // Their deck as *they* reported it on arrival, not as our copy of their Player remembers
+        // it. The race decouples the two runs, so every card the opponent gained during it is
+        // invisible here — the entry screen was showing a deck missing cards they went on to play
+        // in the duel, because the pre-combat sync that fixes local state does not run until arena
+        // entry, after this screen. See DuelArrivedMessage.deck.
+        //
+        // The fallback is the legacy `duel start` path, which never passes through the arena and
+        // so has no arrival message; it enters from a live combat, where state is already synced
+        // and the local copy is right.
+        IReadOnlyList<CardModel> cards = DuelRendezvous.OpponentDeck ?? _opponent.Deck.Cards;
+        Log.Warn($"[SpirePvp] duel entry — opponent deck: {cards.Count} cards " +
+                 $"({(DuelRendezvous.OpponentDeck != null ? "reported on arrival" : "local copy")})");
+
+        NDeckCardSelectScreen screen = NDeckCardSelectScreen.Create(cards.ToList(), prefs);
         if (NOverlayStack.Instance == null)
         {
             IsChoosing = false;
