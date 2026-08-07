@@ -1,4 +1,4 @@
-# Handoff — state of the mod as of 2026-08-06 (late evening, handed Mac → Windows)
+# Handoff — state of the mod as of 2026-08-06 (night, handed Windows → Mac)
 
 Written for someone (human or agent) picking this up cold, on any OS. Everything below was
 built and playtested against **Slay the Spire 2 v0.110.1**, on two local clients connected
@@ -455,6 +455,42 @@ Keep that split if you extend this.
 ## Immediate next step
 
 ### First: re-run the result-screen playtest
+
+**Still not done. Attempted on Windows the night of 2026-08-06 and the match never started** —
+the client could not connect, so not one of the fixes below has been exercised. Everything in
+this section stands exactly as the Mac left it. What that attempt *did* establish, so it need
+not be redone:
+
+- The Mac's four commits build clean on Windows (0 warnings) and **`44 patch classes applied
+  cleanly` on both host and client**, so the pulled code applies on this platform.
+- The client merged all four loc tables (`badges`, `game_over_screen`, `gameplay_ui`,
+  `modifiers`), so the `.pck` was intact — not the half-written-pack trap.
+- Three claims the new code rests on were checked against the decompile rather than played, and
+  all three hold. `RunState.AddVisitedMapCoord` really does set `NextRoomId = 0` and return
+  false when the coord was already visited (`Core/Runs/RunState.cs:460`), and `CurrentMapCoord`
+  really is just `_visitedMapCoords.Last()` (`:112`) — so `MoveRunToArenaCoord`'s single call
+  settles **both** halves of `RunLocation`, as its comment claims. And
+  `DuelLayout.BelongsToOpponent` is null-safe via `creature?.Player`, so
+  `DuelStatsTrackingPatch` dropping its `target == null` guard is behaviour-preserving, not an
+  NRE waiting to happen.
+
+Static checks are not a playtest and none of the table below is verified by them.
+
+**Why the match never started, as far as the logs go.** The host was launched *without*
+`-Custom` (`Command Line Args: --force-steam=off --fastmp=host_standard`), which is a standard
+lobby with no modifier list — so that run could not have configured a match even had it
+connected. The client was otherwise healthy: mod loaded, patches clean, straight to
+`ENetClientConnectionInitializer`, then `[ENetClient] Connection timed out!`. Most likely the
+host simply was not in the lobby yet; unproven, because of the trap directly below.
+
+**Creating the lobby logs nothing, so a host nobody reaches looks exactly like a host that
+never opened one.** The first `[StartRunLobby (1)]` line in a *successful* run is `Client 1001
+connected` — the lobby's own construction and the ENet listener produce no output at all. So
+the host log going quiet after `Preloading 'Common' Complete` proves only that no client ever
+arrived, and says nothing about whether anything was listening. Do not read that silence as
+"the host failed to host". If this recurs, get the host visibly into the lobby screen *first*
+and only then launch the client; if it still times out with the lobby plainly on screen, that
+is a real finding rather than a race.
 
 **Run 1 (2026-08-06) froze the client in the duel** — the arena `RunLocation` bug above. Fixed;
 **run 2 played end to end and the screen came up**, which is what found everything below.
