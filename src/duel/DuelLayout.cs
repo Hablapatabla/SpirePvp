@@ -242,8 +242,9 @@ public static class DuelLayout
     {
         foreach (NCreature summon in moved)
         {
-            Player? owner = summon.Entity?.PetOwner;
-            if (owner == null)
+            Creature? entity = summon.Entity;
+            Player? owner = entity?.PetOwner;
+            if (entity == null || owner == null)
             {
                 continue;
             }
@@ -261,7 +262,22 @@ public static class DuelLayout
             float ownerCentre = ownerNode.Position.X + ownerWidth * 0.5f;
 
             float reflected = 2f * ownerCentre - summonCentre;
-            summon.Position = new Vector2(reflected - summonWidth * 0.5f, summon.Position.Y);
+
+            // Handedness was only half of it. Your own summon is also *lifted* relative to you,
+            // which is what makes it read as standing behind rather than in front — measured on
+            // the host, yours sits at offsetFromOwner=(510.7, -75) while theirs came out at
+            // (-313, 0). PositionEnemies lays its row out on one baseline and has no reason to
+            // raise anything, so the vertical has to be reapplied.
+            //
+            // GetOstyOffsetFromPlayer is vanilla's own answer for how far a summon sits from its
+            // owner, and it is not a constant: half the owner's hitbox plus an offset lerped
+            // between Osty.MinOffset and MaxOffset by the summon's max HP, so a grown summon
+            // stands further out. Taking the Y from it means the opponent's summon is raised by
+            // exactly what yours is, at whatever size it currently is.
+            float lift = NCreature.GetOstyOffsetFromPlayer(entity).Y;
+
+            summon.Position = new Vector2(reflected - summonWidth * 0.5f,
+                                          ownerNode.Position.Y + lift);
         }
     }
 
