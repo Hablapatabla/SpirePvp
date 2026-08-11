@@ -27,7 +27,18 @@ namespace SpirePvp.Modifiers;
 public abstract class DuelModifierBase : ModifierModel
 {
     /// Reuses a vanilla modifier icon until this project has art of its own.
-    protected override string IconPath => ImageHelper.GetImagePath("packed/modifiers/draft");
+    ///
+    /// **The `.png` is load-bearing.** ImageHelper.GetImagePath only prefixes `res://images/`,
+    /// so without an extension this named a resource that cannot exist, ResourceLoader.Exists
+    /// returned false, and ModifierModel fell back to MissingIconPath — `powers/missing_power`,
+    /// which is the placeholder art that drew three "NOPE"s across the top bar for the whole of
+    /// every run (one per active modifier). Vanilla builds its own path as
+    /// `"packed/modifiers/" + entry.ToLowerInvariant() + ".png"`; this has to match.
+    ///
+    /// This property is the one-line-per-group seam for real art, the same shape as
+    /// DuelBadgeIconPatch: override it on RaceClockModifier and DuelClockModifier to give the
+    /// three lobby groups three distinct icons once they exist.
+    protected override string IconPath => ImageHelper.GetImagePath("packed/modifiers/draft.png");
 }
 
 /// <summary>
