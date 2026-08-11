@@ -4,7 +4,6 @@ using MegaCrit.Sts2.Core.Context;
 using MegaCrit.Sts2.Core.Entities.Creatures;
 using MegaCrit.Sts2.Core.Entities.Players;
 using MegaCrit.Sts2.Core.Entities.UI;
-using MegaCrit.Sts2.Core.Helpers;
 using MegaCrit.Sts2.Core.Logging;
 using MegaCrit.Sts2.Core.Nodes.Combat;
 using MegaCrit.Sts2.Core.Nodes.Rooms;
@@ -98,7 +97,6 @@ public static class DuelLayout
         float scaling = room._visuals.Encounter.GetCameraScaling();
         room.PositionEnemies(moved, scaling);
         NCombatRoom.PositionPlayersAndPets(remainingAllies, scaling, room._visuals.Encounter.FullyCenterPlayers);
-        DrawPetsInFrontOfOwners(moved);
         room.UpdateCreatureNavigation();
 
         Log.Warn($"[SpirePvp] duel layout: moved {moved.Count} opponent creature(s) to the enemy side, " +
@@ -150,51 +148,26 @@ public static class DuelLayout
             return;
         }
 
-        if (!_naturalFacing.TryGetValue(node, out float natural))
+        bool captured = _naturalFacing.TryGetValue(node, out float natural);
+        if (!captured)
         {
             natural = body.Scale.X;
             _naturalFacing[node] = natural;
         }
 
         body.Scale = new Vector2(mirrored ? -natural : natural, body.Scale.Y);
+
+        // Diagnostic, and the reason it exists: facing came out correct on one client and
+        // backwards on the other from this identical code, which means the two arrive here with
+        // different scale state rather than the arithmetic being wrong. Print what each side
+        // actually sees so the two logs can be diffed, instead of guessing at pixels a second
+        // time. Remove once the asymmetry is understood.
+        Log.Warn($"[SpirePvp] facing: {node.Entity?.Name} " +
+                 $"pet={node.Entity?.PetOwner != null} " +
+                 $"natural={natural:0.###}{(captured ? " (cached)" : " (captured now)")} " +
+                 $"applied={body.Scale.X:0.###} pos={node.Position}");
     }
 
-    /// <summary>
-    /// Draws each opponent's summons in front of their owner.
-    ///
-    /// Depth here is child order, and vanilla establishes it at the end of
-    /// PositionPlayersAndPets: the player is moved to child index 0 and its pets to 1..n, so
-    /// summons overlap their owner rather than hiding behind them. **That method only runs for
-    /// your own side.** The opponent goes through PositionEnemies, which has no concept of
-    /// owners and pets at all, so their summons landed in whatever order the enemy layout
-    /// produced — which is why the opponent's Osty drew behind its necrobinder.
-    ///
-    /// This reproduces only the ordering half. The rest of PositionPlayersAndPets is
-    /// deliberately not replicated: it also shifts the local player by a fixed offset and
-    /// applies GetOstyOffsetFromPlayer, both gated on LocalContext.IsMe, and both would fight
-    /// the enemy-side placement PositionEnemies has already chosen.
-    ///
-    /// Owner-agnostic, so it covers every summon rather than the one that exposed it.
-    /// </summary>
-    private static void DrawPetsInFrontOfOwners(List<NCreature> moved)
-    {
-        foreach (NCreature node in moved)
-        {
-            if (node.Entity.IsPlayer)
-            {
-                node.GetParent()?.MoveChildSafely(node, 0);
-            }
-        }
-
-        int depth = 1;
-        foreach (NCreature node in moved)
-        {
-            if (!node.Entity.IsPlayer)
-            {
-                node.GetParent()?.MoveChildSafely(node, depth++);
-            }
-        }
-    }
 
     /// <summary>
     /// Puts every player-side creature back in the ally container, so `duel off` really does
