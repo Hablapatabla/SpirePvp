@@ -364,6 +364,45 @@ Note the constraint that shaped §5b still holds: whatever this screen does, it 
 same `ModifierModel`s on the `RunState`, because that is what makes a PvP run reload as a PvP
 run and what puts the settings in front of the joining player before they commit.
 
+### Implementation scope, read off the engine 2026-08-11
+
+The route in is smaller than it looks, and needs no scene editing and no BaseLib.
+
+**The menu.** `NMultiplayerHostSubmenu` (`Core/Nodes/Screens/MainMenu/`) holds exactly three
+`NSubmenuButton`s, fetched from its scene by node name — `StandardButton`, `DailyButton`,
+`CustomRunButton` — each wired to `StartHost(GameMode)`. A mod cannot edit that `.tscn`, but it
+does not need to: **duplicate the existing Custom button node in a postfix on `_Ready`**, retitle
+it, and connect it to our own handler. That inherits the button's art, sizing and focus
+behaviour for free, which is also what makes it look native.
+
+**The label rides in a vanilla table, as ever.** `NSubmenuButton.SetIconAndLocalization(prefix)`
+resolves `new LocString("main_menu_ui", prefix + ".title")`, so a `DUEL_MP.title` entry must go
+in `main_menu_ui.json`. Same rule that forced `encounters.json` and `modifiers.json`: a table of
+our own would never be read.
+
+**`GameMode` is a vanilla enum and we do not add to it.** Host duel starts a
+`GameMode.Custom` host — that is what brings the modifier machinery and the seed field along —
+and then applies the match configuration itself. Hijacking Custom is the point rather than a
+compromise: it is what guarantees the run ends up carrying the same `ModifierModel`s, which is
+the constraint above.
+
+**Gating.** `RefreshButtons` disables Custom behind `CustomAndSeedsEpoch`. A duel button built
+on Custom's machinery inherits that constraint whether or not it shows the same lock, so decide
+deliberately: gate it identically, or unlock it separately and accept that it is a Custom run
+wearing another name.
+
+**Suggested order, cheapest first:**
+
+1. The button, opening a Custom lobby with the three duel modifiers **pre-ticked** to the blitz
+   preset (`Real-Time` · `Race 10` · `Duel 2`). This alone removes every part of the current
+   burial — the host never has to know which three tickboxes to find — while the joining player
+   still sees the agreed settings in the vanilla list, so nothing is lost.
+2. Preset buttons over the top (blitz, and whatever else play suggests).
+3. Direct clock controls, replacing the radio-button modifiers as the *presentation* while still
+   ending in the same modifiers underneath.
+
+Art wanted: the button icon, and whatever framing steps 2–3 sit in.
+
 ## 6. UI components (Godot side, via BaseLib node factories + our .pck)
 
 | Component | Notes |

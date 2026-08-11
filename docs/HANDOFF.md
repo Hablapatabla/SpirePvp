@@ -20,8 +20,8 @@ flags, console commands and gotchas below are OS-neutral unless marked.
 | **M3** chess clock | **done**, playtested |
 | **M4** information rules | **done**, playtested |
 | **M5** race phase | **working, playtested 2026-08-05.** Two clients race the same seeded map independently — own combats, own rewards, advancing at their own pace — with mirrored RNG and a run-long clock |
-| **M6** full loop | **working, playtested 2026-08-06.** Lobby modifiers → race → arena node → rendezvous → deck review → duel → result screen, with checksums live, split race/duel clocks and Neow intact. Plus resignation and agreed draws. Result-screen stats and badges **reach the screen and compare correctly**; six fixes on top of them are **built and unplaytested** — see "Immediate next step". Remaining: rematch |
-| M7 polish | **next milestone: a dedicated Duel host menu** (below) |
+| **M6** full loop | **done, playtested through 2026-08-11.** Lobby modifiers → race → arena node → rendezvous → deck review → duel → result screen, with checksums live, split race/duel clocks and Neow intact. Plus resignation and agreed draws. Result-screen stats and badges reach the screen and compare correctly. The 2026-08-11 sweep closed the race phase's remaining rough edges — rest site, treasure chest, shop, map portraits, the loser's result screen and opponent summons. Remaining: rematch |
+| **M7** | **next milestone: a dedicated Duel host menu** — scoped below and in DESIGN §5b |
 
 A duel is fully playable end to end today: enter the arena, fight with real cards and
 statuses, win or lose on HP or on the clock, and land on a victory/defeat screen.
@@ -77,7 +77,7 @@ abandons the rest, so one typo disables an arbitrary subset while the mod still 
 still logs "loaded". `SpirePvpInit` therefore applies each patch class independently and logs
 a count. **On every launch, confirm the log says `N patch classes applied cleanly`** — if it
 says `PATCH FAILED`, some of the mod is not running and in-game results mean nothing.
-**52 as of this handoff.** The count is per *class*, not per patch: a class holding
+**53 as of this handoff.** The count is per *class*, not per patch: a class holding
 several patch methods still counts once, so grouping patches by concern does not move it.
 
 **Harmony resolves `[HarmonyPatch(typeof(X))]` against methods declared on `X` only.** Naming
