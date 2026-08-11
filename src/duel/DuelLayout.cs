@@ -75,16 +75,26 @@ public static class DuelLayout
                 continue;
             }
 
-            // Keep the visual transform stable across the reparent; PositionEnemies
-            // overwrites it immediately after, but this avoids a one-frame jump.
-            node.Reparent(room._enemyContainer, keepGlobalTransform: true);
-            Mirror(node, mirrored: true);
+            // Only do the one-time work for creatures not already on the enemy side. This is
+            // re-entrant by design — DuelLateSummonLayoutPatch calls it again for every creature
+            // that appears mid-duel — and re-reparenting or replaying the health-bar animation
+            // on each call would be visible.
+            if (node.GetParent() != room._enemyContainer)
+            {
+                // Keep the visual transform stable across the reparent; PositionEnemies
+                // overwrites it immediately after, but this avoids a one-frame jump.
+                node.Reparent(room._enemyContainer, keepGlobalTransform: true);
 
-            // Remote players and their pets start with their bar hidden (co-op shows it on
-            // hover only, gated on the same _isRemotePlayerOrPet flag). Bring it up now;
-            // DuelHealthBarPatch stops it going away again.
-            node._stateDisplay.AnimateIn(HealthBarAnimMode.FromHidden);
-            node._stateDisplay.ZIndex = 1;
+                // Remote players and their pets start with their bar hidden (co-op shows it on
+                // hover only, gated on the same _isRemotePlayerOrPet flag). Bring it up now;
+                // DuelHealthBarPatch stops it going away again.
+                node._stateDisplay.AnimateIn(HealthBarAnimMode.FromHidden);
+                node._stateDisplay.ZIndex = 1;
+            }
+
+            // Idempotent: the natural facing is captured once and re-applied, so calling this
+            // on an already-mirrored node is a no-op rather than a flip back.
+            Mirror(node, mirrored: true);
 
             moved.Add(node);
         }
