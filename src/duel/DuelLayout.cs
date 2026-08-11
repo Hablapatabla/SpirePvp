@@ -113,9 +113,6 @@ public static class DuelLayout
 
         Log.Warn($"[SpirePvp] duel layout: moved {moved.Count} opponent creature(s) to the enemy side, " +
                  $"{remainingAllies.Count} stayed on yours");
-
-        DumpLayout("yours", remainingAllies);
-        DumpLayout("opponent", moved);
     }
 
     /// <summary>
@@ -163,55 +160,13 @@ public static class DuelLayout
             return;
         }
 
-        bool captured = _naturalFacing.TryGetValue(node, out float natural);
-        if (!captured)
+        if (!_naturalFacing.TryGetValue(node, out float natural))
         {
             natural = body.Scale.X;
             _naturalFacing[node] = natural;
         }
 
         body.Scale = new Vector2(mirrored ? -natural : natural, body.Scale.Y);
-
-        // Diagnostic, and the reason it exists: facing came out correct on one client and
-        // backwards on the other from this identical code, which means the two arrive here with
-        // different scale state rather than the arithmetic being wrong. Print what each side
-        // actually sees so the two logs can be diffed, instead of guessing at pixels a second
-        // time. Remove once the asymmetry is understood.
-        Log.Warn($"[SpirePvp] facing: {node.Entity?.Name} " +
-                 $"pet={node.Entity?.PetOwner != null} " +
-                 $"natural={natural:0.###}{(captured ? " (cached)" : " (captured now)")} " +
-                 $"applied={body.Scale.X:0.###} pos={node.Position}");
-    }
-
-
-    /// <summary>
-    /// Dumps one side's final layout so the two can be compared numerically.
-    ///
-    /// Temporary. It exists because the summon placement has now been wrong in three different
-    /// ways and each correction was reasoned from a screenshot; the owner-relative offset your
-    /// own side gets is not a constant that can be read off (GetOstyOffsetFromPlayer is half the
-    /// owner's hitbox plus an offset lerped by the summon's max HP), so the only way to mirror
-    /// it exactly is to measure both sides once. Remove with the facing diagnostic.
-    /// </summary>
-    private static void DumpLayout(string side, List<NCreature> nodes)
-    {
-        foreach (NCreature node in nodes)
-        {
-            Player? owner = node.Entity?.PetOwner;
-            NCreature? ownerNode = owner == null
-                ? null
-                : nodes.FirstOrDefault(n => n.Entity?.Player == owner);
-
-            string relative = ownerNode == null
-                ? ""
-                : $" offsetFromOwner=({node.Position.X - ownerNode.Position.X:0.#}, " +
-                  $"{node.Position.Y - ownerNode.Position.Y:0.#})";
-
-            Log.Warn($"[SpirePvp] layout[{side}]: {node.Entity?.Name} " +
-                     $"pet={owner != null} pos={node.Position} " +
-                     $"size=({node.Visuals?.Bounds.Size.X ?? 0f:0.#}, {node.Visuals?.Bounds.Size.Y ?? 0f:0.#})" +
-                     relative);
-        }
     }
 
     /// <summary>

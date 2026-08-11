@@ -11,7 +11,7 @@ using SpirePvp.Duel;
 namespace SpirePvp.Race.Patches;
 
 /// <summary>
-/// The relic chest, made to understand that the opponent is not standing at it. Three separate
+/// The relic chest, made to understand that the opponent is not standing at it. Four separate
 /// engine assumptions, all the co-located-party pattern, all found in one playtest (2026-08-11)
 /// and grouped here because they are one concern.
 ///
@@ -49,19 +49,19 @@ namespace SpirePvp.Race.Patches;
 /// OnlyOnePlayerVoted, and correctly exclude the opponent from the consolation-prize list
 /// (which tests `voteReceived &amp;&amp; !index.HasValue`).
 ///
-/// **3. The arm came in from the wrong side.** NHandImage rotates by player slot —
-/// `Index % 4` maps 0 to upright and 1 to a quarter turn — so the client, being slot 1, reached
-/// for the relic from the side of the screen. Vanilla never shows this in singleplayer
-/// (NHandImageCollection.Initialize returns early on Players.Count &lt;= 1), so slot 1 is only ever
-/// meant to be seen alongside slot 0. In a race each player is alone at their own chest and
-/// should get the upright hand.
+/// **3. Hands that should never have been on screen.** The reaching hand is a co-op affordance
+/// — it shows where the *other* player is pointing — and vanilla draws none when you are alone.
+/// A race is that situation wearing a two-player run state, so it draws none either.
 ///
-/// Only the *local* hand is redirected. The opponent's NHandImage is deliberately left
-/// constructed: GetHand returns null for a missing hand and OnInputStateChanged dereferences it
-/// without a check, so not building it converts a cosmetic bug into an NRE. Vanilla's own
-/// visibility gate already keeps it off screen unless the opponent is on a relic-picking screen
-/// at the same moment — so a ghost hand remains possible in the narrow case where you are both
-/// at chests simultaneously. Known, and left alone on purpose.
+/// This is worth reading as a correction rather than a feature. Two narrower patches came
+/// first: one re-pointed the local hand at slot 0, because NHandImage rotates by `Index % 4`
+/// and a slot-1 client reached in from the side of the screen; the other suppressed the
+/// opponent's, which appeared as a phantom hand groping across the host's chest. Both were
+/// compensating for drawing something singleplayer would not draw at all. Checking what
+/// vanilla does when alone replaced both with one line.
+///
+/// **4. The client could not leave the chest.** Covered on LocalRelicHolderFocus below — the
+/// slot-indexing assumption again, this time throwing rather than merely looking wrong.
 /// </summary>
 [HarmonyPatch]
 public static class RaceSoloTreasurePatch
@@ -93,32 +93,23 @@ public static class RaceSoloTreasurePatch
             return;
         }
 
-        int skipped = 0;
-
-        foreach (Player player in __instance._playerCollection.Players)
-        {
-            if (LocalContext.IsMe(player))
+        int skipped = RaceSolo.SatisfyAbsentPlayers(
+            __instance._playerCollection,
+            __instance._votes.Count,
+            slot =>
             {
-                continue;
-            }
+                TreasureRoomRelicSynchronizer.PlayerVote vote = __instance._votes[slot];
+                if (vote.voteReceived)
+                {
+                    return false;
+                }
 
-            int slot = __instance._playerCollection.GetPlayerSlotIndex(player);
-            if (slot < 0 || slot >= __instance._votes.Count)
-            {
-                continue;
-            }
-
-            TreasureRoomRelicSynchronizer.PlayerVote vote = __instance._votes[slot];
-            if (vote.voteReceived)
-            {
-                continue;
-            }
-
-            // null index == skipped. Not a random pick: that would have them contest our relic.
-            vote.index = null;
-            vote.voteReceived = true;
-            skipped++;
-        }
+                // null index == skipped. Not a random pick: that would have them contest our
+                // relic and turn it into a relic fight.
+                vote.index = null;
+                vote.voteReceived = true;
+                return true;
+            });
 
         if (skipped > 0)
         {
@@ -127,49 +118,25 @@ public static class RaceSoloTreasurePatch
         }
     }
 
-    /// <summary>(3) The local player is alone at the chest, so reach from slot 0.</summary>
-    [HarmonyPatch(typeof(NHandImage), nameof(NHandImage.Create))]
-    [HarmonyPrefix]
-    public static void UprightLocalHand(Player player, ref int slotIndex)
-    {
-        if (!DuelSession.IsRaceActive)
-        {
-            return;
-        }
-
-        if (LocalContext.IsMe(player))
-        {
-            slotIndex = 0;
-        }
-    }
-
     /// <summary>
-    /// (4) The opponent's hand never animates in — it is the "phantom hand" the playtest saw
-    /// reaching across the host's chest.
+    /// (3) No reaching hands at all — vanilla draws none when alone
+    /// (NHandImageCollection.Initialize returns before creating any if Players.Count &lt;= 1, and
+    /// _Input early-returns on the same test).
     ///
-    /// The hand *object* is still built. NHandImageCollection.GetHand returns null for a hand
-    /// that was never added and OnInputStateChanged dereferences it without a check, so
-    /// declining to construct it would turn a cosmetic bug into an NRE. Suppressing the reveal
-    /// instead leaves every lookup valid and simply never shows it: IsShown starts false and
-    /// only AnimateIn sets it.
-    ///
-    /// Vanilla gates this on the peer being on a relic-picking screen at the same moment, which
-    /// is why it appeared intermittently rather than every chest.
+    /// Suppressing the reveal rather than declining to construct the node: GetHand returns null
+    /// for a hand that was never added and OnInputStateChanged dereferences it unguarded, so
+    /// not building it trades a cosmetic bug for an NRE. IsShown starts false and only AnimateIn
+    /// sets it, so never calling it leaves every lookup valid and nothing on screen.
     /// </summary>
     [HarmonyPatch(typeof(NHandImage), nameof(NHandImage.AnimateIn))]
     [HarmonyPrefix]
-    public static bool HideAbsentPlayerHand(NHandImage __instance)
+    public static bool NoHandsInASoloChest()
     {
-        if (!DuelSession.IsRaceActive)
-        {
-            return true;
-        }
-
-        return LocalContext.IsMe(__instance.Player);
+        return !DuelSession.IsRaceActive;
     }
 
     /// <summary>
-    /// (5) Controller/keyboard focus, which is what actually blocked the client.
+    /// (4) Controller/keyboard focus, which is what actually blocked the client.
     ///
     ///     _holdersInUse[_runState.GetPlayerSlotIndex(LocalContext.GetMe(_runState.Players))]
     ///

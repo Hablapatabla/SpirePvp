@@ -1,5 +1,4 @@
 using HarmonyLib;
-using MegaCrit.Sts2.Core.Entities.Players;
 using MegaCrit.Sts2.Core.Logging;
 using MegaCrit.Sts2.Core.Multiplayer.Game;
 using SpirePvp.Duel;
@@ -55,31 +54,21 @@ public static class RaceSoloRestSitePatch
             return;
         }
 
-        int completed = 0;
-
-        foreach (Player player in __instance._playerCollection.Players)
-        {
-            if (player.NetId == __instance._localPlayerId)
+        int completed = RaceSolo.SatisfyAbsentPlayers(
+            __instance._playerCollection,
+            __instance._restSites.Count,
+            slot =>
             {
-                continue;
-            }
+                RestSiteSynchronizer.PlayerRestSite restSite = __instance._restSites[slot];
+                if (restSite.completionTaskSource.Task.IsCompleted)
+                {
+                    return false;
+                }
 
-            int slot = __instance._playerCollection.GetPlayerSlotIndex(player);
-            if (slot < 0 || slot >= __instance._restSites.Count)
-            {
-                continue;
-            }
-
-            RestSiteSynchronizer.PlayerRestSite restSite = __instance._restSites[slot];
-            if (restSite.completionTaskSource.Task.IsCompleted)
-            {
-                continue;
-            }
-
-            restSite.options.Clear();
-            restSite.completionTaskSource.TrySetResult();
-            completed++;
-        }
+                restSite.options.Clear();
+                restSite.completionTaskSource.TrySetResult();
+                return true;
+            });
 
         if (completed > 0)
         {
