@@ -240,6 +240,8 @@ public static class DuelLayout
     /// </summary>
     private static void MirrorSummonsAboutTheirOwner(List<NCreature> moved)
     {
+        (float min, float max) before = HorizontalSpan(moved);
+
         foreach (NCreature summon in moved)
         {
             Creature? entity = summon.Entity;
@@ -279,6 +281,48 @@ public static class DuelLayout
             summon.Position = new Vector2(reflected - summonWidth * 0.5f,
                                           ownerNode.Position.Y + lift);
         }
+
+        // Put the group back where PositionEnemies put it.
+        //
+        // PositionEnemies chooses the group's placement and spacing from its members' combined
+        // width, having laid the summon out to the *right* of its owner. Reflecting the summon
+        // to the left moves it without moving the owner, so the group's span slides left by
+        // roughly twice the offset while its owner stays put — which drags the opponent away
+        // from their side of the arena and toward the middle, looking cramped and too far from
+        // the end-turn button. That is what the reflection did on its own, and it is a pure
+        // bookkeeping error rather than a judgement about where enemies belong.
+        //
+        // So measure the span before and after and translate the whole group back onto its
+        // original centre. The engine keeps its say over *where* the opponent stands and how far
+        // apart they are; this only changes which side of their owner the summon is on.
+        (float min, float max) after = HorizontalSpan(moved);
+        float shift = (before.min + before.max) * 0.5f - (after.min + after.max) * 0.5f;
+
+        if (shift == 0f)
+        {
+            return;
+        }
+
+        foreach (NCreature node in moved)
+        {
+            node.Position = new Vector2(node.Position.X + shift, node.Position.Y);
+        }
+    }
+
+    /// <summary>Leftmost and rightmost screen edge of a group, widths included.</summary>
+    private static (float Min, float Max) HorizontalSpan(List<NCreature> nodes)
+    {
+        float min = float.MaxValue;
+        float max = float.MinValue;
+
+        foreach (NCreature node in nodes)
+        {
+            float width = node.Visuals?.Bounds.Size.X ?? 0f;
+            min = Math.Min(min, node.Position.X);
+            max = Math.Max(max, node.Position.X + width);
+        }
+
+        return nodes.Count == 0 ? (0f, 0f) : (min, max);
     }
 
     /// <summary>
