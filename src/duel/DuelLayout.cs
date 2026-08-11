@@ -1,3 +1,4 @@
+using System.Linq;
 using Godot;
 using MegaCrit.Sts2.Core.Combat;
 using MegaCrit.Sts2.Core.Context;
@@ -107,6 +108,7 @@ public static class DuelLayout
         float scaling = room._visuals.Encounter.GetCameraScaling();
         room.PositionEnemies(moved, scaling);
         NCombatRoom.PositionPlayersAndPets(remainingAllies, scaling, room._visuals.Encounter.FullyCenterPlayers);
+        MirrorSummonsAboutTheirOwner(moved);
         room.UpdateCreatureNavigation();
 
         Log.Warn($"[SpirePvp] duel layout: moved {moved.Count} opponent creature(s) to the enemy side, " +
@@ -178,6 +180,57 @@ public static class DuelLayout
                  $"applied={body.Scale.X:0.###} pos={node.Position}");
     }
 
+
+    /// <summary>
+    /// Reflects each opponent summon across its owner, so it stands on the same side of them
+    /// that yours stands on you.
+    ///
+    /// Mirroring the opponent is not only about art. On your side a summon is placed *forward*
+    /// of its owner — toward the middle of the screen, where the fight is — by the owner-aware
+    /// arithmetic in PositionPlayersAndPets. PositionEnemies has no notion of owners at all, so
+    /// it lays the opponent's group out in a row and the same offset points the wrong way:
+    /// their summon ends up on the far side of them, behind its own necrobinder, while yours is
+    /// in front of you. Both screens showed it, symmetrically and identically wrong.
+    ///
+    /// Reflecting whatever placement PositionEnemies chose, rather than recomputing one,
+    /// deliberately keeps the engine's spacing decisions — which respond to creature count and
+    /// size — and only corrects their handedness. Centres are reflected rather than origins,
+    /// since Position is a corner and owner and summon are rarely the same width.
+    ///
+    /// Owner-agnostic: Osty, Pael's Legion, Byrdonis and every other PetOwner summon, with none
+    /// of them named. Note this deliberately does not reproduce PositionLocalPlayerOsty's fixed
+    /// nudge, which is gated on LocalContext.IsMe and would fight the enemy-side layout.
+    ///
+    /// Safe under the re-entrancy DuelLateSummonLayoutPatch introduces because it always runs
+    /// immediately after PositionEnemies, on freshly computed positions — it reflects a fresh
+    /// layout each time rather than re-reflecting its own output back.
+    /// </summary>
+    private static void MirrorSummonsAboutTheirOwner(List<NCreature> moved)
+    {
+        foreach (NCreature summon in moved)
+        {
+            Player? owner = summon.Entity?.PetOwner;
+            if (owner == null)
+            {
+                continue;
+            }
+
+            NCreature? ownerNode = moved.FirstOrDefault(n => n.Entity?.Player == owner);
+            if (ownerNode == null)
+            {
+                continue;
+            }
+
+            float summonWidth = summon.Visuals?.Bounds.Size.X ?? 0f;
+            float ownerWidth = ownerNode.Visuals?.Bounds.Size.X ?? 0f;
+
+            float summonCentre = summon.Position.X + summonWidth * 0.5f;
+            float ownerCentre = ownerNode.Position.X + ownerWidth * 0.5f;
+
+            float reflected = 2f * ownerCentre - summonCentre;
+            summon.Position = new Vector2(reflected - summonWidth * 0.5f, summon.Position.Y);
+        }
+    }
 
     /// <summary>
     /// Puts every player-side creature back in the ally container, so `duel off` really does
