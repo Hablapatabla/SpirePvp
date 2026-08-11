@@ -1,4 +1,4 @@
-# Handoff — state of the mod as of 2026-08-06 (night, handed Windows → Mac)
+# Handoff — state of the mod as of 2026-08-07 (handed back Mac → Windows)
 
 Written for someone (human or agent) picking this up cold, on any OS. Everything below was
 built and playtested against **Slay the Spire 2 v0.110.1**, on two local clients connected
@@ -456,10 +456,22 @@ Keep that split if you extend this.
 
 ### First: re-run the result-screen playtest
 
-**Still not done. Attempted on Windows the night of 2026-08-06 and the match never started** —
-the client could not connect, so not one of the fixes below has been exercised. Everything in
-this section stands exactly as the Mac left it. What that attempt *did* establish, so it need
-not be redone:
+**Still not done, and the Mac did not get to it either — the code is byte-for-byte what Windows
+already had.** The handoff has now crossed twice with no playtest on either side, so nothing
+below has moved: same six fixes, same table, same log lines.
+
+**Start with the two things that killed the last attempt**, because neither is a code problem:
+
+1. **Pass `-Custom`.** The failed run's args line read `--force-steam=off
+   --fastmp=host_standard` — a standard lobby, which has no modifier list, so the match could
+   not have been configured however far it otherwise got. That flag is the tell if it happens
+   again.
+2. **Get the host visibly into the lobby screen before launching the client.** Waiting on the
+   `.pck` export is not enough, and the log will not tell you — see the silence trap below.
+
+**Attempted on Windows the night of 2026-08-06 and the match never started** — the client could
+not connect, so not one of the fixes below has been exercised. What that attempt *did* establish,
+so it need not be redone:
 
 - The Mac's four commits build clean on Windows (0 warnings) and **`44 patch classes applied
   cleanly` on both host and client**, so the pulled code applies on this platform.
