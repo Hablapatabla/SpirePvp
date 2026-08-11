@@ -4,6 +4,7 @@ using MegaCrit.Sts2.Core.Context;
 using MegaCrit.Sts2.Core.Entities.Creatures;
 using MegaCrit.Sts2.Core.Entities.Players;
 using MegaCrit.Sts2.Core.Entities.UI;
+using MegaCrit.Sts2.Core.Helpers;
 using MegaCrit.Sts2.Core.Logging;
 using MegaCrit.Sts2.Core.Nodes.Combat;
 using MegaCrit.Sts2.Core.Nodes.Rooms;
@@ -78,7 +79,7 @@ public static class DuelLayout
             // Keep the visual transform stable across the reparent; PositionEnemies
             // overwrites it immediately after, but this avoids a one-frame jump.
             node.Reparent(room._enemyContainer, keepGlobalTransform: true);
-            FaceLeft(node, faceLeft: true);
+            Mirror(node, mirrored: true);
 
             // Remote players and their pets start with their bar hidden (co-op shows it on
             // hover only, gated on the same _isRemotePlayerOrPet flag). Bring it up now;
@@ -97,6 +98,7 @@ public static class DuelLayout
         float scaling = room._visuals.Encounter.GetCameraScaling();
         room.PositionEnemies(moved, scaling);
         NCombatRoom.PositionPlayersAndPets(remainingAllies, scaling, room._visuals.Encounter.FullyCenterPlayers);
+        DrawPetsInFrontOfOwners(moved);
         room.UpdateCreatureNavigation();
 
         Log.Warn($"[SpirePvp] duel layout: moved {moved.Count} opponent creature(s) to the enemy side, " +
@@ -104,16 +106,43 @@ public static class DuelLayout
     }
 
     /// <summary>
-    /// Mirrors a creature's body art horizontally so the duelists face each other. Player
-    /// creatures are drawn facing right because they always stand on the left; once moved
-    /// across they need flipping or both fighters stare the same way.
+    /// Each moved node's authored horizontal facing, captured the first time we touch it.
+    ///
+    /// Static state outliving a run is the trap DuelRunCleanupPatch exists for, so this is
+    /// released in DuelMatch.OnRunEnded via <see cref="Reset"/>. Nodes do not survive a combat
+    /// either, so holding them across one would be a leak as well as a correctness problem.
+    /// </summary>
+    private static readonly Dictionary<NCreature, float> _naturalFacing = new();
+
+    /// <summary>Drops the captured facings. See DuelMatch.OnRunEnded.</summary>
+    public static void Reset()
+    {
+        _naturalFacing.Clear();
+    }
+
+    /// <summary>
+    /// Mirrors a creature's body art horizontally so the duelists face each other.
+    ///
+    /// **Mirrors relative to the creature's own authored facing rather than forcing a sign.**
+    /// The original wrote `scale.X = faceLeft ? -|x| : |x|`, which encodes the assumption that
+    /// positive means "facing right". That holds for player creatures — the comment said as
+    /// much — but not for summons, so the opponent's Osty came out backwards while its owner
+    /// mirrored correctly: forcing a sign either did nothing or flipped it the wrong way,
+    /// depending on how that particular art was authored.
+    ///
+    /// Capturing the natural value and negating *that* is correct for any convention, and it
+    /// stays idempotent, which the absolute version was getting for free and which `duel on` /
+    /// `duel off` rely on to be re-runnable.
+    ///
+    /// Nothing here is per-creature: it works for Osty, Pael's Legion, Byrdonis and every other
+    /// PetOwner summon without naming any of them.
     ///
     /// Flips the body node rather than NCreature.Visuals: Visuals.Scale feeds Bounds and the
     /// aspect-ratio fit in AdjustCreatureScaleForAspectRatio, and a negative scale there
     /// would poison that arithmetic. The health bar is a sibling (_stateDisplay), so it is
     /// unaffected either way — text stays readable.
     /// </summary>
-    private static void FaceLeft(NCreature node, bool faceLeft)
+    private static void Mirror(NCreature node, bool mirrored)
     {
         Node2D? body = node.Visuals?.GetCurrentBody();
         if (body == null)
@@ -121,8 +150,50 @@ public static class DuelLayout
             return;
         }
 
-        float magnitude = Math.Abs(body.Scale.X);
-        body.Scale = new Vector2(faceLeft ? -magnitude : magnitude, body.Scale.Y);
+        if (!_naturalFacing.TryGetValue(node, out float natural))
+        {
+            natural = body.Scale.X;
+            _naturalFacing[node] = natural;
+        }
+
+        body.Scale = new Vector2(mirrored ? -natural : natural, body.Scale.Y);
+    }
+
+    /// <summary>
+    /// Draws each opponent's summons in front of their owner.
+    ///
+    /// Depth here is child order, and vanilla establishes it at the end of
+    /// PositionPlayersAndPets: the player is moved to child index 0 and its pets to 1..n, so
+    /// summons overlap their owner rather than hiding behind them. **That method only runs for
+    /// your own side.** The opponent goes through PositionEnemies, which has no concept of
+    /// owners and pets at all, so their summons landed in whatever order the enemy layout
+    /// produced — which is why the opponent's Osty drew behind its necrobinder.
+    ///
+    /// This reproduces only the ordering half. The rest of PositionPlayersAndPets is
+    /// deliberately not replicated: it also shifts the local player by a fixed offset and
+    /// applies GetOstyOffsetFromPlayer, both gated on LocalContext.IsMe, and both would fight
+    /// the enemy-side placement PositionEnemies has already chosen.
+    ///
+    /// Owner-agnostic, so it covers every summon rather than the one that exposed it.
+    /// </summary>
+    private static void DrawPetsInFrontOfOwners(List<NCreature> moved)
+    {
+        foreach (NCreature node in moved)
+        {
+            if (node.Entity.IsPlayer)
+            {
+                node.GetParent()?.MoveChildSafely(node, 0);
+            }
+        }
+
+        int depth = 1;
+        foreach (NCreature node in moved)
+        {
+            if (!node.Entity.IsPlayer)
+            {
+                node.GetParent()?.MoveChildSafely(node, depth++);
+            }
+        }
     }
 
     /// <summary>
@@ -154,7 +225,7 @@ public static class DuelLayout
                 node.Reparent(room._allyContainer, keepGlobalTransform: true);
             }
 
-            FaceLeft(node, faceLeft: false);
+            Mirror(node, mirrored: false);
             allies.Add(node);
         }
 
