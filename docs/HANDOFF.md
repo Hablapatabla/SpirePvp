@@ -1,4 +1,4 @@
-# Handoff — state of the mod as of 2026-08-07 (handed back Mac → Windows)
+# Handoff — state of the mod as of 2026-08-11 (Windows)
 
 Written for someone (human or agent) picking this up cold, on any OS. Everything below was
 built and playtested against **Slay the Spire 2 v0.110.1**, on two local clients connected
@@ -77,7 +77,8 @@ abandons the rest, so one typo disables an arbitrary subset while the mod still 
 still logs "loaded". `SpirePvpInit` therefore applies each patch class independently and logs
 a count. **On every launch, confirm the log says `N patch classes applied cleanly`** — if it
 says `PATCH FAILED`, some of the mod is not running and in-game results mean nothing.
-**44 as of this handoff.**
+**52 as of this handoff.** The count is per *class*, not per patch: a class holding
+several patch methods still counts once, so grouping patches by concern does not move it.
 
 **Harmony resolves `[HarmonyPatch(typeof(X))]` against methods declared on `X` only.** Naming
 an inherited method throws "Undefined target method". This caused the above.
@@ -454,114 +455,55 @@ Keep that split if you extend this.
 
 ## Immediate next step
 
-### First: re-run the result-screen playtest
+### M7 — the dedicated Duel host menu
 
-**Still not done, and the Mac did not get to it either — the code is byte-for-byte what Windows
-already had.** The handoff has now crossed twice with no playtest on either side, so nothing
-below has moved: same six fixes, same table, same log lines.
+**Everything that was pending here has been playtested and closed.** The 2026-08-11 session ran
+the loop end to end repeatedly and fixed what it found; the result screen, the arena, the
+rendezvous, the deck review, resignation and the duel itself are all confirmed working from
+both sides. What follows is history worth keeping, not a to-do list.
 
-**Start with the two things that killed the last attempt**, because neither is a code problem:
+M7 is scoped below under "Then: M7's dedicated Duel host menu".
 
-1. **Pass `-Custom`.** The failed run's args line read `--force-steam=off
-   --fastmp=host_standard` — a standard lobby, which has no modifier list, so the match could
-   not have been configured however far it otherwise got. That flag is the tell if it happens
-   again.
-2. **Get the host visibly into the lobby screen before launching the client.** Waiting on the
-   `.pck` export is not enough, and the log will not tell you — see the silence trap below.
+### What 2026-08-11 fixed, and the one idea behind most of it
 
-**Attempted on Windows the night of 2026-08-06 and the match never started** — the client could
-not connect, so not one of the fixes below has been exercised. What that attempt *did* establish,
-so it need not be redone:
+Nine of the eleven bugs that session were the same thing wearing different clothes: **the
+engine assumes the party is standing together, and in a race it is not.** DESIGN I3 predicted
+exactly this recurrence for "rest sites, shops and events" and all three duly arrived.
 
-- The Mac's four commits build clean on Windows (0 warnings) and **`44 patch classes applied
-  cleanly` on both host and client**, so the pulled code applies on this platform.
-- The client merged all four loc tables (`badges`, `game_over_screen`, `gameplay_ui`,
-  `modifiers`), so the `.pck` was intact — not the half-written-pack trap.
-- Three claims the new code rests on were checked against the decompile rather than played, and
-  all three hold. `RunState.AddVisitedMapCoord` really does set `NextRoomId = 0` and return
-  false when the coord was already visited (`Core/Runs/RunState.cs:460`), and `CurrentMapCoord`
-  really is just `_visitedMapCoords.Last()` (`:112`) — so `MoveRunToArenaCoord`'s single call
-  settles **both** halves of `RunLocation`, as its comment claims. And
-  `DuelLayout.BelongsToOpponent` is null-safe via `creature?.Player`, so
-  `DuelStatsTrackingPatch` dropping its `target == null` guard is behaviour-preserving, not an
-  NRE waiting to happen.
+`src/race/RaceSolo.cs` is now where that is written down — the two shapes it takes, the places
+each has bitten, and the rule to reach for first. Read it before diagnosing any new race-phase
+room bug. The short version:
 
-Static checks are not a playtest and none of the table below is verified by them.
+- **A barrier that waits for everyone.** `RestSiteRoom.Exit` awaits every player's completion
+  source; `TreasureRoomRelicSynchronizer.PickRelic` returns early until every vote is in. The
+  opponent never satisfies theirs, so the room never releases. Vanilla's own
+  `OnPeerDisconnected` is the blessed pattern: satisfy the absent player's slot up front.
+- **Presentation indexed by player slot.** A slot-1 client gets the second seat, the second
+  hand, the second holder. **In a race the local player must present as slot 0.** Where vanilla
+  has a real singleplayer path, prefer it to correcting the multiplayer one — checking what the
+  engine draws when alone replaced two hand patches with none.
 
-**Why the match never started, as far as the logs go.** The host was launched *without*
-`-Custom` (`Command Line Args: --force-steam=off --fastmp=host_standard`), which is a standard
-lobby with no modifier list — so that run could not have configured a match even had it
-connected. The client was otherwise healthy: mod loaded, patches clean, straight to
-`ENetClientConnectionInitializer`, then `[ENetClient] Connection timed out!`. Most likely the
-host simply was not in the lobby yet; unproven, because of the trap directly below.
+Two more findings from that session that generalise:
 
-**Creating the lobby logs nothing, so a host nobody reaches looks exactly like a host that
-never opened one.** The first `[StartRunLobby (1)]` line in a *successful* run is `Client 1001
-connected` — the lobby's own construction and the ENet listener produce no output at all. So
-the host log going quiet after `Preloading 'Common' Complete` proves only that no client ever
-arrived, and says nothing about whether anything was listening. Do not read that silence as
-"the host failed to host". If this recurs, get the host visibly into the lobby screen *first*
-and only then launch the client; if it still times out with the lobby plainly on screen, that
-is a real finding rather than a race.
+- **A missing loc key can wreck a whole screen, not just a label.** `DUEL_ENCOUNTER.title` was
+  absent from the `encounters` table, so the *loser's* result screen threw inside
+  `InitializeBannerAndQuote` — four lines from the end of `NGameOverScreen._Ready`, skipping
+  `_leaderboard.Visible = false` and leaving the daily-run leaderboard drawn over everything.
+  The winner took another branch and looked perfect. `EncounterModel` asks for exactly two keys,
+  `.title` and `.loss`.
+- **Sorting anything once, at duel activation, misses everything summoned later.**
+  `DuelLayout.MoveOpponentToEnemySide` ran once and could only sort creatures that existed then,
+  so the opponent's Osty — spawned by Bound Phylactery at combat start *and again every turn
+  from `AfterEnergyResetLate`* — stayed on the player side, un-mirrored. It presented as a
+  facing bug that struck one client and not the other; it was a layout bug, and the logs said so
+  outright (`moved 1` against `moved 2`). `DuelLateSummonLayoutPatch` re-sorts on
+  `CombatManager.AfterCreatureAdded`, which is documented to run once the node exists.
 
-**Run 1 (2026-08-06) froze the client in the duel** — the arena `RunLocation` bug above. Fixed;
-**run 2 played end to end and the screen came up**, which is what found everything below.
+**And a process note that cost real time in that session:** two placement bugs were "corrected"
+from screenshots, and one of those corrections was wrong and had to be reverted. What settled it
+was logging both sides' positions and diffing them — the same method the project already uses
+for state divergence. Pixels are not exempt from "read the logs yourself".
 
-Confirmed working in run 2, from both logs: same arena coord on both clients, zero buffered
-messages after `duel arena ready`, `stats sent:` and `stats received from` on both sides, badges
-awarded on both (3 to the winner, 1 to the loser), the six comparison lines present and
-correctly mirrored between the two screens.
-
-**Five fixes went in after that run and none of them are playtested:**
-
-| Fix | Watch for |
-|---|---|
-| Score-line `[gold]` tags drawn literally | Six clean lines, no visible markup |
-| Duel loss named a race elite as the killer | "Your opponent won the duel." *stays* — it is overwritten a second after the screen opens if this regressed |
-| Duel win reported damage to the Architect | No Architect line at all |
-| Elites defeated read 0 after killing one | Kill an elite on the way; it counts, and the breakdown does not call it your cause of death |
-| Opponent decklist was stale on the entry screen | Take a card from an elite on the client; **it is in the deck the host sees** |
-
-That last one is the important one. `arena: opponent N arrived with M cards` should appear on both
-logs with M matching the deck they actually have, and `duel entry — opponent deck: M cards
-(reported on arrival)` — if it says `(local copy)` the message did not arrive and you are looking
-at the stale deck again.
-
-Still worth checking, because run 2 could not reach them: `Elites defeated` non-zero on **one**
-side only, and an `Elite Hunter` badge going to that player alone.
-
-**One deliberately lopsided duel proves all of it.** `Race Clock: 10` · `Duel Clock: 3`. Send one
-player on a **detour to fight an elite** — genuinely fight it, not `kill`, and take the card
-reward, since that one detour is what exercises the elite count, the deck reveal and two badges —
-while the other goes more or less straight to the arena. In the duel, have one spam cheap cards
-and the other play as few as possible, then finish with `damage 200 1`. The asymmetry is the test;
-identical play would hide all of it.
-
-**Reach the arena from two different map coords** — one player walking, the other jumping with
-`travel`. Matching coords is what hid the freeze for months, so a test where both walk to the boss
-is not testing the fix.
-
-Log lines that settle it: `duel: run moved to arena coord` with the **same coord on both**, no
-`enqueueing it because we are currently at location` after `duel arena ready`, `arena: opponent N
-arrived with M cards` on both, `duel entry — opponent deck: M cards (reported on arrival)`,
-`stats sent:` / `stats received from` on both, and `duel badges: N awarded`.
-
-Two smaller fixes rode along and were not specifically exercised: the damage tracker now asks
-`DuelLayout.BelongsToOpponent` instead of `target.Player`, so damage to your *own* pet no longer
-counts as offence (needs a character with a summon to show), and `DuelResultLinesPatch` now clears
-`_scoreLines` the way vanilla's `AnimateScoreLines` does.
-
-Two known judgement calls, neither a bug, both worth a second opinion after seeing them:
-
-- **Cards played counts auto-plays.** Hellraiser-style effects inflate it, which makes
-  "Efficient" losable through no real choice. Left counting everything because the right answer
-  depends on how the number actually looks; `CardPlay.IsAutoPlay` is the filter if it reads
-  badly.
-- **Badge icons are borrowed vanilla art**, mapped by meaning (`damage_leader` → Aggressor,
-  `perfect` → Flawless). They will look like real badges and be recognisable as other badges.
-  `DuelBadgeIconPatch` is the one-line-per-badge seam when real art exists.
-
----
 
 **Then: M7's dedicated Duel host menu** (decided 2026-08-06). Today a match is
 configured by knowing to pick a *Custom* run and tick three modifiers, which is both buried and
@@ -660,6 +602,7 @@ would improve the thing:
 | Piece | Why, and what exists now |
 |---|---|
 | **Duel host menu** (M7) | The next milestone. Wants a menu entry and whatever framing the preset/clock controls sit in. Nothing exists. |
+| **Modifier icons** | Three would cover it — one per lobby group (turn model · race clock · duel clock), reused across each group's variants. Currently all three borrow vanilla's Draft icon. `DuelModifierBase.IconPath` is the seam: override it on `RaceClockModifier` and `DuelClockModifier` to split them. **Note the `.png` is load-bearing** — `ImageHelper.GetImagePath` only prefixes `res://images/`, and an extensionless path silently falls back to `powers/missing_power`, which is the placeholder that drew three "NOPE"s across the top bar for most of this project's life. |
 | **Result screen** | The banner reads VICTORY / DEFEATED / DRAW in vanilla's frame with the score lines cut, so there is now visible empty space where a duel's own summary belongs. |
 | **Deck review background** | Currently the *boss* background, which is wrong and was flagged as wrong on sight. Anything plain — black, or the campfire — beats it; until then the fallback is whatever `NDeckCardSelectScreen` uses behind its grid. |
 | **Duel map node** | Exists (`SpirePvp/map/duel_node.png` + `_outline`). Now doubles as the top-bar boss icon via `DuelRoomIconPatch`, so it is being drawn at two sizes and may want a small variant. |

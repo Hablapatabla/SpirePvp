@@ -10,11 +10,17 @@ StS2 modding model) → `docs/DESIGN.md` (full design, milestones, investigation
 Platform setup: `docs/MAC_SETUP.md` is macOS-specific; the flags and reasoning in HANDOFF are
 OS-neutral.
 
-**Current state (2026-08-06):** **M1–M6 done and playtested** against v0.110.1 on two local
+**Current state (2026-08-11):** **M1–M6 done and playtested** against v0.110.1 on two local
 clients over ENet. The whole loop runs: lobby modifiers → race Act 1 on a mirrored seed →
 arena rendezvous → deck review → duel → result screen, with split race/duel clocks, checksums
 live, and back-to-back matches in one process. Matches also end by **resignation** (abandoning
 is a loss and a win for the opponent) and by **agreed draw** (pause menu → Offer Draw).
+
+The 2026-08-11 session was a long playtest sweep that closed the race phase's remaining
+rough edges — a client that could not leave a rest site, a chest that offered two relics and
+then would not let the client take one, opponent portraits stuck to your own map node, the
+loser's result screen wrecked by a missing loc key, and the opponent's summons drawn on the
+wrong side. All fixed and played through. **M7 is the next milestone.**
 
 **Remaining:** rematch (deliberately deferred — it is milestone-sized, not a button; see
 HANDOFF), per-round damage stats on the result screen, and **M7's dedicated Duel host menu**,
@@ -30,8 +36,15 @@ side comparison before suspecting the mechanic. DESIGN §7 has the symptom → c
 - `dotnet build` must stay green; it auto-installs the mod into the local game.
 - **Never use `Harmony.PatchAll`.** It throws on the first bad target and silently abandons the
   rest. `SpirePvpInit` patches per class and logs a count — confirm `N patch classes applied
-  cleanly` in the log on every launch, or in-game results are meaningless. **44 as of
-  2026-08-06.**
+  cleanly` in the log on every launch, or in-game results are meaningless. **52 as of
+  2026-08-11.** Note the count is per *class*, not per patch: a class holding several patch
+  methods still counts once, so grouping patches by concern does not move it.
+- **The engine assumes the party is standing together, and in a race it is not.** This is the
+  single most productive thing to suspect when a race-phase room misbehaves — it has now
+  produced bugs in combat, map travel, rest sites, the treasure chest and the shop. It comes in
+  two shapes and `src/race/RaceSolo.cs` documents both, along with the rule that falls out: **in
+  a race the local player must present as slot 0.** Where vanilla has a real singleplayer path,
+  prefer it to correcting the multiplayer one.
 - **Read the logs yourself** (`logs/host.log`, `logs/client.log`) rather than asking for
   symptoms, and check the log's timestamp against the installed DLL — a stale log is
   indistinguishable from a patch that stopped applying. The launchers rotate rather than
