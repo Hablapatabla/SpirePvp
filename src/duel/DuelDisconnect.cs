@@ -107,6 +107,12 @@ public static class DuelDisconnect
     {
         NetError reason = info.GetReason();
 
+        if (IsDesync(reason))
+        {
+            DeclareVoid(reason);
+            return;
+        }
+
         if (reason is NetError.Quit or NetError.HostAbandoned or NetError.Kicked)
         {
             Declare($"the opponent left deliberately ({reason})");
@@ -164,6 +170,36 @@ public static class DuelDisconnect
         _declared = true;
         Log.Warn($"[SpirePvp] {why} — declaring a win by disconnect");
         DuelResult.DeclareWinner(true, DuelEndReason.Disconnect);
+    }
+
+    /// <summary>
+    /// Whether a lost connection is the sim having come apart rather than the peer having gone.
+    ///
+    /// Asked as its own question, in one place, because the two sides learn of it through
+    /// different channels — the host issues the kick, the client is told about it — and the whole
+    /// point is that they must reach the *same* answer without talking.
+    /// </summary>
+    public static bool IsDesync(NetError reason) => reason == NetError.StateDivergence;
+
+    /// <summary>
+    /// Ends the match as a void draw, because the two simulations stopped agreeing.
+    ///
+    /// **This exists because the alternative put a VICTORY banner on both screens.** See
+    /// <see cref="DuelEndReason.Desync"/> for the measurement and the reasoning; the short version
+    /// is that a desync destroys the evidence a winner would be read from, so there is no winner
+    /// to name and pretending otherwise is worse than saying so.
+    ///
+    /// Declared locally on both sides rather than announced, like every other disconnect route —
+    /// there is no connection left to announce over. It agrees anyway because both sides switch on
+    /// the same reason code.
+    /// </summary>
+    public static void DeclareVoid(NetError reason)
+    {
+        _declared = true;
+        ClearWait("the match is void");
+        Log.Warn($"[SpirePvp] the simulations diverged ({reason}) — voiding the match as a draw; " +
+                 "neither side's state is evidence of who was ahead");
+        DuelResult.DeclareDraw(DuelEndReason.Desync);
     }
 
     /// <summary>

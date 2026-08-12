@@ -96,11 +96,19 @@ public static class DuelResultQuotes
                     _ => ("wonHp", "You won the duel.")
                 };
 
+            // A switch rather than the `== AgreedDraw ? … : raceExpired` this used to be. That
+            // read correctly while there were exactly two draws and silently mislabels the third:
+            // a voided match would have been announced as a race timeout, which is a specific
+            // false claim about how the match ended. Same trap as every other predicate here —
+            // "not the one I named" is not a condition.
             case DuelOutcome.Draw:
-                return reason == DuelEndReason.AgreedDraw
-                    ? ("drawAgreed", "You agreed to a draw.")
-                    : ("drawRaceExpired",
-                       "Time ran out before either of you reached the arena.");
+                return reason switch
+                {
+                    DuelEndReason.AgreedDraw => ("drawAgreed", "You agreed to a draw."),
+                    DuelEndReason.Desync => ("drawDesync", "The match desynced. No result."),
+                    _ => ("drawRaceExpired",
+                          "Time ran out before either of you reached the arena.")
+                };
 
             default:
                 return reason switch

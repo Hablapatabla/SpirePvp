@@ -3,6 +3,7 @@ using MegaCrit.Sts2.Core.Context;
 using MegaCrit.Sts2.Core.Entities.Multiplayer;
 using MegaCrit.Sts2.Core.Entities.Players;
 using MegaCrit.Sts2.Core.Logging;
+using MegaCrit.Sts2.Core.Multiplayer.Game.Lobby;
 using MegaCrit.Sts2.Core.Runs;
 
 namespace SpirePvp.Duel.Patches;
@@ -51,13 +52,48 @@ namespace SpirePvp.Duel.Patches;
 [HarmonyPatch]
 public static class DuelDisconnectPatch
 {
-    /// <summary>The peer went away while we are still playing. We win.</summary>
+    /// <summary>
+    /// Why the last client dropped, captured on its way past.
+    ///
+    /// **The reason is known here and thrown away one line later.**
+    /// `RunLobby.OnDisconnectedFromClientAsHost` is handed a `NetErrorInfo`, logs it, and then
+    /// raises `RemotePlayerDisconnected` carrying nothing but the player id — so the host's own
+    /// route below cannot tell a quit from a divergence kick it issued itself. That is how both
+    /// players ended a match on a VICTORY banner (see <see cref="DuelEndReason.Desync"/>): the
+    /// host read its own ejection of the client as the client walking away.
+    ///
+    /// Stashed rather than plumbed because the event signature is vanilla's and the gap is one
+    /// call wide. Cleared as it is read, so a later disconnect with no reason cannot inherit this
+    /// one — the stale-value trap this project keeps meeting in its own static state.
+    /// </summary>
+    private static NetError? _lastClientDropReason;
+
+    /// <summary>Runs before the event above, which is the only reason a prefix is required.</summary>
+    [HarmonyPatch(typeof(RunLobby), nameof(RunLobby.OnDisconnectedFromClientAsHost))]
+    [HarmonyPrefix]
+    public static void BeforeDisconnectedFromClientAsHost(NetErrorInfo info)
+    {
+        _lastClientDropReason = info.GetReason();
+    }
+
+    /// <summary>The peer went away while we are still playing. We win — unless the sim came apart.</summary>
     [HarmonyPatch(typeof(RunManager), nameof(RunManager.RemotePlayerDisconnected))]
     [HarmonyPostfix]
     public static void AfterRemotePlayerDisconnected(RunManager __instance, ulong playerId)
     {
+        NetError? reason = _lastClientDropReason;
+        _lastClientDropReason = null;
+
         if (!DuelDisconnect.ShouldDecide(__instance))
         {
+            return;
+        }
+
+        // A divergence is not a departure, and the host is the side that has to notice: it is the
+        // one that issued the kick, so "the client disconnected" is true and entirely misleading.
+        if (reason != null && DuelDisconnect.IsDesync(reason.Value))
+        {
+            DuelDisconnect.DeclareVoid(reason.Value);
             return;
         }
 

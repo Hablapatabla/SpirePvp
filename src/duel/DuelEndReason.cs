@@ -50,4 +50,24 @@ public static class DuelEndReason
     /// apart.
     /// </summary>
     public const int Disconnect = 5;
+
+    /// <summary>
+    /// The two simulations stopped agreeing and the host ejected the client for
+    /// `StateDivergence`. **A void match, scored as a draw** — not a win for anybody.
+    ///
+    /// It arrives as a disconnect and was originally handled as one, which produced the worst
+    /// result screen this project has shown: measured 2026-08-12, *both* players were told
+    /// "Their connection gave out" over a VICTORY banner. Each side had independently concluded
+    /// the opponent had dropped, and on a divergence each side is right — the host cut the link,
+    /// and the client's link died.
+    ///
+    /// Awarding it to nobody is the only defensible reading. A desync means the two games
+    /// disagree about the board, so neither client's view of who was ahead is evidence of
+    /// anything; the match did not produce a result, and saying so is honest where a coin-flip
+    /// winner is not. Note this is the one disconnect route where both sides *can* agree without
+    /// talking, because the reason code is symmetric and each is told it — which is what makes a
+    /// local decision safe here and not in the general partition case (see
+    /// <see cref="DuelDisconnect.Declare"/>).
+    /// </summary>
+    public const int Desync = 6;
 }
