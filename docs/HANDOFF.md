@@ -740,7 +740,9 @@ than a fix:
 
 | Work | Size | Notes |
 |---|---|---|
-| **Rematch** | milestone | The biggest remaining hole in the loop. Scoped under Open Issues below: the run is torn down by result-screen time, so it needs a handshake, a route into a lobby that skips the menu, and teardown ordering that keeps the transport alive across a run boundary |
+| ~~**Rematch**~~ | — | **Done and playtested 2026-08-12.** Offer/accept on the result screen, same seed, transport held open through teardown. |
+| **Return to lobby** | medium | **Parked 2026-08-12 at Lucas's request, with the research done.** A second result-screen button returning both players to the Duel lobby to change rules or characters. The mechanism is confirmed viable: `StartRunLobby`'s constructor iterates `ConnectedPeers` and adopts already-connected peers, and `HandleClientLobbyJoinRequestMessage` answers with a `ClientLobbyJoinResponseMessage` exactly as it would for a fresh join — so **vanilla's join handshake works over a connection that is already up**. What is left is the ordering: host tears down (disconnect suppressed, as `DuelRematch` does) and opens `NCustomRunScreen` via `InitializeMultiplayerAsHost`, then the client tears down, re-sends the join request, and builds its own screen from the response via `InitializeMultiplayerAsClient`. Unresearched: opening `NCustomRunScreen` programmatically (screen-stack mechanics). Bigger than Rematch, because Rematch could skip the lobby entirely and this cannot. |
+| ~~**Rematch (old scoping)**~~ | — | The biggest remaining hole in the loop. Scoped under Open Issues below: the run is torn down by result-screen time, so it needs a handshake, a route into a lobby that skips the menu, and teardown ordering that keeps the transport alive across a run boundary |
 | ~~**Per-round damage stats**~~ | — | **Done, and confirmed in play 2026-08-12.** `DuelStats` tracks cards and damage through the duel, broadcasts them as the match is decided, and `DuelResultLinesPatch` draws six `yours · theirs` comparison rows. A per-*round* breakdown is deliberately not built — see below |
 | **True rejoin** | milestone | Scoped in `docs/PLAYTEST_LIST.md`. Vanilla's rejoin is half-built and the missing half is the UI; the run-state rule is already decided |
 | **Random as a character choice** | small feature | Deferred with a full scope in `docs/PLAYTEST_LIST.md` |
@@ -887,6 +889,19 @@ Smaller known gaps, none blocking:
   one shows up; only poison is fixed.
 - The duel entry screen's confirm feedback is a colour tint standing in for the intended
   green check + opponent portrait (DESIGN §6, wants an asset pass).
+- **The killing blow is left hanging in mid-air behind the result screen.** Reported 2026-08-12.
+  Cause is known and is the familiar shape: `DuelEndCombatPatch` **skips
+  `CombatManager.EndCombatInternal` wholesale** and calls `DuelResult.ShowFor` in its place, so
+  every wind-down step vanilla does on the way out of a combat — including whatever retires the
+  card currently mid-play — simply never happens. The patch exists because `EndCombatInternal`
+  assumes a real map room and NREs in the arena, so it cannot just be let through.
+
+  **Not a quick fix, and it is the same trap as `RunManager.EnterRoom`**: a vanilla teardown
+  skipped in one line, inheriting every omission silently. `DuelArena` had to mirror
+  `EnterMapPointInternal` step for step and six omissions were found one at a time; this is that
+  problem at the other end of the combat. Doing it properly means reading `EndCombatInternal` and
+  deciding which of its steps are safe in an arena, with a comment listing each — not adding a
+  card-cleanup call and hoping. Worth its own pass.
 - **The arena's top-bar icon still hovers as a boss** — *"Boss — the deadliest foe in the
   area…"*. Reported 2026-08-12 and **deliberately deferred, with the seam found so it does not
   have to be found twice.** `NTopBarBossIcon.OnFocus` builds the tip from
