@@ -372,3 +372,49 @@ public record struct DuelArrivedMessage : INetMessage
         deck = reader.ReadList<SerializableCard>();
     }
 }
+
+/// <summary>
+/// "Play it again" — the offer and its answer, exchanged on the result screen.
+///
+/// **Same shape as `DuelDrawOfferMessage`, and for the same reason:** a rematch needs both
+/// players, offers that cross on the wire are agreement rather than a conflict, and the answer
+/// has to be able to say no. Rather than share that message's type, this is its own — a draw ends
+/// a match and a rematch starts one, and one field meaning two opposite things is exactly the
+/// drift `DuelEndReason` exists to prevent.
+///
+/// **No seed rides on it, deliberately.** A rematch replays the same seed, and both clients
+/// already hold it in the run they are looking at — identical by construction, since a shared seed
+/// is the premise of the whole mode. Sending it would invite the two copies to disagree and give
+/// the receiver a reason to trust the wire over its own state.
+///
+/// Appended at the bottom, like every message since `DuelDrawOfferMessage`: ids are positional, so
+/// new types go last and leave the established ones alone.
+/// </summary>
+public record struct DuelRematchMessage : INetMessage
+{
+    public bool ShouldBroadcast => true;
+
+    public NetTransferMode Mode => NetTransferMode.Reliable;
+
+    public LogLevel LogLevel => LogLevel.Info;
+
+    public bool ShouldBuffer => true;
+
+    /// <summary>False = "I want a rematch"; true = "here is my answer to yours".</summary>
+    public bool isResponse;
+
+    /// <summary>Meaningful only when <see cref="isResponse"/> is true.</summary>
+    public bool accepted;
+
+    public void Serialize(PacketWriter writer)
+    {
+        writer.WriteBool(isResponse);
+        writer.WriteBool(accepted);
+    }
+
+    public void Deserialize(PacketReader reader)
+    {
+        isResponse = reader.ReadBool();
+        accepted = reader.ReadBool();
+    }
+}

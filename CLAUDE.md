@@ -51,8 +51,8 @@ side comparison before suspecting the mechanic. DESIGN §7 has the symptom → c
 - `dotnet build` must stay green; it auto-installs the mod into the local game.
 - **Never use `Harmony.PatchAll`.** It throws on the first bad target and silently abandons the
   rest. `SpirePvpInit` patches per class and logs a count — confirm `N patch classes applied
-  cleanly` in the log on every launch, or in-game results are meaningless. **60 as of
-  2026-08-12**, confirmed against a live log (this line said 56 while HANDOFF said 58 — when they
+  cleanly` in the log on every launch, or in-game results are meaningless. **61 as of
+  2026-08-12** (rematch added one), confirmed against a live log (this line said 56 while HANDOFF said 58 — when they
   disagree, HANDOFF wins, and the log settles it). Note the count is per *class*, not per patch: a class holding several patch
   methods still counts once, so grouping patches by concern does not move it.
 - **The engine assumes the party is standing together, and in a race it is not.** This is the
