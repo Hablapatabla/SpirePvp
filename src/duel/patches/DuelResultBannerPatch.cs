@@ -31,10 +31,12 @@ namespace SpirePvp.Duel.Patches;
 /// a boss this run never fought, and a number that means nothing in a duel. Blanked rather than
 /// rewritten: the duel's own numbers are already on the screen, in the score lines.
 /// </summary>
-[HarmonyPatch(typeof(NGameOverScreen), nameof(NGameOverScreen.InitializeBannerAndQuote))]
+[HarmonyPatch]
 public static class DuelResultBannerPatch
 {
-    public static void Postfix(NGameOverScreen __instance)
+    [HarmonyPatch(typeof(NGameOverScreen), nameof(NGameOverScreen.InitializeBannerAndQuote))]
+    [HarmonyPostfix]
+    public static void AfterInitializeBannerAndQuote(NGameOverScreen __instance)
     {
         if (DuelSession.Phase != DuelPhase.Complete)
         {
@@ -109,6 +111,45 @@ public static class DuelResultBannerPatch
         Log.Warn($"[SpirePvp] result screen: {DuelSession.Outcome}, "
                  + $"reason {DuelResult.EndReason} — \"{quote}\" [{source}] "
                  + $"in {(__instance._history.Win ? "victoryDamageLabel" : "deathQuote")}");
+    }
+
+    /// <summary>
+    /// Puts the winner's line back on the summary screen, which vanilla hides on the way in.
+    ///
+    /// **Reported 2026-08-12: the loser's line appears on the score screen and the winner's does
+    /// not.** `OpenSummaryScreen` — the Continue button — begins with
+    /// `_victoryDamageLabel.Visible = false` and *then* runs `AnimateInQuote`, which on a win
+    /// tweens that very label's `modulate:a` and `visible_ratio`. So the animation plays on a
+    /// hidden node and nothing is ever drawn, while the loss branch tweens `_deathQuote`, which
+    /// nobody hid.
+    ///
+    /// That is correct for vanilla and wrong for us, and the difference is what the label now
+    /// holds. Vanilla's `_victoryDamageLabel` is a full-screen block of run-score prose about the
+    /// Architect, which would sit across the summary it is handing over to — hiding it is the
+    /// right call. We have reparented it into the banner and put a one-line duel epitaph in it
+    /// (see below), so for a duel it is the same line the loser keeps, in the same place, and it
+    /// should survive the same transition.
+    ///
+    /// A postfix, so it re-shows the label after vanilla has hidden it and before the tween has
+    /// anything to fade in. Gated on `Complete` like everything else here, so an ordinary run's
+    /// summary screen is untouched.
+    /// </summary>
+    [HarmonyPatch(typeof(NGameOverScreen), nameof(NGameOverScreen.OpenSummaryScreen))]
+    [HarmonyPostfix]
+    public static void AfterOpenSummaryScreen(NGameOverScreen __instance)
+    {
+        // `_history.Win` rather than the outcome, for the reason given above: it is the field
+        // `AnimateInQuote` branches on, so this can never re-show a label the animation is not
+        // going to fill.
+        if (DuelSession.Phase != DuelPhase.Complete || !__instance._history.Win)
+        {
+            return;
+        }
+
+        __instance._victoryDamageLabel.Visible = true;
+
+        Log.Warn("[SpirePvp] result screen: victory line re-shown on the summary screen "
+                 + "(OpenSummaryScreen hides it for vanilla's Architect prose)");
     }
 
     /// <summary>
