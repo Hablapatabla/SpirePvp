@@ -78,8 +78,23 @@
       Written to obj/ rather than over the tracked file, so building never dirties the tree it
       is reporting on. Falls back to the plain manifest when git is unavailable — the mod still
       works, it just loses the guarantee.
+
+      **Debug only, and the distinction is the point.** Git runs on whoever *builds*, never on a
+      player's machine — so which distribution route is in use decides whether a hash is wanted:
+
+        - Built from a clone (how this is shared today): every player builds their own copy, so
+          two people can hold the same declared version and different code. The hash is the only
+          thing that catches that.
+        - Published to the Workshop: one person builds once and every subscriber receives that
+          identical file, so they match by construction. A commit hash there is noise in a
+          user-visible version string, and it would pin the release to a machine that happened
+          to have git.
+
+      So release builds keep the declared semver and are bumped deliberately, which is what a
+      published version is for. `dotnet build -c Release` is the publish build.
     -->
-    <Target Name="StampModVersion" BeforeTargets="CopyToModsFolder">
+    <Target Name="StampModVersion" BeforeTargets="CopyToModsFolder"
+            Condition="'$(Configuration)' == 'Debug'">
         <Exec Command="git -C &quot;$(MSBuildProjectDirectory)&quot; rev-parse --short HEAD"
               ConsoleToMSBuild="true" ContinueOnError="true" StandardOutputImportance="low">
             <Output TaskParameter="ConsoleOutput" PropertyName="GitCommit"/>
