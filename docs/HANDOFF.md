@@ -697,6 +697,25 @@ makes every card behave sensibly rather than choosing which ones to sacrifice.
 it could not be playtested; shipping an untested round loop on top of a working one is how this
 milestone's four ordering bugs happened in the first place.
 
+### Playtest notes from the two-player session, 2026-08-12
+
+- **Tick-paced blitz is now the most interesting open idea** — scoped as **M8.5** in DESIGN §7.
+  Short version: in blitz you cannot see *what* the opponent played, only that something happened,
+  so there is nothing to react to. Resolving one card at a time on a fixed cadence (OSRS's 0.6s
+  tick is the reference) makes each play a readable event. It is a third turn model and slots into
+  the `IDuelTurnModel` seam that already exists.
+- **The opponent's relics are not shown in the deck review.** Wanted. Note the rule it falls under:
+  the race decouples the two runs, so your copy of their relics is **stale** — this has to be
+  *sent*, not looked up. `DuelArrivedMessage` already carries their deck for exactly this reason
+  and is the natural place to add them, which also keeps the ordering free.
+- **"Does a client pull in the host's mods automatically?" — no, and not in this game.**
+  Answered 2026-08-12 against the decompile so it does not have to be wondered about again.
+  `Core/Modding` has a `workshopId` field for identifying a Workshop-sourced mod but no subscribe
+  or download path, and `JoinFlow` *refuses* a mismatch outright with
+  `ConnectionFailureReason.ModMismatch` — which is the "Mod mismatch!" popup. SpirePvp is not
+  distributed through the Workshop at all, so even if the engine had that feature it could not
+  apply. Both players build from the same commit; there is no way around it.
+
 ### Two bugs found 2026-08-12, both unfixed
 
 - **The lobby's radio rows can be emptied.** Unticking the last option in a group leaves *no*

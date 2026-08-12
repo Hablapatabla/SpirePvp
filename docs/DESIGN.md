@@ -583,6 +583,36 @@ mechanic. Note `HittableEnemies` is **not** patchable — it has no acting-playe
   offers `1v1 Duel: Turn-Based`, and picking it plays blitz — `DuelMatch.IsTurnBased` is read in
   exactly one place, a log line. Either accept that or hide the modifier until M8 lands.
   *Accept: the same duel is playable under both models, chosen at duel start.*
+- **M8.5 — Tick-paced blitz ("the OSRS model").** *Proposed by Lucas 2026-08-12, after playing
+  both existing models, and it may be the one that ships.*
+
+  **The problem it solves is legibility, not fairness.** In blitz the opponent's effects arrive as
+  things that simply happen — damage lands, a power appears — with no readable moment where a card
+  was played. You cannot see what hit you, so you cannot react to it, and a duel becomes two people
+  clicking rather than two people fencing.
+
+  The shape: **actions are still submitted in real time, but resolve on a fixed cadence**, one card
+  at a time, each with an animation long enough to read. Old School RuneScape's 0.6s tick is the
+  stated reference — long enough that a play is a visible event you can respond to, short enough
+  that the match still feels live. "Pseudo turn-based but playing out really quickly."
+
+  Why it is worth a milestone of its own rather than a tweak: it is a **third turn model**, and the
+  seam already exists. `IDuelTurnModel` was built so blitz and lock-in could differ in *when*
+  actions execute, and this differs in exactly that dimension — it neither buffers a whole round
+  (model B) nor releases instantly (model A), but releases the shared queue on a clock. It also
+  fixes model A's host-latency edge as a side effect: if resolution is quantised to a tick, a half
+  RTT stops deciding anything unless it crosses a tick boundary.
+
+  Open questions for whoever builds it:
+  - **Where the pacing goes.** The host orders the stream, so the host should pace it — releasing
+    one queued action per tick rather than draining the queue. `ActionExecutor` is the obvious
+    place to look; the risk is that vanilla assumes the queue drains promptly.
+  - **Tick length is a playtest question**, not a design one. 0.6s is the reference point, not a
+    decision.
+  - **Whether the card animation is lengthened or the resolution is delayed.** These look the same
+    on screen and are not the same thing: one changes presentation, the other changes when damage
+    lands. Only the second gives a real reaction window.
+
 - **M9 — Turn-model tuning.** Revisit resolution order (§3.1b) now that both modes are
   playable and can be compared by feel rather than argument; per-round planning timer for
   model B; decide whether one model ships or both do as a lobby option.
