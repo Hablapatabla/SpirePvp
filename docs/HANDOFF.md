@@ -127,6 +127,89 @@ bites exactly where all the testing happens. Anything that must notice an absent
 measure it: `ConnectionStats.LastReceivedTime` is the signal vanilla itself uses, and
 `DuelDisconnect` acts on 30 seconds of silence.
 
+**Resetting a counter does not clear what is stored under the old ids.** FOUND AND FIXED
+2026-08-12, unplaytested at time of writing, and it is the first *desync* this project has shipped
+into a real match. `RaceCoordinator.ResetSynchronizerCounters` zeroes the choice / reward / action
+/ hook counters at the phase flip because the race pulls them apart. But `PlayerChoiceSynchronizer`
+also keeps `_receivedChoices` — peer choices that arrived with nobody waiting for them — and
+matches them later by `(choiceId, senderId)` **alone**. `FastForwardChoiceIds` touches only the
+counter, so those entries survive with ids the duel is about to hand out again from 0.
+
+The race fills that list by construction: **a card reward pick travels as a player choice**, so
+every reward either player takes is broadcast, stored by the peer, and never consumed. Measured:
+the client took two rewards during the race (host stored choices `0 = indexes 1`, `1 = indexes 2`);
+in the duel the client played **Photon Cut**, whose `OnPlay` ends in `CardSelectCmd.FromHand`; the
+host reserved choice id 0 for the client and found the race's choice 0 already there —
+
+```
+Was going to wait for remote choice 0 for player 1001 but we've already received it
+Finished waiting for remote choice 0 for player 1001: PlayerChoiceResult indexes 1
+System.InvalidOperationException: Tried to get combat cards from player choice result of type Index!
+```
+
+— so the host's put-back never happened, the client's did, and the very next checksum diverged
+(`Local: 1514961121. Remote: 2932920909`). `RaceCoordinator.ClearStaleReceivedChoices` now empties
+the list alongside the counter reset.
+
+**What made it look random:** it needs a duel card that *gathers a player choice*, and only the
+peer's choices are stored this way — you consume your own locally. So it fires on the first
+choosing card the client plays and never on the host's. Sweep the siblings when touching this:
+`RewardsSetSynchronizer` has the identical shape (`bufferedMessages`, `completedRewards`, both
+keyed by an id `FastForwardRewardIds` resets without clearing) and is latent only because a race's
+reward picks travel as *choices* rather than reward messages — measured zero
+`RewardsSetSynchronizer` traffic across a whole race.
+
+**Zeroing a counter that keys a *shared ordered stream* is not the same as zeroing a per-player
+one, and only one of the four is shared.** FOUND 2026-08-12, in the very next playtest after the
+fix above — the stale-choice fix worked (`dropped 1 stale peer choice(s)`, both sides) and a
+*different* divergence followed. Choice, reward and hook counters are bumped locally by their
+owner; `ActionQueueSet._nextActionId` numbers the queue both peers execute in common. Resetting it
+is only safe if both peers reset at the **same position in that stream**, and
+`ResetSynchronizerCounters` runs wherever each client happens to reach the phase flip.
+
+Reproduced by both players typing `duel now`, which is networked and therefore travels *as a
+`ConsoleCmdGameAction` in that queue*. The host consumed its own copy as action id 0 and then
+reset, so its next action was id 0 again; the client had already entered the arena and reset by the
+time the host's copy arrived, so that copy *became* the client's id 0 and every later id was off by
+one. The dumps said it outright — `Last executed action ID: 1` against `3`, with the client three
+cards ahead — and the client's own log named the culprit: an `ActionEnqueuedMessage … duel now`
+with `Source Location: act 0 coord (3, 0) room 0`, the *pre-arena* coord, arriving after the reset.
+
+**Do not try to fix this inside the command.** Making `duel now` host-only was tried and reverted
+the same session, and the reason generalises to every networked console command: **the action is
+enqueued and consumes its id before `Process` runs**, so refusing inside the command removes
+nothing from the stream — it leaves an action that still takes an id and now also does nothing.
+Measured: the host's `duel now` reached the client, the guard refused it there, and the client
+never entered the arena at all (`entering duel arena` on the host, absent on the client) while the
+divergence it was meant to prevent was untouched. Worse on both counts.
+
+The client executing the host's `duel now` **is** the mechanism by which the client enters the
+arena, so anything that blocks it breaks the shortcut entirely. The mitigation is operational:
+**exactly one player types `duel now`.** Two people typing it puts two actions in the queue, and
+that is what desyncs.
+
+**The underlying hazard is not the command, and is not closed.** Any action in flight across the
+phase flip renumbers differently on the two peers. The real rendezvous starts the duel from a
+`DuelStartMessage`, a mod message that bypasses the action queue entirely, so nothing is being
+ordered against it — which is why the flow has survived many playtests. If a divergence ever
+appears at the flip *without* a console command in the log, this is the first thing to suspect, and
+the fix would be to reconcile the action id host-authoritatively rather than by each side zeroing
+independently.
+
+**A desync is not a disconnect, and treating it as one put VICTORY on both screens.** Same match,
+2026-08-12. The divergence made the host eject the client (`Disconnecting client 1001, reason:
+StateDivergence`), and both sides then independently declared a win by disconnect — the host
+reading its *own* kick as the client walking away, the client reading its ejection as the host
+vanishing. Both were shown *"Their connection gave out."* over a victory banner.
+
+`DuelEndReason.Desync` now voids the match as a **draw**. A desync means the two games disagree
+about the board, so neither client's state is evidence of who was ahead; there is no winner to
+name. Note this is the one disconnect route where both sides can agree *without talking*, because
+the reason code is symmetric and each is told it — which is what makes deciding locally safe here
+and not in the general partition case `DuelDisconnect.Declare` documents. The host needs a patch to
+see it at all: `RunLobby.OnDisconnectedFromClientAsHost` has the `NetErrorInfo`, logs it, and then
+raises `RemotePlayerDisconnected` carrying only the player id.
+
 **Test on the same path, not divergent ones.** The two runs share a seed and therefore a map,
 and `RunLocationTargetedMessageBuffer` gates on **location, not identity** — so two players
 standing on the same coord deliver every message to each other. Divergent-path testing hides an
@@ -213,6 +296,20 @@ so, all found in one playtest on 2026-08-06 and all fixed:
   the last room the run recorded was the last room of the *race* — and
   `ScoreUtility.GetElitesKilledCount` subtracts the final room when it is an elite, on the
   assumption that is what killed you. Now recorded, like every other room.
+
+**The winner's line and the loser's line survive the Continue button differently, and vanilla is
+right to do it.** Reported 2026-08-12: on the *summary* screen the defeat line showed and the
+victory line did not. `NGameOverScreen.OpenSummaryScreen` opens with
+`_victoryDamageLabel.Visible = false` and then runs `AnimateInQuote`, which on a win tweens that
+same label's `modulate:a` and `visible_ratio` — so the animation plays on a hidden node. The loss
+branch tweens `_deathQuote`, which nobody hid.
+
+For vanilla that is correct: `_victoryDamageLabel` is a full-screen block of Architect prose that
+would lie across the summary. For a duel it holds our one-line epitaph, reparented into the banner,
+so it should keep the same place the loser's line keeps. `DuelResultBannerPatch.AfterOpenSummaryScreen`
+re-shows it. **Note this is the third distinct thing that had to be told the winner's line lives in
+a different label** — set it, place it, and now keep it visible — which is the cost of borrowing
+the only label that animates in on a win.
 
 **No BBCode in score lines.** `[gold]…[/gold]` was drawn literally, tags and all, across every
 result line: `NScoreLine` puts its text in a `MegaLabel`, which is a plain Godot `Label`. The
@@ -466,7 +563,7 @@ Mod commands:
 | Command | Effect |
 |---|---|
 | `duel start` | Opens the opponent's decklist as the duel entry screen. Both players confirm, then the arena loads. |
-| `duel now` | Skips the entry screen, straight into the arena. Debug shortcut. |
+| `duel now` | Skips the entry screen, straight into the arena. Debug shortcut. **Exactly one player types it** — it is networked, so one command moves both clients, and a second one desyncs the match (see the ordered-counter entry above). Do not "fix" that with a guard inside the command; that was tried and is strictly worse. |
 | ~~`duel clock <minutes>`~~ | **Removed.** The clocks are part of the match agreement, picked in the lobby as `Race Clock` and `Duel Clock`. The race bank runs from run creation and the duel gets a fresh one when it begins. A mid-run command could only hand someone a bank they never agreed to or reset one already spent — either silently invalidates the match. Pick the 1-minute options to test flagging. |
 | `duel on` / `duel off` | Converts the combat you are already in into a duel, and back. Legacy path from M1; `duel start` is the real flow. |
 | `duel hud` / `duel hud off` | **Debug only.** Shows the opponent's floor, HP and deck size on your map during the race. Off by default and deliberately not a feature — see M6 item 1. Useful when diagnosing the race; not something to leave on in a real match. |
@@ -540,7 +637,75 @@ Keep that split if you extend this.
 
 ## Immediate next step
 
-### Start here: three things built but never played
+### Start here: the desync fix, built 2026-08-12 and never played
+
+**The stale peer-choice fix is confirmed working, through a complete duel** (2026-08-12): `dropped
+1 stale peer choice(s) held by the race (1001#0) — 0 still pending` on the host and `(1#0)` on the
+client, a full HP-decided duel, and **zero** `State divergence` or `Tried to get combat cards` in
+either log. The result wording is confirmed too, from loc rather than fallback and correctly paired
+to the ending — `Won, reason 0 — "They died in the arena. You did not." [wonHp 1/4]` against
+`Lost, reason 0 — "Your whole run, ended by their deck." [lostHp 2/4]`. Badges reached the screen
+(`duel badges: 3 awarded` / `0 awarded`) with no `duel badges failed`.
+
+**Confirmed since:** both portraits on the starting node at Neow, and **two back-to-back matches in
+one process with zero mod errors on either client** — the only errors in that log are vanilla's
+`Error deleting path modded/profile1/saves/current_run_mp.save.backup`, which is noise and predates
+this work. No `duel badges failed` on any run.
+
+**Still unplayed:** the void draw — it needs a divergence to provoke, and divergences are now rare,
+so it may simply stay unplayed. And the **badge teardown guard** is *still* unexercised for a
+reason worth writing down: **the Main Menu button does not appear until the badges have finished
+animating**, so the window this guard covers cannot be reached by clicking that button. Whatever
+route reaches it — the Continue button, Escape, an earlier click target — find it before assuming
+the guard works, or drop the guard as unreachable.
+
+What a run must show:
+
+- `duel: dropped N stale peer choice(s) held by the race (…)` at the phase flip, with a nonzero N
+  whenever either player took a reward during the race — which is every real match.
+- **Both players playing choice-gathering cards in the duel** (Photon Cut is the one that caught
+  it; anything ending in a card select does) with **no** `Tried to get combat cards from player
+  choice result of type Index!` and no `State divergence detected`.
+- If a divergence ever does happen again, both screens must now read **DRAW** with a
+  `drawDesync` line — never two victories.
+
+`0 still pending` is the expected tail of that log line; a nonzero pending count means something
+in a race now awaits a remote choice, which nothing should, and wants reading rather than
+handling.
+
+### Also unplaytested: both portraits on the map from the start
+
+Raised 2026-08-12 — at Neow you saw only your own icon. **Neither player has a map coord yet**:
+`CurrentMapCoord` is the last entry in `_visitedMapCoords`, and that list is empty until a room is
+entered, so `RaceMapPositionPatch` answered "nowhere" for both. An unmoved run is standing on
+`ActMap.StartingMapPoint` by definition, so each side now defaults the other there until the first
+real report arrives.
+
+**No message was added, and one was tried and backed out.** Broadcasting the starting position
+from `OnRunLaunched` announces a fact the receiver can derive, and it cannot fire any earlier than
+the default does anyway. Worth remembering as the counter-case to the rule below: *hook the
+arrival too* applies to state the peer cannot work out for itself, and this is not that.
+
+**Deliberately not built: the opponent's icon on the Neow blessing options.** Decided 2026-08-12.
+The logs rule it out twice over, and both reasons are worth keeping:
+
+1. **The data is not on the wire.** Neow is `shared: False`, so no `SharedEventOptionChosenMessage`
+   is sent; each client logs only `Local player chose event option index 0` and its own
+   `Option index 0 chosen for player <self>`. Neither client knows what the other picked.
+2. **Even with the data, the index means different things.** The vote UI is keyed by option
+   *index*, and Neow is filtered per character (DESIGN §1). Measured on the host in one run: player
+   1 was offered Nutritious Oyster / Scroll Boxes / Hefty Tablet, player 1001 Kaleidoscope /
+   Neow's Torment / Neow's Bones — **no overlap at all**. A portrait on your index 2 would name a
+   blessing that was never on their list.
+
+`RaceNoOpponentVoteIconsPatch.NoOpponentEventVote` predicted exactly this ("two different events
+whose indices happen to coincide would put their portrait on your option") and suppressed it as a
+precaution; the logs have now confirmed it live. Reviving it would need a message carrying the
+blessing **by name** and a presentation that is not the index-keyed portrait — plus an
+information-rule decision (DESIGN §1), since a live Neow readout tells you their opening plan
+before the race has begun.
+
+### Then: three things built but never played
 
 Everything the 2026-08-11 two-player session raised is closed, and disconnect handling is done
 and playtested on every route. What is left from 2026-08-12 is small and needs a screen rather
