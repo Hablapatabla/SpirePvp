@@ -3,14 +3,14 @@
 Raised by playing, not by testing. Grouped by what they actually are rather than by the order
 they were hit, because several are one cause wearing different clothes.
 
-Status: **triage written, none fixed yet.** Being batched deliberately so the playtest is one
+Status: **§1 campfire break and the log flood fixed; rest outstanding.** Being batched deliberately so the playtest is one
 pass rather than five.
 
 ---
 
 ## 1. Hard failures
 
-**Entering the campfire on the client broke.** Highest priority — a hard stop, and the rest site
+**FIXED — entering the campfire on the client broke.** `RaceIgnoreRemoteRoomPatch`. Highest priority — a hard stop, and the rest site
 has already produced two separate co-located-party bugs (`RaceSoloRestSitePatch` for the exit
 barrier, `RaceSoloRestSiteArtPatch` for the seating). **Client-only: the host walked on past it
 without trouble**, which is the same asymmetry every rest-site bug here has had. Needs the

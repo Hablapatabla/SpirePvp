@@ -110,7 +110,7 @@ public static class DuelLobbyPanel
                 continue;
             }
 
-            panel.AddChildSafely(Heading(locKey));
+            Heading(panel, locKey);
 
             // One row per group, so a decision reads as a row of alternatives rather than as
             // four more entries in a vertical list. This is what makes the three groups look
@@ -167,7 +167,7 @@ public static class DuelLobbyPanel
     /// </summary>
     private static void BuildPresetRow(Control panel, NCustomRunModifiersList list)
     {
-        panel.AddChildSafely(Heading("SPIREPVP_LOBBY.preset"));
+        Heading(panel, "SPIREPVP_LOBBY.preset");
 
         HBoxContainer row = new HBoxContainer
         {
@@ -378,7 +378,7 @@ public static class DuelLobbyPanel
         // A disclosure caret rather than a tickbox. A tickbox was tried and reads wrong here:
         // it looks like a *choice*, sitting among rows of real choices, when this only reveals
         // things. The caret says "there is more below" and nothing else.
-        MegaLabel label = (MegaLabel)Heading(locKey);
+        MegaLabel label = Heading(panel, locKey);
         label.MouseFilter = Control.MouseFilterEnum.Stop;
         label.MouseDefaultCursorShape = Control.CursorShape.PointingHand;
 
@@ -410,7 +410,6 @@ public static class DuelLobbyPanel
         }));
 
         Refresh();
-        panel.AddChildSafely(label);
     }
 
     /// <summary>Vanilla's gold, so a hovered heading matches the rest of the menu.</summary>
@@ -432,7 +431,7 @@ public static class DuelLobbyPanel
             : "CUSTOM_RUN_SCREEN.CUSTOM_MODE_TITLE"));
     }
 
-    private static Control Heading(string locKey)
+    private static MegaLabel Heading(Control parent, string locKey)
     {
         // **Do not use SetTextAutoSize here.** It shrinks the text to fit the control's rect,
         // and a fresh label in a VBoxContainer has no rect worth speaking of — which is exactly
@@ -452,6 +451,26 @@ public static class DuelLobbyPanel
             HorizontalAlignment = HorizontalAlignment.Left,
             AutowrapMode = TextServer.AutowrapMode.WordSmart
         };
+
+        // **A MegaLabel with no theme font override throws on every layout pass.** Vanilla says
+        // so outright — "has no theme font override. Please set one to avoid a Godot engine bug"
+        // — and a freshly constructed one has none, so each heading logged an exception every
+        // time it measured itself. Harmless in effect and deafening in the log: they were the
+        // first several hundred errors of the playtest, which is a real cost when the log is the
+        // primary diagnostic tool for this project.
+        //
+        // Borrowed from the tickboxes we are sitting among rather than loaded separately, so the
+        // headings inherit whatever the screen is themed with instead of pinning a font of their
+        // own.
+        // Added before the font is resolved, because an override can only be copied from the
+        // theme once the node is in the tree to inherit one.
+        parent.AddChildSafely(label);
+
+        Font? font = label.GetThemeFont("font");
+        if (font != null)
+        {
+            label.AddThemeFontOverride("font", font);
+        }
 
         label.SetFontSize(HeadingFontSize);
 
