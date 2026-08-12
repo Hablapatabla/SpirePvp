@@ -1,4 +1,4 @@
-# Handoff — state of the mod as of 2026-08-11 (Windows)
+# Handoff — state of the mod as of 2026-08-11 (Windows → Mac)
 
 Written for someone (human or agent) picking this up cold, on any OS. Everything below was
 built and playtested against **Slay the Spire 2 v0.110.1**, on two local clients connected
@@ -22,7 +22,7 @@ flags, console commands and gotchas below are OS-neutral unless marked.
 | **M5** race phase | **working, playtested 2026-08-05.** Two clients race the same seeded map independently — own combats, own rewards, advancing at their own pace — with mirrored RNG and a run-long clock |
 | **M6** full loop | **done, playtested through 2026-08-11.** Lobby modifiers → race → arena node → rendezvous → deck review → duel → result screen, with checksums live, split race/duel clocks and Neow intact. Plus resignation and agreed draws. Result-screen stats and badges reach the screen and compare correctly. The 2026-08-11 sweep closed the race phase's remaining rough edges — rest site, treasure chest, shop, map portraits, the loser's result screen and opponent summons. Remaining: rematch |
 | **M7** | **done, playtested 2026-08-11.** A **Duel** entry beside Standard/Daily/Custom opens a lobby retitled "Duel": Blitz/Rapid/No-clock presets, then the three real decisions as headed rows of chips, then the other custom-run modifiers behind a collapsed caret. Re-dresses `NCustomRunScreen` rather than replacing it |
-| **Shipping** | **done.** `git clone && dotnet build` is a complete install — the `.pck` is committed, so no Godot is needed. README has a step-by-step for a non-technical Windows player. Debug builds stamp the git commit into the mod version, so the engine's mod-match gate enforces "same build" rather than us asking. Coexistence verified with a Workshop mod (RegentFX): 56 patches clean on both clients, VFX rendering in a duel |
+| **Shipping** | **done.** `git clone && dotnet build` is a complete install — the `.pck` is committed, so no Godot is needed. README has a step-by-step for a non-technical Windows player. Debug builds stamp the git commit into the mod version, so the engine's mod-match gate enforces "same build" rather than us asking. Coexistence verified with a Workshop mod (RegentFX): patches clean on both clients and VFX rendering in a duel. **The `.pck` is committed, so no Godot is needed to build — only to re-export after changing something under `SpirePvp/`, and the exported pack must then be committed too** |
 
 A duel is fully playable end to end today: enter the arena, fight with real cards and
 statuses, win or lose on HP or on the clock, and land on a victory/defeat screen.
@@ -78,7 +78,7 @@ abandons the rest, so one typo disables an arbitrary subset while the mod still 
 still logs "loaded". `SpirePvpInit` therefore applies each patch class independently and logs
 a count. **On every launch, confirm the log says `N patch classes applied cleanly`** — if it
 says `PATCH FAILED`, some of the mod is not running and in-game results mean nothing.
-**56 as of this handoff.** The count is per *class*, not per patch: a class holding
+**58 as of this handoff.** The count is per *class*, not per patch: a class holding
 several patch methods still counts once, so grouping patches by concern does not move it.
 
 **Harmony resolves `[HarmonyPatch(typeof(X))]` against methods declared on `X` only.** Naming
@@ -103,6 +103,14 @@ disconnected service for 21 seconds — 46 error lines on the host, a matching "
 handlers are registered" on the client. `DuelClockService.Tick` now stops on any run that is no
 longer `IsInProgress`, and the host's broadcast additionally checks `NetService.IsConnected`.
 Guard on the *condition*, not on each new route out; there is always another route.
+
+**Test on the same path, not divergent ones.** The two runs share a seed and therefore a map,
+and `RunLocationTargetedMessageBuffer` gates on **location, not identity** — so two players
+standing on the same coord deliver every message to each other. Divergent-path testing hides an
+entire family of bugs: a hundred local runs missed what the first real two-player session found
+in an hour, because two people given the same map naturally walk the same obvious route. The
+campfire break, the reward errors and the event leak were all this. When something works locally
+and breaks in a real match, ask whether your test ever put both players on one coord.
 
 **A message that only fires on *change* cannot carry initial state.** The peer that arrives
 late gets its state some other way, so hook the arrival too. Four instances now: the duel
@@ -478,21 +486,21 @@ Keep that split if you extend this.
 
 ## Immediate next step
 
-### Playtest with a second person, and take the list
+### Work `docs/PLAYTEST_LIST.md` — six open items, all reproducible solo
 
-Everything scoped is built and played: the loop, the result screen, the Duel menu and lobby, and
-distribution. What has *not* happened is a match against someone who did not build it, on their
-own machine, without being told which bugs to ignore. That is the next thing, and it is the only
-thing that generates a real list.
+**That playtest happened**, against someone who did not build it, over Steam. It produced fifteen
+items; nine are fixed and six remain, and every one of the six reproduces with two local clients.
+No second person is needed to continue.
 
-Send them the repo and the README's "Playing with a friend" section. Both sides must be on the
-same commit — the engine now enforces that itself, refusing the connection rather than letting
-two builds desync.
+Read `docs/PLAYTEST_LIST.md` first — it carries the diagnosis for each open item, not just the
+symptom, and records the two questions that need Lucas's decision rather than a fix (how much of
+the run should be identical, and how disconnects should end a match).
 
-Known-good afterwards, worth re-reading before diagnosing anything: the client's "internal
-error" when launched before the host is in a lobby is `--fastmp=join` firing at startup with
-nothing listening, and it is a dev-harness artefact that cannot happen for someone launching
-through Steam.
+**The single most useful change to how you test: take the same path.** The two runs share a seed
+and therefore a map, and `RunLocationTargetedMessageBuffer` gates on *location, not identity* —
+so two players on the same coord deliver every message to each other. Same-path play is both the
+most natural way to play and the worst case, and testing divergent paths is why a hundred local
+runs missed the whole family of bugs that first real session found immediately.
 
 ### M7 — the dedicated Duel host menu (done; kept for the reasoning)
 
