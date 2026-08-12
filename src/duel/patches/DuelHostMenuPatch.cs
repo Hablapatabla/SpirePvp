@@ -80,6 +80,23 @@ public static class DuelHostMenuPatch
             if (step != Vector2.Zero)
             {
                 duel.Position = custom.Position + step;
+
+                // A hand-positioned row was centred for three buttons, so a fourth extends it
+                // off-centre in whichever direction the row runs. Shift the whole row back by
+                // half a step to re-centre it around the same midpoint.
+                //
+                // Derived from vanilla's own spacing rather than a constant, so it stays correct
+                // if the menu is ever re-laid out — and applied to all four, because moving only
+                // the new one would just relocate the asymmetry.
+                Vector2 recentre = step * -0.5f;
+                foreach (NSubmenuButton button in new[]
+                         { __instance._standardButton, __instance._dailyButton, custom, duel })
+                {
+                    if (button != null)
+                    {
+                        button.Position += recentre;
+                    }
+                }
             }
         }
 
