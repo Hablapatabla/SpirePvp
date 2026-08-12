@@ -4,6 +4,7 @@ using MegaCrit.Sts2.Core.Entities.Players;
 using MegaCrit.Sts2.Core.Logging;
 using MegaCrit.Sts2.Core.Multiplayer.Game;
 using MegaCrit.Sts2.Core.Runs;
+using SpirePvp.Duel.Turns;
 using SpirePvp.Net;
 
 namespace SpirePvp.Duel;
@@ -387,8 +388,38 @@ public static class DuelClockService
         foreach (Player player in state.Players)
         {
             DuelClock clock = LocalContext.IsMe(player) ? _local : _opponent;
-            ApplyReadyState(clock, CombatManager.Instance.IsPlayerReadyToEndTurn(player));
+            ApplyReadyState(clock, IsDoneDeciding(player));
         }
+    }
+
+    /// <summary>
+    /// Whether this player is finished deciding, which is what a chess clock actually measures.
+    ///
+    /// **In blitz that is end-turn readiness; in the lock-in model it is not, and asking the wrong
+    /// one meant the turn-based clock never paused at all.** `IsPlayerReadyToEndTurn` only becomes
+    /// true when `EndPlayerTurnAction` *executes*, which under that model is at the flush — a
+    /// moment before the turn rolls. So you locked in, sat watching your opponent think, and were
+    /// charged for every second of it, which is precisely the thing a chess clock exists to stop.
+    /// It went unnoticed because the turn-based sessions so far were played on `Duel Clock: Off`.
+    ///
+    /// **Third instance of the same trap** (HANDOFF: the phase test in this file, then the
+    /// duplicate of it in `DuelFlag`): a condition that correlates with the one you mean, until a
+    /// new mode separates them. The condition meant is "has this player committed their round".
+    ///
+    /// Resolution counts as committed for *both*, because nobody is deciding while the round
+    /// plays out — and with `DuelPace` giving each card a readable beat, that stretch is now
+    /// seconds long rather than instant. Charging it to the players would make a slower, more
+    /// legible duel a more expensive one.
+    /// </summary>
+    private static bool IsDoneDeciding(Player player)
+    {
+        if (DuelTurnModel.Current is not LockInTurnModel lockIn)
+        {
+            return CombatManager.Instance.IsPlayerReadyToEndTurn(player);
+        }
+
+        return DuelPace.IsResolving
+               || (LocalContext.IsMe(player) ? lockIn.LockedIn : lockIn.OpponentLockedIn);
     }
 
     /// <summary>Declared done ⇒ clock stops; still deciding ⇒ clock runs.</summary>
