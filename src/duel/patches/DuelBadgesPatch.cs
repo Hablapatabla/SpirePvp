@@ -1,3 +1,4 @@
+using Godot;
 using HarmonyLib;
 using MegaCrit.Sts2.Core.Commands;
 using MegaCrit.Sts2.Core.Helpers;
@@ -37,25 +38,64 @@ public static class DuelBadgesPatch
         return false;
     }
 
+    /// <summary>
+    /// Builds the badges and parks them in the container, transparent, without animating them.
+    ///
+    /// **Called before the score lines animate, so the badge row's height is reserved up front.**
+    /// Reported 2026-08-12: the gap between the quote and the score lines looked right until the
+    /// badges arrived, and then the lines were pushed up into it. Vanilla's order is the cause —
+    /// `AnimateRunSummary` does `await AnimateScoreLines(); await AnimateBadges();`, so the badge
+    /// container is empty and zero-height while the lines are laid out, and grows underneath them
+    /// afterwards. Nothing was mis-spaced; the column simply reflowed after the fact.
+    ///
+    /// Reserving the space beats compensating for it: there is no gap to re-tune when the number
+    /// of badges changes, and the "before" spacing everyone liked is the spacing that stays.
+    ///
+    /// **Transparent rather than hidden**, and that distinction is the whole trick: Godot's
+    /// containers skip invisible children when laying out, so `Visible = false` would reserve
+    /// nothing at all. Alpha 0 keeps the space and is exactly the state `NBadge.AnimateIn` expects,
+    /// since it tweens `modulate:a` to 1.
+    ///
+    /// Idempotent, because both entry points call it and only one of them can be first.
+    /// </summary>
+    public static void EnsureCreated(NGameOverScreen screen)
+    {
+        if (DuelSession.Phase != DuelPhase.Complete
+            || !screen.IsValid() || !screen._badgeContainer.IsValid()
+            || screen._badgeContainer.GetChildren().OfType<NBadge>().Any())
+        {
+            return;
+        }
+
+        DuelStatsMessage mine = DuelStats.BuildLocal();
+        List<DuelBadges.Award> awards =
+            DuelBadges.For(mine, DuelStats.Opponent, DuelSession.LocalPlayerWon);
+
+        foreach (DuelBadges.Award award in awards)
+        {
+            NBadge? badge = NBadge.Create(award.Id, award.Rarity);
+            if (badge != null)
+            {
+                badge.Modulate = new Color(badge.Modulate, 0f);
+                screen._badgeContainer.AddChildSafely(badge);
+            }
+        }
+
+        Log.Warn($"[SpirePvp] duel badges: {awards.Count} awarded" +
+                 (DuelStats.HasOpponent ? "" : " (no opponent stats — nothing to compare)") +
+                 $" — reserved before the score lines, container min height "
+                 + $"{screen._badgeContainer.Size.Y}");
+    }
+
     private static async Task ShowDuelBadges(NGameOverScreen screen)
     {
         try
         {
-            DuelStatsMessage mine = DuelStats.BuildLocal();
-            List<DuelBadges.Award> awards =
-                DuelBadges.For(mine, DuelStats.Opponent, DuelSession.LocalPlayerWon);
-
-            foreach (DuelBadges.Award award in awards)
-            {
-                NBadge? badge = NBadge.Create(award.Id, award.Rarity);
-                if (badge != null)
-                {
-                    screen._badgeContainer.AddChildSafely(badge);
-                }
-            }
-
-            Log.Warn($"[SpirePvp] duel badges: {awards.Count} awarded" +
-                     (DuelStats.HasOpponent ? "" : " (no opponent stats — nothing to compare)"));
+            // Normally a no-op by now: the score lines create them so the row's height is already
+            // in the layout. Still called, because this patch must not depend on the other one
+            // having run — a match that somehow reaches badges without score lines should still
+            // show badges.
+            EnsureCreated(screen);
 
             // Vanilla's cadence: a beat before the first badge, then one at a time.
             await Cmd.Wait(0.25f);

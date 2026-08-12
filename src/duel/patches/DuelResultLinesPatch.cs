@@ -62,6 +62,13 @@ public static class DuelResultLinesPatch
             // twice would animate the first set a second time.
             screen._scoreLines.Clear();
 
+            // **Before a single line is added.** The badges go in a sibling container that vanilla
+            // does not fill until after these lines have animated, so the column reflows and shoves
+            // the lines up into the quote. Creating the badges now — transparent, unanimated —
+            // reserves that row's height so the layout the lines land in is the final one. See
+            // DuelBadgesPatch.EnsureCreated.
+            DuelBadgesPatch.EnsureCreated(screen);
+
             DuelStatsMessage mine = DuelStats.BuildLocal();
             DuelStatsMessage? theirs = DuelStats.Opponent;
 
