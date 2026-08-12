@@ -119,7 +119,9 @@ dotnet build
 the mod file open.
 
 Both of you need to do this at the same time. If one has updated and the other has not, the game
-will refuse to connect you rather than misbehaving — annoying, but it is the safe outcome.
+will refuse to connect you rather than misbehaving — annoying, but it is the safe outcome, and
+it is enforced rather than trusted: the mod stamps the exact build into its version, and the
+game compares them before letting you join.
 
 ### If something goes wrong
 
