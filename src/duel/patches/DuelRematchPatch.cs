@@ -104,6 +104,29 @@ public static class DuelRematchPatch
             NReturnToMainMenuButton rematch = (NReturnToMainMenuButton)menuButton.Duplicate(
                 (int)(Node.DuplicateFlags.Scripts | Node.DuplicateFlags.Groups));
             rematch.Name = RematchButtonName;
+
+            // **The hover glow lives in a ShaderMaterial, and a duplicate shares it by reference.**
+            // `NReturnToMainMenuButton._Ready` caches `GetNode<TextureRect>("Image").Material` as
+            // `_hsv`, and every hover tween writes that material's `s` and `v` parameters directly
+            // — so two buttons holding one material are one button as far as illumination goes.
+            // Reported 2026-08-12: hovering Rematch lit Main Menu and back, with the glow going
+            // janky moving between them, which is two tweens driving one parameter against each
+            // other.
+            //
+            // **This project has met this exact bug before**, on M7's Duel menu entry
+            // (`DuelHostMenuPatch`, `bgMaterialWasShared=True`), and the fix carries the same
+            // ordering constraint: it must happen **before** the clone enters the tree, because
+            // `_hsv` is resolved during `_Ready`. Replacing the material afterwards leaves the
+            // cached reference pointing at the shared one and changes nothing visible.
+            TextureRect? menuImage = menuButton.GetNodeOrNull<TextureRect>("Image");
+            TextureRect? rematchImage = rematch.GetNodeOrNull<TextureRect>("Image");
+            bool sharedMaterial = menuImage?.Material != null
+                                  && ReferenceEquals(menuImage.Material, rematchImage?.Material);
+            if (sharedMaterial && rematchImage != null)
+            {
+                rematchImage.Material = (Material)rematchImage.Material.Duplicate();
+            }
+
             parent.AddChild(rematch);
             parent.MoveChild(rematch, menuButton.GetIndex());
 
@@ -145,7 +168,8 @@ public static class DuelRematchPatch
             // intermission, before vanilla offers any way off the screen at all.
             Log.Warn($"[SpirePvp] rematch: button added beside {menuButton.Name}, resting at "
                      + $"{rematch._showPosition} (menu button rests at {menuButton._showPosition}, "
-                     + $"width {menuButton.Size.X}, step {step})");
+                     + $"width {menuButton.Size.X}, step {step}, "
+                     + $"hoverMaterialWasShared={sharedMaterial})");
         }
         catch (Exception e)
         {
