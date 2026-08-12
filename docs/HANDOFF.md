@@ -200,13 +200,44 @@ when you want to be in the arena quickly.
 the client adopt it**, which is immune to where in the stream each peer happens to be. That is one
 message and it retires this whole family.
 
-**The underlying hazard is not the command, and is not closed.** Any action in flight across the
-phase flip renumbers differently on the two peers. The real rendezvous starts the duel from a
+**The underlying hazard is not the command.** Any traffic in flight across the phase flip is
+accounted for differently on the two peers. The real rendezvous starts the duel from a
 `DuelStartMessage`, a mod message that bypasses the action queue entirely, so nothing is being
 ordered against it — which is why the flow has survived many playtests. If a divergence ever
 appears at the flip *without* a console command in the log, this is the first thing to suspect, and
 the fix would be to reconcile the action id host-authoritatively rather than by each side zeroing
 independently.
+
+**CLOSED 2026-08-12, and it took a third divergence to see the shape of it.** The hazard was not
+the counters and not the command: **the shortcut flipped the phase locally, so each client flipped
+at its own point in the message stream.** The host typed `duel now` while the client was still
+taking its Act 1 card rewards; the client's reward traffic reached the host *after* the host had
+entered the arena, reset its counters and turned race mode off. The host then replayed that race
+work under duel rules — consuming choice ids 0 and 1 and reward id 0, and generating a reward set
+from a different RNG, so it handed player 1001 Predator and Capacitor where the client held Shrug
+It Off and Acrobatics. The dumps differed in **exactly three lines**:
+
+```
+Choice IDs: 0,2          vs   0,0
+Reward IDs: 0,1          vs   0,0
+RNG counter Niche: 7     vs   1
+```
+
+Everything else — every card, pile, HP, creature — matched, because the pre-combat state sync
+covers those and covers none of these.
+
+**Why the rendezvous is immune, which is the part worth keeping:** both players announce arrival
+and the flip happens once both announcements are in hand. The transport is reliable and ordered per
+direction, so anything a player sent during the race necessarily arrives *before* their arrival
+message — waiting for that message is therefore waiting for their whole race to be applied. It is
+not a timing margin; it is an ordering guarantee, which is why the real flow has never produced
+this and the shortcut around it now has twice.
+
+So `duel now` and `duel start` both go through `DuelRendezvous.ArriveLocal` now. `duel now` still
+skips the *reading* — the review opens and confirms itself via `DuelEntry.AutoConfirm`, which is
+local and not on the wire, so one player skipping does not drag the other past a screen they were
+reading. **The shortcut is no longer a second path into the duel**, which is the actual fix; it was
+never really about the counters.
 
 **A desync is not a disconnect, and treating it as one put VICTORY on both screens.** Same match,
 2026-08-12. The divergence made the host eject the client (`Disconnecting client 1001, reason:
@@ -590,7 +621,7 @@ Mod commands:
 | Command | Effect |
 |---|---|
 | `duel start` | Opens the opponent's decklist as the duel entry screen. Both players confirm, then the arena loads. |
-| `duel now` | Skips the entry screen, straight into the arena. Debug shortcut. **Both players type it**, and the mod commands are now **local-only** (`IsNetworked = false`) so that is safe: a networked console command is enqueued into the shared stream, where each side assigns ids from its own counter, and the asymmetry desynced two sessions running. Do not make them networked again without reading `DuelConsoleCmd`'s comment. |
+| `duel now` | Skips the entry *screen*, not the rendezvous — it announces arrival like the map node does and the review confirms itself, so both players still have to be at the arena before anything flips. Entering locally is what desynced a match on 2026-08-12. **Both players type it**, and the mod commands are now **local-only** (`IsNetworked = false`) so that is safe: a networked console command is enqueued into the shared stream, where each side assigns ids from its own counter, and the asymmetry desynced two sessions running. Do not make them networked again without reading `DuelConsoleCmd`'s comment. |
 | ~~`duel clock <minutes>`~~ | **Removed.** The clocks are part of the match agreement, picked in the lobby as `Race Clock` and `Duel Clock`. The race bank runs from run creation and the duel gets a fresh one when it begins. A mid-run command could only hand someone a bank they never agreed to or reset one already spent — either silently invalidates the match. Pick the 1-minute options to test flagging. |
 | `duel on` / `duel off` | Converts the combat you are already in into a duel, and back. Legacy path from M1; `duel start` is the real flow. |
 | `duel hud` / `duel hud off` | **Debug only.** Shows the opponent's floor, HP and deck size on your map during the race. Off by default and deliberately not a feature — see M6 item 1. Useful when diagnosing the race; not something to leave on in a real match. |

@@ -125,8 +125,27 @@ public static class DuelEntry
         NOverlayStack.Instance.Push(screen);
 
         Log.Warn("[SpirePvp] duel entry — showing opponent deck");
+
+        if (AutoConfirm)
+        {
+            AutoConfirm = false;
+            Log.Warn("[SpirePvp] duel entry — auto-confirming (duel now)");
+            ToggleReady();
+        }
+
         return true;
     }
+
+    /// <summary>
+    /// Confirm the review the moment it opens, for `duel now`.
+    ///
+    /// **Local, and deliberately not on the wire.** The screen is a local presentation and the
+    /// start is already a negotiation — so one player skipping their own reading of it needs no
+    /// agreement from the other, who still gets their screen and still confirms by hand. Both
+    /// typing `duel now` therefore lands in the arena immediately, and one typing it does not drag
+    /// the other past a screen they were reading.
+    /// </summary>
+    public static bool AutoConfirm { get; set; }
 
     /// <summary>The START DUEL button was pressed. Toggles, because confirming is revocable.</summary>
     public static void ToggleReady()
@@ -178,6 +197,7 @@ public static class DuelEntry
         _opponent = null;
         _screen = null;
         IsChoosing = false;
+        AutoConfirm = false;
         _armed = false;
     }
 

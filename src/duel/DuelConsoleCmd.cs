@@ -180,29 +180,59 @@ public class DuelConsoleCmd : AbstractConsoleCmd
     /// from DuelWinConditionPatch already in place the duel would end the instant it began.
     /// </summary>
     /// <summary>
-    /// Opens the duel entry screen: the opponent's decklist, with START DUEL on it. Both
-    /// players confirm there before the arena loads. Until the map node exists (M6) this is
-    /// how you reach that screen; afterwards the node replaces the command, not the flow.
+    /// Announces arrival at the arena, which opens the entry screen — the opponent's decklist,
+    /// with START DUEL on it — once both players are there. Both confirm before the arena loads.
+    ///
+    /// **It goes through the rendezvous rather than opening the screen locally**, for the reason
+    /// written up on <see cref="StartDuelRoomImmediately"/>: a phase flip taken at each client's own
+    /// moment lets race traffic cross it, and that desynced a match. Opening the screen directly was
+    /// the M1-era path, from before there was a rendezvous to go through; it needed a live combat
+    /// to open in, which is itself a sign it predated the map node.
     /// </summary>
     private static CmdResult StartDuelRoom()
     {
-        if (!CombatManager.Instance.IsInProgress)
+        if (RunManager.Instance?.State == null)
         {
-            return new CmdResult(success: false,
-                "Not in a combat — the entry screen needs both players present. Start one first.");
+            return new CmdResult(success: false, "Not in a run — start a multiplayer run first.");
         }
 
-        if (!DuelEntry.Open())
+        if (DuelArena.HasEntered)
         {
-            return new CmdResult(success: false,
-                "Could not find an opponent — a duel needs a second player in this combat.");
+            return new CmdResult(success: true, "Already in the duel arena — nothing to do.");
         }
 
-        return new CmdResult(success: true, "Opponent's deck open — press START DUEL when ready.");
+        DuelRendezvous.ArriveLocal();
+        return new CmdResult(success: true, DuelRendezvous.RemoteArrived
+            ? "Both at the arena — opening the deck review."
+            : "Waiting at the arena for your opponent…");
     }
 
     /// <summary>
-    /// Skips the entry screen and drops straight into the arena. Debug shortcut.
+    /// Skips the entry *screen* and goes to the arena — but not the rendezvous, which is the part
+    /// that makes the phase flip safe.
+    ///
+    /// **This used to call `DuelArena.Enter` directly, and that desynced a match on 2026-08-12.**
+    /// Entering locally flips the phase wherever each player happens to be in the message stream,
+    /// and `RaceCoordinator` resets the choice / reward / action / hook counters at that flip. The
+    /// host typed `duel now` while the client was still taking its Act 1 card rewards; the client's
+    /// reward traffic then arrived *after* the host had reset, so the host consumed choice ids 0
+    /// and 1 and reward id 0 for race work the client had already accounted for — and generated the
+    /// reward set from an RNG the reset had moved, handing player 1001 Predator and Capacitor where
+    /// the client held Shrug It Off and Acrobatics. The dumps differed in exactly three lines:
+    /// `Choice IDs 0,2` against `0,0`, `Reward IDs 0,1` against `0,0`, and `RNG counter Niche: 7`
+    /// against `1`. Everything else — every card, pile, HP and creature — matched, because the
+    /// pre-combat state sync covers those and covers none of these.
+    ///
+    /// **The rendezvous is immune to that, and not by accident.** Both players announce arrival and
+    /// the flip happens once both announcements are in hand. The transport is reliable and ordered
+    /// per direction, so anything a player sent during the race — every reward, every choice —
+    /// necessarily arrives before their arrival message does. Waiting for that message is therefore
+    /// waiting for their race to be fully applied. That is why the real flow has survived every
+    /// playtest while the shortcut around it has now desynced twice.
+    ///
+    /// So this arrives properly and only skips the reading: the review still opens, and confirms
+    /// itself (`DuelEntry.AutoConfirm`). HANDOFF predicted this exact failure and said the hazard
+    /// "is not closed"; closing it means the shortcut stops being a second path into the duel.
     ///
     /// **Typing it twice used to brick the run**, which is a debug command doing far more damage
     /// than a debug command should: the second entry built a second `CombatRoom` while the first
@@ -218,9 +248,16 @@ public class DuelConsoleCmd : AbstractConsoleCmd
             return new CmdResult(success: true, "Already in the duel arena — nothing to do.");
         }
 
-        return DuelArena.Enter()
-            ? new CmdResult(success: true, "Entering the duel arena…")
-            : new CmdResult(success: false, "Not in a run — start a multiplayer run first.");
+        if (RunManager.Instance?.State == null)
+        {
+            return new CmdResult(success: false, "Not in a run — start a multiplayer run first.");
+        }
+
+        DuelEntry.AutoConfirm = true;
+        DuelRendezvous.ArriveLocal();
+        return new CmdResult(success: true, DuelRendezvous.RemoteArrived
+            ? "Both at the arena — entering."
+            : "Waiting at the arena for your opponent…");
     }
 
     /// <summary>
