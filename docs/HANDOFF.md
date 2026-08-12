@@ -188,6 +188,18 @@ arena, so anything that blocks it breaks the shortcut entirely. The mitigation i
 **exactly one player types `duel now`.** Two people typing it puts two actions in the queue, and
 that is what desyncs.
 
+**It bit again on 2026-08-12**, during the first turn-based playtest, in exactly the same shape:
+client `id 0 duel now (1001)`, then `id 0 duel now (1)` arriving after its reset, so its first play
+took id 1 while the host's took id 0 — `Last executed action ID: 0` against `1`, and *nothing else
+in either dump differed*. Two hits in one day is enough evidence that "exactly one player types it"
+does not survive contact with actual testing, because `duel now` is precisely what you reach for
+when you want to be in the arena quickly.
+
+**So the operational mitigation is not enough, and the real fix should move up.** Do not reset
+`ActionQueueSet._nextActionId` on both sides independently; have the **host broadcast the value and
+the client adopt it**, which is immune to where in the stream each peer happens to be. That is one
+message and it retires this whole family.
+
 **The underlying hazard is not the command, and is not closed.** Any action in flight across the
 phase flip renumbers differently on the two peers. The real rendezvous starts the duel from a
 `DuelStartMessage`, a mod message that bypasses the action queue entirely, so nothing is being
