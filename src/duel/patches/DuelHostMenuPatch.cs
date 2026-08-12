@@ -65,6 +65,24 @@ public static class DuelHostMenuPatch
         // Directly after Custom, so the four read as one list rather than an appendix.
         parent.MoveChildSafely(duel, custom.GetIndex() + 1);
 
+        // Child order is enough only if a layout container is placing these. If the buttons are
+        // positioned by hand — which the scene is free to do, and which we cannot read from here
+        // — then Duplicate() copied Custom's Position too and the clone would sit exactly on top
+        // of it, reading as though Duel had *replaced* Custom rather than joined it.
+        //
+        // Vanilla's own spacing is the only sensible source for the step, so take it from the
+        // gap between the two buttons above and continue the run. Guarded on the parent not
+        // being a Container, because inside one this would be overwritten anyway and setting it
+        // would just be noise.
+        if (parent is not Container && __instance._dailyButton != null)
+        {
+            Vector2 step = custom.Position - __instance._dailyButton.Position;
+            if (step != Vector2.Zero)
+            {
+                duel.Position = custom.Position + step;
+            }
+        }
+
         // The submenu owns StartHost and has no singleton, so the handler closes over the
         // instance. Safe: the button is a child of that submenu, so it cannot outlive it.
         duel.Connect(NClickableControl.SignalName.Released,
