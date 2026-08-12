@@ -79,7 +79,7 @@ abandons the rest, so one typo disables an arbitrary subset while the mod still 
 still logs "loaded". `SpirePvpInit` therefore applies each patch class independently and logs
 a count. **On every launch, confirm the log says `N patch classes applied cleanly`** — if it
 says `PATCH FAILED`, some of the mod is not running and in-game results mean nothing.
-**63 as of this handoff** (98 methods), confirmed against a live log 2026-08-12. The count is per *class*, not per patch: a class holding
+**66 as of this handoff** (102 methods), confirmed against a live log 2026-08-12. The count is per *class*, not per patch: a class holding
 several patch methods still counts once, so grouping patches by concern does not move it.
 
 **Harmony resolves `[HarmonyPatch(typeof(X))]` against methods declared on `X` only.** Naming
@@ -664,9 +664,48 @@ Keep that split if you extend this.
 
 ## Immediate next step
 
-### Start here: M8's two remaining pieces
+### Start here: playtest the planning phase
 
-**The lock-in turn model is built and playtested (2026-08-12).** A five-round turn-based duel end
+**M8's two remaining pieces are built and unplayed (2026-08-12).** Energy is reserved while you
+plan, planned cards are drawn in vanilla's play queue, and an icon over the end turn button says who
+has locked in. What to try is at the end of this section, under *"The playtest this needs"*.
+
+**Two findings came out of building them, and the second is the one to remember.**
+
+**The energy reservation was recorded here as "built, unverified". It was half built, and the half
+that existed could not have worked.** `0b57348` added `LockInTurnModel.ReservedEnergy` and nothing
+that reads it — no `CanPlay` patch was ever written — so the reported "cards still playable past 3
+energy spent" was a live bug, not a stale observation. And the property summed
+`PlayCardAction._card`, which `ExecuteAction` assigns: it is null for every action the model holds,
+because a *buffered* play by definition has not executed. It returned 0 for the whole of its first
+day. `NetCombatCard.ToCardModelOrNull` is the accessor that works on an action that has not run, and
+it is what vanilla's own play queue uses for exactly that reason.
+
+**The client never let go of a round, and the working duel hid it.** `BeginNextRound` was reached
+only through the host-only branch of `TryFlush`, so after its first lock-in a client stayed
+`_localLockedIn` forever and its buffer kept round 1's cards for the rest of the match. The
+five-round playtest passed anyway, because the *host* holds a client's plays regardless
+(`DuelLockInPatch`) — so from round 2 the client was silently submitting blitz-style into a host-side
+buffer and the round still resolved. The client's own log says it plainly: `holding … (1 planned)`
+appears in round 1 and never again, while the host's restarts at 1 every round.
+
+It stops being survivable the moment anything *reads* the buffer, which is what the reservation
+does: a client would have been charged round 1's cards for the whole duel — the "hand refuses to
+play anything, with no way to tell why" failure the code comment had already named. Both sides now
+release the round on the same condition (both locked in), the client learning it from the host's
+`DuelLockInMessage`, which is sent before the flush on a reliable ordered transport and therefore
+cannot arrive after the actions it precedes.
+
+**That symmetry is not tidiness, it is the desync argument**, and it is why `CanPlay` is patchable
+at all here. `CanPlay` is not a UI predicate — `PlayCardAction.ExecuteAction` re-checks it,
+`CardSelectCmd` filters a choice list with it, `WhisperingEarring` picks a card to auto-play from it
+— and a reservation is local by construction, so an unguarded postfix would answer differently on
+the two sims. Two conditions close it: the patch answers only while
+`ActionExecutor.CurrentlyRunningAction` is null (every sim caller above runs inside an executing
+action, and *nothing* executes during planning because every play is buffered), and both clients
+hold an empty buffer before the round's first action executes on either.
+
+**The lock-in turn model itself is playtested (2026-08-12).** A five-round turn-based duel end
 to end on two clients: rounds resolving interleaved, turns rolling over, an HP finish with correct
 paired result screens, and zero mod errors on either side. Picking `1v1 Duel: Turn-Based` now plays
 turn-based. The four ordering constraints that took four attempts to find are written up in
@@ -728,19 +767,54 @@ milestone's four ordering bugs happened in the first place.
   2026-08-12, not investigated. Worth checking whether it is duel-specific or turn-based-specific
   before assuming either — and note the top-bar deck counter has a known vanilla staleness quirk
   nearby, so confirm which widget is actually missing rather than stale.
-- **Cards reported still playable past 3 energy spent.** Reported in the same message as the energy
-  reservation landing, so it is genuinely unclear whether it was observed on the build *before*
-  that fix. Re-test before investigating: the fix mirrors
-  `PlayerCombatState.HasEnoughResourcesFor` exactly and only ever makes a card *less* playable, so
-  if it is still wrong the likely cause is `Owner`/`PlayerCombatState` being null during planning
-  rather than the arithmetic.
+- ~~**Cards reported still playable past 3 energy spent.**~~ **Real, and fixed 2026-08-12** — the
+  reservation had no consumer at all (see the top of this section). `DuelPlanEnergyPatch` now
+  spends it.
 
 What is left, in order:
 
-1. ~~**Energy reservation.**~~ **Built 2026-08-12, unverified** — see the bug note above.
-2. **Presentation for held cards.** A buffered play currently looks like nothing happened. Also
-   worth showing that the opponent has locked in — `DuelLockInMessage` already arrives and is
-   logged, and is otherwise unused.
+1. ~~**Energy reservation.**~~ **Built 2026-08-12** — `DuelPlanEnergyPatch`, mirroring
+   `HasEnoughResourcesFor` against the buffer, raising vanilla's own `EnergyCostTooHigh` so the cost
+   turns red through `CardCostHelper` rather than inventing a second way to say "no". Unplayed.
+2. ~~**Presentation for held cards.**~~ **Built 2026-08-12** — `LockInPlanView`, and both surfaces
+   are vanilla's own, because a held play and a co-op play awaiting the host's ordering are the same
+   thing: submitted, not yet resolved. `NCardPlayQueue.OnLocalCardPlayed` files the card in the play
+   queue as it is planned (which also means the card leaves the hand, so it cannot be planned
+   twice), and `NEndTurnButton`'s ready-icon says who has locked in — the model answers
+   `ShouldDisplayPlayerIcon` because `IsPlayerReadyToEndTurn` cannot: the end turn does not execute
+   until the flush, so the one stretch of the round where the question is live is the one stretch
+   vanilla has no answer for. Unplayed. **A planned *potion* still looks like nothing happened**
+   (`UsePotionAction` is `CombatPlayPhaseOnly`, so it is buffered too, and the queue is a card
+   strip) — the same gap, smaller.
+
+**The queue keys a play on action identity, and a planned play crosses the wire**, so on a client
+the object that executes is not the object that was planned. `DuelPlanQueuePatch` handles both ends
+of that: vanilla must not file a card the plan already filed, and a *cancelled* play (a card whose
+target died, a hand discarded by an earlier card in the round) has to be removed by card model,
+because its by-identity lookup misses on a client. `RemoveCardFromQueueForExecution` keys on the
+model already and needs no help — worth knowing which of the three does which before touching it.
+
+### The playtest this needs
+
+One turn-based match, and the whole checklist is in the first two rounds. `Duel: Turn-Based` +
+`Race Clock: 1` gets you to the arena fast; `duel now` from **exactly one** player is quicker still.
+
+- **Plan three cards.** Each should leave your hand and stack in the play queue beside the play
+  area, in the order you planned them, exactly as a co-op play does while it waits for the host.
+- **Keep planning past your energy.** Cards you cannot afford should go red-cost and refuse to be
+  played — *not* the "forbidden" icon, which is for a different kind of no. Nothing should fizzle at
+  resolution any more.
+- **Then end your turn and wait.** Your icon appears over the end turn button, and your hand should
+  go dead — nothing playable until the round resolves. When the opponent locks in, their icon
+  appears too.
+- **Both sides, and check the second round specifically.** The client's round reset is the fix that
+  had no symptom, so `lock-in: round closed — N play(s) handed over` must appear in the client log
+  *every* round, and `holding … (N planned, M energy reserved)` must restart from 1 each round on
+  both.
+- **Then let a planned card be cancelled**, if it happens naturally — kill a summon that a planned
+  card was aimed at, or plan a card behind one that discards your hand. The card should return to
+  the hand rather than hanging over the play area for the rest of the duel. This is the client's
+  by-identity miss, so it only shows on the client.
 
 Then **M9's initiative**: the tiebreak seam is `LockInTurnModel.StartsTheRound`, and the candidate
 is Lucas's — whoever reached the arena first starts the alternation, alternating each round.
@@ -750,7 +824,7 @@ is Lucas's — whoever reached the arena first starts the alternation, alternati
 **Everything from the 2026-08-12 session is built and playtested.** The loop, the desync fixes, the
 result screen, rematch — all confirmed in play on both clients, with the only errors in either log
 being vanilla's `Error deleting path …current_run_mp.save.backup`, which is noise and predates this
-work. Patch count is **63 classes / 98 methods**; confirm that line on every launch.
+work. Patch count is **66 classes / 102 methods**; confirm that line on every launch.
 
 Closed and confirmed this session, so nothing below needs re-testing:
 

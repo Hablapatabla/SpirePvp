@@ -573,10 +573,19 @@ mechanic. Note `HittableEnemies` is **not** patchable — it has no acting-playe
   4. The local end turn must be recorded **before** locking in, because locking in can flush the
      round immediately — and a flush that beats the assignment appends only the opponent's.
 
-  Still open, both deliberately: **energy is not reserved while planning** (it is spent at
-  execution, so a player can plan more cards than they can pay for and watch the surplus fizzle —
-  wants a `CardModel.CanPlay` postfix against `CardEnergyCost`), and **held cards have no
-  "planned" presentation**, so a buffered play looks like nothing happened.
+  **Both of the pieces this milestone left open are now built (2026-08-12, unplayed).** Energy is
+  reserved while planning (`DuelPlanEnergyPatch`), and a held play is drawn in vanilla's own play
+  queue with a ready-icon over the end turn button for who has locked in (`LockInPlanView`).
+
+  **The rule that came out of building them, and it generalises past this milestone: `CanPlay` is
+  not a UI predicate.** `PlayCardAction.ExecuteAction` re-checks it, `CardSelectCmd` filters a
+  choice list with it, `WhisperingEarring` picks which card to auto-play from it — all sim code,
+  which must answer identically on both clients. A reservation is local by construction, so
+  anything patched in there has to be provably invisible to the sim: the postfix answers only while
+  `ActionExecutor.CurrentlyRunningAction` is null, which holds for every sim caller because they all
+  run inside an executing action, and *nothing* executes during a planning phase — every play is
+  buffered. The same argument is why both clients must release the round on the same condition
+  rather than each at its own local event.
   **Explicitly on hold, 2026-08-05: do not start this until real-time blitz is polished end to
   end.** The comparison is only worth making against a finished thing, and there is real work
   left on blitz. Note the consequence that has to be lived with meanwhile: the lobby already

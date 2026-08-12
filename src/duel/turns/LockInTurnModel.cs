@@ -34,19 +34,25 @@ namespace SpirePvp.Duel.Turns;
 /// <see cref="StartsTheRound"/>, and the candidate replacement is M9's — whoever reached the arena
 /// first starts the alternation, alternating each round after.
 ///
-/// **Known gap, deliberately not in this slice: energy is not reserved while planning.** It is
-/// spent when a play *executes*, which in blitz is a frame after the click and so invisible;
-/// buffered, that gap is the whole round, so nothing currently stops a player planning ten Strikes
-/// on three energy and watching seven fizzle at resolution. The fix is a postfix on
-/// `CardModel.CanPlay` subtracting the buffered cost, and it was cut from this slice on purpose: a
-/// wrong predicate there makes cards *unplayable*, which would make the mode untestable rather
-/// than merely rough. Do it once the loop is confirmed, against `CardEnergyCost` rather than a
-/// guessed accessor.
+/// **Energy is reserved while planning** (`ReservedEnergy`, spent by `DuelPlanEnergyPatch`), and
+/// planned cards sit in vanilla's own play queue (`LockInPlanView`). Both exist because a buffered
+/// play is otherwise indistinguishable from a click that did nothing.
 ///
 /// **Only the host flushes.** Clients cannot spoof an action's owner (the host derives it from
 /// `senderId`), and two clients ordering a shared stream independently is how a sim desyncs. The
 /// host holds both buffers and enqueues every play with `EnqueueAction(action, ownerId)` — I5's
 /// finding, proven during M3's research and unused until now.
+///
+/// **Both sides let go of the round at the same moment, and that symmetry is load-bearing.** The
+/// host clears when it flushes; a client has nothing to enqueue but clears on the same condition
+/// (both locked in), which it learns from the host's `DuelLockInMessage` — sent before the flush on
+/// a reliable ordered transport, so it cannot arrive after the actions it precedes. Until
+/// 2026-08-12 the client never cleared at all: `BeginNextRound` was reached only through the
+/// host-only branch of <see cref="TryFlush"/>, so a client stayed locked in for the rest of the
+/// duel and its buffer kept round 1 forever. The match survived it — the host holds a client's
+/// plays regardless, so the round still resolved — which is exactly why it went unnoticed through a
+/// five-round playtest. It stops being survivable the moment anything *reads* the buffer, and
+/// `ReservedEnergy` reads it: a client would have been charged round 1's cards for the whole match.
 /// </summary>
 public sealed class LockInTurnModel : IDuelTurnModel
 {
@@ -88,6 +94,12 @@ public sealed class LockInTurnModel : IDuelTurnModel
     /// Summed on demand from the buffer rather than accumulated, so an undo or a cleared round
     /// cannot leave a stale reservation behind — the failure mode would be a hand that refuses to
     /// play anything, with no way to tell why.
+    ///
+    /// **The card comes from `NetCombatCard`, not from `PlayCardAction._card`.** That field is
+    /// assigned in `ExecuteAction` and is therefore null for every action this class holds — a
+    /// buffered play has by definition not executed. Read off it, this property returned 0 for the
+    /// whole of its first day. `NetCombatCard.ToCardModelOrNull` resolves the live model by combat
+    /// index, which is what vanilla's own queue does with an action it has not run yet.
     /// </summary>
     public int ReservedEnergy
     {
@@ -96,9 +108,10 @@ public sealed class LockInTurnModel : IDuelTurnModel
             int total = 0;
             foreach (GameAction action in _local)
             {
-                if (action is PlayCardAction play && play._card != null)
+                CardModel? card = PlannedCard(action);
+                if (card != null)
                 {
-                    total += Math.Max(0, play._card.EnergyCost.GetWithModifiers(CostModifiers.All));
+                    total += Math.Max(0, card.EnergyCost.GetWithModifiers(CostModifiers.All));
                 }
             }
 
@@ -106,7 +119,41 @@ public sealed class LockInTurnModel : IDuelTurnModel
         }
     }
 
+    /// <summary>The card a buffered play will resolve, or null for anything that is not a card.</summary>
+    private static CardModel? PlannedCard(GameAction action) =>
+        action is PlayCardAction play ? play.NetCombatCard.ToCardModelOrNull() : null;
+
+    /// <summary>
+    /// Whether this card is already in the plan.
+    ///
+    /// The energy reservation asks, because a planned card must not be charged against its own
+    /// reservation. That is not hypothetical: a queued card keeps `PileType.Hand`, so the queue
+    /// repaints it through the same `CanPlay` the hand uses, and without this every planned card
+    /// would draw itself as unaffordable the moment it was planned.
+    /// </summary>
+    public bool IsPlanned(CardModel card)
+    {
+        foreach (GameAction action in _local)
+        {
+            if (ReferenceEquals(PlannedCard(action), card))
+            {
+                return true;
+            }
+        }
+
+        return false;
+    }
+
     public bool LockedIn => _localLockedIn;
+
+    /// <summary>
+    /// Whether the opponent has locked in, for the icon over the end turn button.
+    ///
+    /// Set from their end turn on the host and from their message on a client — the same split
+    /// <see cref="HoldRemote"/> and <see cref="RemoteLockedIn"/> document, and the reason this is a
+    /// property rather than each of them setting a display flag of its own.
+    /// </summary>
+    public bool OpponentLockedIn => _remoteLockedIn;
 
     /// <summary>
     /// Whose first card resolves first. Fixed slot order for now: the lower net id starts, which
@@ -182,7 +229,9 @@ public sealed class LockInTurnModel : IDuelTurnModel
         }
 
         _local.Add(action);
-        Log.Info($"[SpirePvp] lock-in: holding {action} ({_local.Count} planned)");
+        LockInPlanView.ShowPlanned(action);
+        Log.Info($"[SpirePvp] lock-in: holding {action} ({_local.Count} planned, "
+                 + $"{ReservedEnergy} energy reserved)");
         return true;
     }
 
@@ -209,6 +258,12 @@ public sealed class LockInTurnModel : IDuelTurnModel
 
         Log.Warn($"[SpirePvp] lock-in: locking in {_local.Count} play(s)");
 
+        // Your own icon over the end turn button, on the same footing as the opponent's. Vanilla
+        // would show it when `EndPlayerTurnAction` executes, which under this model is a whole
+        // round later — so without this the one moment the button has something to say about you
+        // is the one moment it says nothing.
+        LockInPlanView.RefreshLockInIcons();
+
         // A client hands its plays over through the engine's ordinary request path; the host holds
         // them rather than enqueuing, via DuelLockInPatch. The host has its own buffer already.
         if (run.NetService.Type == NetGameType.Client)
@@ -226,12 +281,26 @@ public sealed class LockInTurnModel : IDuelTurnModel
     /// <summary>
     /// The opponent says they have locked in.
     ///
-    /// **Informational on the host**, which decides from their end turn arriving instead — see
-    /// `HoldRemote`. Kept because it is what a client learns from, and a client showing "they are
-    /// waiting on you" is the obvious next piece of presentation.
+    /// **Informational on the host, authoritative on a client**, and the asymmetry is the point.
+    /// The host decides from their end turn *arriving* (see <see cref="HoldRemote"/>) because this
+    /// message is sent before the plays it announces and could flush a round whose end turn is
+    /// still in flight. A client holds no buffer to flush and no round to order, so the same
+    /// message is safe there — and it is the only signal a client gets, since the host's end turn
+    /// never travels.
     /// </summary>
-    public void RemoteLockedIn(int playCount) =>
+    public void RemoteLockedIn(int playCount)
+    {
         Log.Warn($"[SpirePvp] lock-in: opponent announced {playCount} play(s), {_remote.Count} held");
+
+        if (RunManager.Instance?.NetService.Type != NetGameType.Client)
+        {
+            return;
+        }
+
+        _remoteLockedIn = true;
+        LockInPlanView.RefreshLockInIcons();
+        TryFlush();
+    }
 
     /// <summary>
     /// Holds something the opponent requested, instead of letting the host enqueue it now.
@@ -263,6 +332,7 @@ public sealed class LockInTurnModel : IDuelTurnModel
             _remoteEnd = action;
             _remoteLockedIn = true;
             Log.Warn("[SpirePvp] lock-in: opponent's end turn arrived — they are locked in");
+            LockInPlanView.RefreshLockInIcons();
             TryFlush();
             return;
         }
@@ -272,23 +342,35 @@ public sealed class LockInTurnModel : IDuelTurnModel
     }
 
     /// <summary>
-    /// Both sides are in, so resolve the round: interleave the two buffers and enqueue every play.
+    /// Both sides are in, so the round is closed: the host interleaves the two buffers and enqueues
+    /// every play; a client only lets go of its own.
     ///
-    /// Host only. A client does nothing here — it receives the host's `ActionEnqueuedMessage`
-    /// stream exactly as it does in blitz, and executes the same ordering everyone else does.
+    /// **A client has nothing to enqueue and still has something to do.** It receives the host's
+    /// `ActionEnqueuedMessage` stream exactly as it does in blitz and executes the ordering
+    /// everyone else does — but the round it planned is over, so the buffer it planned into has to
+    /// be released *here*, on the same condition the host uses, rather than at some later local
+    /// event. Anything asking what is planned — the energy reservation, the queue view, the hand —
+    /// then gets the same answer on both clients at the same point in the stream, which is the only
+    /// version of this that cannot decide a card differently on the two sims.
     /// </summary>
     private void TryFlush()
     {
         RunManager? run = RunManager.Instance;
         IRunState? state = run?.State;
-        if (run == null || state == null || _flushing
-            || !_localLockedIn || !_remoteLockedIn
-            || run.NetService.Type != NetGameType.Host)
+        if (run == null || state == null || _flushing || !_localLockedIn || !_remoteLockedIn)
         {
             return;
         }
 
         _flushing = true;
+
+        if (run.NetService.Type != NetGameType.Host)
+        {
+            Log.Warn($"[SpirePvp] lock-in: round closed — {_local.Count} play(s) handed over, "
+                     + "waiting on the host's ordering");
+            BeginNextRound();
+            return;
+        }
 
         ulong me = LocalContext.NetId ?? 0UL;
         ulong opponent = 0UL;

@@ -45,6 +45,13 @@ run teardown, which works because `CleanUp` has *not* fired while that screen is
 `1v1 Duel: Turn-Based` now plays turn-based: each side plans a round privately, ending your turn is
 the lock-in, and the host resolves the two buffers interleaved.
 
+**The planning phase now shows itself (2026-08-12, unplayed):** energy is reserved as you plan, held
+cards sit in vanilla's play queue, and an icon over the end turn button says who has locked in. Both
+surfaces are the engine's own — a held play and a co-op play awaiting the host's ordering are the
+same thing. Note what this cost: `CanPlay` is read by sim code (`PlayCardAction`, `CardSelectCmd`,
+`WhisperingEarring`), so a *local* rule like a reservation may only answer while nothing is
+executing, or the two sims disagree about which cards exist.
+
 **Remaining:** turn-based has an open *design* problem — draw cards are near-dead, because the
 round is planned from the opening hand (options and the leaning are in HANDOFF). Then M8.5,
 tick-paced blitz, which is the most promising idea the playtests produced. See HANDOFF for the
@@ -59,7 +66,7 @@ side comparison before suspecting the mechanic. DESIGN §7 has the symptom → c
 - `dotnet build` must stay green; it auto-installs the mod into the local game.
 - **Never use `Harmony.PatchAll`.** It throws on the first bad target and silently abandons the
   rest. `SpirePvpInit` patches per class and logs a count — confirm `N patch classes applied
-  cleanly` in the log on every launch, or in-game results are meaningless. **63 as of 2026-08-12** (98 methods). Note the count is per *class*, not per patch: a class holding several patch
+  cleanly` in the log on every launch, or in-game results are meaningless. **66 as of 2026-08-12** (102 methods). Note the count is per *class*, not per patch: a class holding several patch
   methods still counts once, so grouping patches by concern does not move it.
 - **The engine assumes the party is standing together, and in a race it is not.** This is the
   single most productive thing to suspect when a race-phase room misbehaves — it has now
