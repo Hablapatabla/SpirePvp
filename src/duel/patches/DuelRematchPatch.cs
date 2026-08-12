@@ -123,6 +123,20 @@ public static class DuelRematchPatch
             float step = menuButton.Size.X > 1f ? menuButton.Size.X + 40f : RematchButtonGap;
             rematch._showPosition = menuButton._showPosition + new Vector2(-step, 0f);
 
+            // **Start it disabled, or the enable that reveals it does nothing.**
+            // `NClickableControl._isEnabled` is declared `= true`, and `Enable()` is guarded by
+            // `if (!_isEnabled)` — so a fresh duplicate believes it is already enabled, the guard
+            // swallows the call, `OnEnable` never runs, and the button keeps the transparent,
+            // pre-tween state `NReturnToMainMenuButton._Ready` left it in. That is precisely what
+            // the placement dump caught: ours `mod=(0, 0, 0, 0)` at the unshifted `(678, 909)`
+            // against the menu button's `mod=(1, 1, 1, 1)` at `(818, 909)` — one property apart,
+            // and invisible for it.
+            //
+            // `Disable()` puts it in the state vanilla's button is genuinely in at this point
+            // (`_Ready` ends with `_mainMenuButton.Disable()`), so the mirrored enable later is a
+            // real transition and plays the real animation.
+            rematch.Disable();
+
             rematch.Connect(NClickableControl.SignalName.Released, Callable.From<NButton>(OnRematchPressed));
 
             // Not shown here, deliberately — see MirrorMenuButtonEnable. `_Ready` ends with
@@ -201,6 +215,14 @@ public static class DuelRematchPatch
 
         if (enable)
         {
+            // Belt and braces against the guard above: if anything has left it believing it is
+            // already enabled, the call would be swallowed and the button would stay invisible
+            // with nothing in the log to say why.
+            if (rematch.IsEnabled)
+            {
+                rematch.Disable();
+            }
+
             rematch.Visible = true;
             rematch.Enable();
         }
