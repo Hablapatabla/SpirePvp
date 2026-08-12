@@ -47,8 +47,11 @@ public static class DuelLockInPatch
             return true;
         }
 
+        // An undo is handled by the model but must still reach vanilla: it is the engine that
+        // un-readies the player, and swallowing it would leave them ready on the host while their
+        // own screen says otherwise.
         model.HoldRemote(action);
-        return false;
+        return action is not UndoEndPlayerTurnAction;
     }
 
 }

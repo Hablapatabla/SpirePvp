@@ -124,17 +124,24 @@ public sealed class LockInTurnModel : IDuelTurnModel
 
         if (action is EndPlayerTurnAction)
         {
-            LockIn();
-
+            // **Recorded before locking in, because locking in can flush the round immediately.**
+            // If the opponent is already waiting, `LockIn` runs the flush inside itself — and a
+            // flush that happens before this assignment appends only *their* end turn, so we are
+            // never marked ready and the round hangs with every card already spent. Measured:
+            // `resolving round — 3 then 3` and then, thirty lines later,
+            // `holding EndPlayerTurnAction for player 1` — the host's own end turn arriving after
+            // the round it belonged to had gone.
+            //
             // The host holds its own so the flush can put it after the plays; a client lets it go
             // to the host, which holds it there for the same reason.
-            if (RunManager.Instance?.NetService.Type == NetGameType.Host)
+            bool isHost = RunManager.Instance?.NetService.Type == NetGameType.Host;
+            if (isHost)
             {
                 _localEnd = action;
-                return true;
             }
 
-            return false;
+            LockIn();
+            return isHost;
         }
 
         // Exactly vanilla's own test for "this belongs to the play phase", reused rather than
@@ -205,6 +212,17 @@ public sealed class LockInTurnModel : IDuelTurnModel
     /// </summary>
     public void HoldRemote(GameAction action)
     {
+        // **Backing out un-locks them.** Undo is not a play and must not be buffered as one; it
+        // also means the opponent is no longer ready, so the round must stop being flushable or a
+        // later lock-in would resolve against a stale buffer.
+        if (action is UndoEndPlayerTurnAction)
+        {
+            _remoteEnd = null;
+            _remoteLockedIn = false;
+            Log.Warn("[SpirePvp] lock-in: opponent backed out of their end turn");
+            return;
+        }
+
         if (action is EndPlayerTurnAction)
         {
             // **Their end turn *is* their lock-in, and using it as the signal removes a race.**
