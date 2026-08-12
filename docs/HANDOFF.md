@@ -664,7 +664,29 @@ Keep that split if you extend this.
 
 ## Immediate next step
 
-### Start here: M8's lock-in turn model
+### Start here: M8's two remaining pieces
+
+**The lock-in turn model is built and playtested (2026-08-12).** A five-round turn-based duel end
+to end on two clients: rounds resolving interleaved, turns rolling over, an HP finish with correct
+paired result screens, and zero mod errors on either side. Picking `1v1 Duel: Turn-Based` now plays
+turn-based. The four ordering constraints that took four attempts to find are written up in
+DESIGN §7 — read them before touching the round loop.
+
+What is left, in order:
+
+1. **Energy reservation.** It is spent at execution, so nothing stops planning ten Strikes on
+   three energy and watching seven fizzle. A postfix on `CardModel.CanPlay` subtracting the
+   buffered cost, against `CardEnergyCost` rather than a guessed accessor. Cut from the first
+   slice on purpose: a wrong predicate there makes cards *unplayable*, which would have made the
+   mode untestable rather than merely rough.
+2. **Presentation for held cards.** A buffered play currently looks like nothing happened. Also
+   worth showing that the opponent has locked in — `DuelLockInMessage` already arrives and is
+   logged, and is otherwise unused.
+
+Then **M9's initiative**: the tiebreak seam is `LockInTurnModel.StartsTheRound`, and the candidate
+is Lucas's — whoever reached the arena first starts the alternation, alternating each round.
+
+### The old M8 note, kept for its scoping
 
 **Everything from the 2026-08-12 session is built and playtested.** The loop, the desync fixes, the
 result screen, rematch — all confirmed in play on both clients, with the only errors in either log

@@ -553,10 +553,30 @@ mechanic. Note `HittableEnemies` is **not** patchable — it has no acting-playe
   balance knobs (§9); Workshop packaging; spectator/obs support (stretch).
   *Accept: a match is configured without the host ever seeing the Custom modifier list, and the
   joining player still sees the agreed settings before starting.*
-- **M8 — Simultaneous turn-based duel** (§3.1b model B). Introduce `IDuelTurnModel`, move the
-  existing behaviour behind a `BlitzTurnModel` unchanged, then add the lock-in model beside
-  it. Carry the choice on `DuelStartMessage`. **Use submission order and do not tune it** —
+- **M8 — Simultaneous turn-based duel** (§3.1b model B). **Core built and playtested 2026-08-12**:
+  a five-round turn-based duel played end to end on two clients, rounds resolving interleaved,
+  turns rolling over, finishing on HP with correct result screens and zero mod errors. Picking
+  `1v1 Duel: Turn-Based` in the lobby now plays turn-based.
+  `IDuelTurnModel` / `BlitzTurnModel` / `LockInTurnModel`, with the gate on
+  `ActionQueueSynchronizer.RequestEnqueue`. **Use submission order and do not tune it** —
   resolution order is M9's problem.
+
+  **Four ordering constraints had to be found one at a time, and they are the whole difficulty of
+  this milestone.** Recorded because any change to the round loop has to keep all four:
+
+  1. `EndPlayerTurnAction` is itself a `CombatPlayPhaseOnly` action, so the buffer swallowed it —
+     a deadlock, since end turn is what releases the buffer.
+  2. The host must hold *both* end turns and enqueue them **after** the plays. Let through early
+     the turn rolls over before its cards resolve; dropped, nobody is ever ready.
+  3. The lock-in trigger belongs on the `RequestEnqueue` path, not `SetReadyToEndTurn`: it must
+     fire on the click so the buffered plays leave *before* the end-turn request.
+  4. The local end turn must be recorded **before** locking in, because locking in can flush the
+     round immediately — and a flush that beats the assignment appends only the opponent's.
+
+  Still open, both deliberately: **energy is not reserved while planning** (it is spent at
+  execution, so a player can plan more cards than they can pay for and watch the surplus fizzle —
+  wants a `CardModel.CanPlay` postfix against `CardEnergyCost`), and **held cards have no
+  "planned" presentation**, so a buffered play looks like nothing happened.
   **Explicitly on hold, 2026-08-05: do not start this until real-time blitz is polished end to
   end.** The comparison is only worth making against a finished thing, and there is real work
   left on blitz. Note the consequence that has to be lived with meanwhile: the lobby already
