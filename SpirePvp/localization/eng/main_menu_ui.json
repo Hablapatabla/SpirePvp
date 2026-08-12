@@ -1,4 +1,8 @@
 {
   "DUEL_MP.title": "Duel",
-  "DUEL_MP.description": "Race a friend through Act 1 on the same seed, then fight them in the arena."
+  "DUEL_MP.description": "Race a friend through Act 1 on the same seed, then fight them in the arena.",
+  "SPIREPVP_LOBBY.turnModel": "Turn model",
+  "SPIREPVP_LOBBY.raceClock": "Race clock — time to reach the arena",
+  "SPIREPVP_LOBBY.duelClock": "Duel clock — a fresh bank when the duel begins",
+  "SPIREPVP_LOBBY.advanced": "Other custom run modifiers"
 }

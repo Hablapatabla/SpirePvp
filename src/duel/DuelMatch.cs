@@ -40,7 +40,8 @@ public static class DuelMatch
     private static IEnumerable<ModifierModel> EffectiveModifiers(IRunState? runState) =>
         MaskedModifiers ?? runState?.Modifiers ?? (IEnumerable<ModifierModel>)Array.Empty<ModifierModel>();
 
-    private static bool HasTurnModel(IEnumerable<ModifierModel> modifiers)
+    /// <summary>Public so the lobby can ask whether a set of modifiers describes a duel.</summary>
+    public static bool HasTurnModel(IEnumerable<ModifierModel> modifiers)
     {
         foreach (ModifierModel modifier in modifiers)
         {
