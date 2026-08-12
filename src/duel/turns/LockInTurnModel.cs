@@ -96,6 +96,21 @@ public sealed class LockInTurnModel : IDuelTurnModel
             return false;
         }
 
+        // **Ending your turn is the lock-in, not a play, and it must never be buffered.**
+        // `EndPlayerTurnAction` is itself a `CombatPlayPhaseOnly` action, so the category test
+        // below swallowed it — and swallowing it is a deadlock, not a glitch: end turn never
+        // reaches `SetReadyToEndTurn`, so the lock-in never fires, so the buffer is never released
+        // and the round can never end. Measured 2026-08-12, and it read exactly as reported —
+        // "nothing happens when clicking end turn" — with the log saying
+        // `holding EndPlayerTurnAction for player 1 turn 1 (3 planned)`.
+        //
+        // Undo goes through for the same reason: backing out of a lock-in is a decision about the
+        // round, not a play within it.
+        if (action is EndPlayerTurnAction or UndoEndPlayerTurnAction)
+        {
+            return false;
+        }
+
         // Exactly vanilla's own test for "this belongs to the play phase", reused rather than
         // reinvented: it is the same category the engine already defers during an enemy turn.
         if (action.ActionType != GameActionType.CombatPlayPhaseOnly)

@@ -92,9 +92,15 @@ public static class DuelLobbyPanel
         container.AddChildSafely(panel);
         container.MoveChildSafely(panel, 0);
 
-        BuildPresetRow(panel, list, CanEditModifiers(screen));
-
         List<NRunModifierTickbox> promoted = new List<NRunModifierTickbox>();
+
+        // **The turn model sits above the presets, and the order is an argument rather than a
+        // taste.** A preset sets the two clocks and nothing else, so putting it on top implies it
+        // configures the turn model too — and picking real-time or turn-based is the larger of the
+        // two decisions: it chooses which game is being played, where a preset only chooses how
+        // long it lasts. So the preset row is built after the first group rather than before them
+        // all. Moved 2026-08-12 at Lucas's request.
+        bool presetRowBuilt = false;
 
         foreach ((string locKey, System.Type group) in Groups)
         {
@@ -130,6 +136,19 @@ public static class DuelLobbyPanel
                 row.AddChildSafely(tickbox);
                 promoted.Add(tickbox);
             }
+
+            if (!presetRowBuilt)
+            {
+                BuildPresetRow(panel, list, CanEditModifiers(screen));
+                presetRowBuilt = true;
+            }
+        }
+
+        // Only if no group produced a row at all — otherwise the presets would be missing entirely
+        // from a lobby that still has clocks to preset.
+        if (!presetRowBuilt)
+        {
+            BuildPresetRow(panel, list, CanEditModifiers(screen));
         }
 
         if (promoted.Count == 0)
