@@ -4,7 +4,80 @@
 
 ## Status
 
-**The full loop works** (playtested 2026-08-06, two local clients): lobby modifiers → race Act 1 → arena node → rendezvous → deck review → duel → result screen, with desync detection live. No blocking issues. The clock is two banks — a race deadline and a fresh duel bank. A match can also end by **resignation** (abandoning is a loss and a win for the opponent) or by **agreed draw**. The result screen shows the match's own statistics and badges, compared against your opponent rather than scored as a run. M6's remaining work is rematch. See `docs/HANDOFF.md` for what is built but not yet playtested.
+**The full loop works and is playable end to end** (playtested through 2026-08-11, two local clients): main menu → **Duel** → lobby with presets → race Act 1 on a mirrored seed → arena node → rendezvous → deck review → duel → result screen, with desync detection live. No blocking issues.
+
+The clock is two banks — a race deadline and a fresh duel bank — configured by preset (Blitz 10/1, Rapid 15/3, No clock) or by hand. A match can also end by **resignation** (abandoning is a loss and a win for the opponent) or by **agreed draw**. The result screen shows the match's own statistics and badges, compared against your opponent rather than scored as a run.
+
+Remaining: rematch, and the turn-based turn model (M8). See `docs/HANDOFF.md`.
+
+## Playing with a friend
+
+Both players need the mod, and both must be on the **same commit** — net message ids are
+positional and the model database is hashed into the connection handshake, so mismatched builds
+are refused by the engine before anything of ours runs.
+
+### Install
+
+1. **Slay the Spire 2** on Steam (built against **v0.110.1**).
+2. **[.NET SDK 9](https://dotnet.microsoft.com/download)** and **git**.
+3. Then:
+
+   ```
+   git clone <repo url>
+   cd SpirePvp
+   dotnet build
+   ```
+
+`dotnet build` installs everything into the game's `mods/SpirePvp/` folder for you — dll, json
+and the `.pck`. **No Godot install is needed**: the `.pck` is committed precisely so that a
+clone is playable without the editor.
+
+The game is found automatically in the usual Steam locations on Windows, macOS and Linux. If
+Steam lives somewhere else, point at it once:
+
+```
+dotnet build -p:Sts2Path="E:/Games/steamapps/common/Slay the Spire 2"
+```
+
+### Enable mods, once per save profile
+
+**This step is a silent killer.** Without it the game loads *no mods at all* while otherwise
+looking completely normal — no error, no missing-mod message, just a game with no Duel entry.
+
+Launch the game, open **Mods** from the main menu, and accept the warning. The log line to look
+for if something is wrong is `Skipping loading mod SpirePvp, user has not yet seen the mods
+warning`.
+
+### Play
+
+Launch normally through Steam (no command-line flags — those are for the two-local-clients dev
+setup and force a LAN transport instead of Steam).
+
+- **Host:** Multiplayer → Host → **Duel**. Pick a preset or set the clocks by hand, then start.
+- **Join:** Multiplayer → **Join**, and pick the host from your Steam friends list.
+
+The joining player sees the agreed time control in the lobby before committing.
+
+### Updating
+
+```
+git pull
+dotnet build
+```
+
+Both of you, to the same commit. If one side has pulled and the other has not, the connection is
+rejected rather than silently desyncing — which is the good outcome, but it does mean a fix is
+only live once you have both pulled it.
+
+### Known: you cannot join an unmodded friend while this is installed
+
+The mod is inert at runtime — every patch is guarded, and normal runs are untouched — but its
+mere presence changes the multiplayer handshake, and the engine refuses the connection on
+either a mod-list mismatch or a model-database hash mismatch. This is the engine correctly
+refusing a configuration that would desync.
+
+To play vanilla co-op with someone who does not have it, disable SpirePvp on the **Mods** screen
+(the setting is per profile) and restart.
 
 ## Agent handover prompt
 

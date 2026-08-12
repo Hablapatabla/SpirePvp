@@ -65,5 +65,17 @@
         <Copy SourceFiles="$(TargetPath)" DestinationFolder="$(ModsPath)SpirePvp/"/>
         <Copy SourceFiles="$(MSBuildProjectDirectory)/SpirePvp.json" DestinationFolder="$(ModsPath)SpirePvp/"/>
         <Copy SourceFiles="$(TargetDir)$(TargetName).pdb" DestinationFolder="$(ModsPath)SpirePvp/" Condition="Exists('$(TargetDir)$(TargetName).pdb')"/>
+
+        <!--
+          The committed .pck, so that `git clone && dotnet build` is a complete install.
+
+          Without this a fresh clone builds and runs with no localization at all: every modifier,
+          menu entry and badge renders as a raw loc key. `dotnet build` does not produce a .pck —
+          only the Godot editor does — which is exactly why it is committed rather than ignored,
+          and why it has to be copied like any other build output.
+
+          Skipped when absent so a working tree mid-export still builds.
+        -->
+        <Copy SourceFiles="$(MSBuildProjectDirectory)/SpirePvp.pck" DestinationFolder="$(ModsPath)SpirePvp/" Condition="Exists('$(MSBuildProjectDirectory)/SpirePvp.pck')"/>
     </Target>
 </Project>
