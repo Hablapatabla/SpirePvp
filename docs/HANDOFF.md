@@ -666,11 +666,38 @@ Keep that split if you extend this.
 
 ### Start here: playtest the planning phase
 
-**M8's two remaining pieces are built and unplayed (2026-08-12).** Energy is reserved while you
-plan, planned cards are drawn in vanilla's play queue, and an icon over the end turn button says who
-has locked in. What to try is at the end of this section, under *"The playtest this needs"*.
+**M8's two remaining pieces are built (2026-08-12), and the playtest of them found something
+bigger.** Energy is reserved while you plan, planned cards are drawn in vanilla's play queue, and an
+icon over the end turn button says who has locked in. What to try is at the end of this section,
+under *"The playtest this needs"*.
 
-**Two findings came out of building them, and the second is the one to remember.**
+**BLOCKER FOUND AND FIXED, UNPLAYED: the lock-in gate was inverted, so the interleaved merge had
+never actually run.** Reported from the seat that saw it — on the client, cards resolved the instant
+end turn was clicked rather than when both players were in, while the host's correctly waited.
+`DuelLockInPatch` ended in `return action is not UndoEndPlayerTurnAction`, which passes every *play*
+through to vanilla and swallows only the undo: the exact inverse of what its own comment describes.
+The host therefore held each of the client's plays in the round buffer **and** enqueued it on
+arrival. Three consecutive lines in the host log say it:
+
+```
+lock-in: holding opponent's PlayCardAction CARD.DEFEND_SILENT (1 held)
+[ActionQueueSynchronizer] Enqueueing action PlayCardAction CARD.DEFEND_SILENT
+[ActionExecutor] Executing action: PlayCardAction CARD.DEFEND_SILENT
+```
+
+The flush then enqueued the same plays a second time, where they no-opped because the cards had
+already left the hand. **So `resolving round — 3 then 3` was three real plays and three
+already-spent ones, in both sessions this model has been played in, and one side of every round has
+been playing blitz.** It never desynced because both sims took their ordering from the same host
+stream — which is exactly why nothing in the logs looked wrong and why the five-round playtest
+passed. Treat the turn-based mode as **unplayed** until this is confirmed in a match.
+
+The general lesson is the one this project keeps paying for in a new costume: **a predicate that
+merely correlates**. Every observable was consistent with a working lock-in — plays were held, the
+round was flushed, the merge logged sensible counts, both clients agreed — because the wrong half of
+the work was still being done by the right code.
+
+**Two more findings came out of building the pieces, and the second is the one to remember.**
 
 **The energy reservation was recorded here as "built, unverified". It was half built, and the half
 that existed could not have worked.** `0b57348` added `LockInTurnModel.ReservedEnergy` and nothing
@@ -799,8 +826,12 @@ model already and needs no help — worth knowing which of the three does which 
 One turn-based match, and the whole checklist is in the first two rounds. `Duel: Turn-Based` +
 `Race Clock: 1` gets you to the arena fast; `duel now` from **exactly one** player is quicker still.
 
-- **Plan three cards.** Each should leave your hand and stack in the play queue beside the play
-  area, in the order you planned them, exactly as a co-op play does while it waits for the host.
+- **First, the thing that has never worked: the client's cards must not resolve when the client
+  locks in.** Both players plan, and whoever locks in *first* should see nothing happen until the
+  other does. Then the round resolves interleaved — one of yours, one of theirs, alternating, host
+  first — which is a thing no playtest has seen yet. In the host log, every
+  `holding opponent's PlayCardAction` must **not** be followed by an
+  `[ActionQueueSynchronizer] Enqueueing action` for that same card until `resolving round`.
 - **Keep planning past your energy.** Cards you cannot afford should go red-cost and refuse to be
   played — *not* the "forbidden" icon, which is for a different kind of no. Nothing should fizzle at
   resolution any more.
@@ -815,6 +846,35 @@ One turn-based match, and the whole checklist is in the first two rounds. `Duel:
   card was aimed at, or plan a card behind one that discards your hand. The card should return to
   the hand rather than hanging over the play area for the rest of the duel. This is the client's
   by-identity miss, so it only shows on the client.
+
+### Two more from that playtest, both unfixed and both about the same property
+
+**You cannot back out of a lock-in.** `NEndTurnButton.CallReleaseLogic` sets the button
+`Disabled` on the click and only offers *Undo End Turn* while
+`CombatManager.IsPlayerReadyToEndTurn(me)` is true — which under this model is false until the
+flush, a whole round later. So the button is dead from the click until the round resolves, and the
+undo path in `LockInTurnModel.HoldRemote` ("opponent backed out of their end turn") has never been
+reachable. It matters more now that locking in also greys the hand: a mis-click commits the round.
+
+**It is not just a button.** A client's plays are already at the host by then (`LockIn` forwards
+them before announcing), so backing out means recalling them: a message, the host dropping that
+player's `_remote` and clearing `_remoteLockedIn`, and the queue view handing the cards back to the
+hand. It also wants a **decision** first — whether backing out is allowed at all is a competitive
+rule, not an implementation detail, and DESIGN §3.1b does not settle it.
+
+**A hand-selection effect offers your planned cards, and takes their nodes.** Playing Survivor
+(discard a card) put the still-queued plays back in the hand as eligible picks. This is not a bug
+in the queue view: a planned card is **still in the Hand pile** until it resolves — that is the same
+fact `PlayCardAction.ExecuteAction` relies on when it cancels a play whose pile has changed — so the
+selection screen is right to offer it, and `NCard.GetNodeForCard` finds our queued node
+(`hand.GetCard(card) ?? playQueue.GetCardNode(card) ?? …`) and pulls it into the grid.
+
+**Do not fix it by filtering the list.** A card selection travels as a player choice keyed by
+*index*, so a list the two clients build differently is a desync — and the client cannot know the
+host's plan anyway. What is genuinely open is whether discarding a planned card should cancel its
+play loudly rather than silently, and whether the node should return to the queue rather than the
+hand. Re-observe it first: this was seen while the client's plays were resolving on arrival, so
+Survivor ran *during planning*; with the gate fixed it runs inside the flush instead.
 
 Then **M9's initiative**: the tiebreak seam is `LockInTurnModel.StartsTheRound`, and the candidate
 is Lucas's — whoever reached the arena first starts the alternation, alternating each round.
