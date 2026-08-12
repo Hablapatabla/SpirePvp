@@ -1044,19 +1044,47 @@ out-damage them* — in one row. A per-round table needs space the flat score li
 it is the same shape of addition that got the race HUD cut: more numbers, not more insight. Revisit
 only if play asks for it.
 
-**Rematch: deliberately deferred, 2026-08-06, and it is milestone-sized rather than a button.**
-The run is already over by the time the result screen is up: `RunManager.CleanUp` has fired,
-`DuelRunCleanupPatch` has released every handler, the clocks are reset. Starting a fresh match
-means getting both clients into a `StartRunLobby` carrying the same modifiers, seed and player
-set and launching, *without* passing through the main menu — which is where the connection
-drops. So it needs a rematch handshake, a route back into a lobby that skips the menu, and
-teardown ordering that keeps the transport alive across a run boundary the mod has never
-crossed. Every one of those is the shape of bug that has cost this project multi-session hunts.
+**Rematch — rescoped 2026-08-12, and the old scoping was wrong on its central premise.**
 
-One design question is open and should be settled before building it: **does a rematch replay
-the same seed or roll a new one?** Same-seed is the truer rematch — both players have seen the
-map, so the second run is pure decision-making — and it is *strictly easier*, because the seed
-is already in the run being ended.
+This section used to open "the run is already over by the time the result screen is up:
+`RunManager.CleanUp` has fired, `DuelRunCleanupPatch` has released every handler, the clocks are
+reset", and concluded that rematch needed *teardown ordering that keeps the transport alive across
+a run boundary*. **`CleanUp` has not fired at result-screen time.** It is called from `NGame` and
+`NMainMenu` on the way back to the menu, not when a run ends — a run *ending* is `OnEnded`, which
+sets `IsGameOver` and nothing else. The log settles it: the entire result screen, summary screen
+included, renders before
+
+```
+[ENetHost] Disconnecting client 1001, reason: QuitGameOver
+[RunLobby] Disconnected. Reason: QuitGameOver
+[Startup] Time to main menu
+```
+
+and that disconnect is issued explicitly by `NGameOverScreen.OnMainMenuButtonPressed`, host-side
+only. Everything else follows from that: `RunManager.State` is still non-null (only `CleanUp`'s
+`finally` nulls it), every mod handler is still armed (`DuelRunCleanupPatch` hooks `CleanUp`), and
+the seed and modifiers are still readable off the run being left.
+
+**So the hard part is not keeping the transport alive — it is already alive. The hard part is the
+launch path.** A run is started by `StartRunLobby`: the host sends `LobbyBeginRunMessage`
+(players, seed, modifiers, act1) and both sides run `BeginRunLocally` → `LobbyListener.BeginRun`.
+Two things to resolve there, both known rather than open:
+
+- **Is `RunManager.RunLobby` still alive on the result screen?** It should be — `CleanUp` is what
+  disposes it — which would make a rematch closer to "call begin-run again" than to "rebuild a
+  lobby". **Verify this first; the whole shape of the work depends on it.**
+- **`_isBeginningRun` is latched and never cleared** — `BeginRunLocally` sets it and the guard
+  logs "Tried to begin run twice, ignoring second one!". Reusing a lobby instance means clearing
+  it. `SetHostIsClosed(true)` and `SetBufferMessages(true)` are set on the same path and want the
+  same look.
+
+What is genuinely still needed: a **rematch handshake** (both must agree — `DuelResign` and
+`DuelDrawPrompt` already implement exactly this offer/accept shape over the connection that is
+still up), and a **button on the result screen**, which is still the only moment that works
+because leaving it is what disconnects.
+
+**The seed question is settled: same seed.** Both players have seen the map, so the second run is
+pure decision-making, and it is strictly less work — the seed is already in the run being ended.
 
 **A flame effect for the deck-review transition** (wanted, not built). The rest site's fire is
 `NRestSiteFireVfx`, a scene child of `NRestSiteRoom` with no static `Create`, so it cannot be
