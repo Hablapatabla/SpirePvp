@@ -21,7 +21,8 @@ flags, console commands and gotchas below are OS-neutral unless marked.
 | **M4** information rules | **done**, playtested |
 | **M5** race phase | **working, playtested 2026-08-05.** Two clients race the same seeded map independently — own combats, own rewards, advancing at their own pace — with mirrored RNG and a run-long clock |
 | **M6** full loop | **done, playtested through 2026-08-11.** Lobby modifiers → race → arena node → rendezvous → deck review → duel → result screen, with checksums live, split race/duel clocks and Neow intact. Plus resignation and agreed draws. Result-screen stats and badges reach the screen and compare correctly. The 2026-08-11 sweep closed the race phase's remaining rough edges — rest site, treasure chest, shop, map portraits, the loser's result screen and opponent summons. Remaining: rematch |
-| **M7** | **next milestone: a dedicated Duel host menu** — scoped below and in DESIGN §5b |
+| **M7** | **done, playtested 2026-08-11.** A **Duel** entry beside Standard/Daily/Custom opens a lobby retitled "Duel": Blitz/Rapid/No-clock presets, then the three real decisions as headed rows of chips, then the other custom-run modifiers behind a collapsed caret. Re-dresses `NCustomRunScreen` rather than replacing it |
+| **Shipping** | **done.** `git clone && dotnet build` is a complete install — the `.pck` is committed, so no Godot is needed. README has a step-by-step for a non-technical Windows player. Debug builds stamp the git commit into the mod version, so the engine's mod-match gate enforces "same build" rather than us asking. Coexistence verified with a Workshop mod (RegentFX): 56 patches clean on both clients, VFX rendering in a duel |
 
 A duel is fully playable end to end today: enter the arena, fight with real cards and
 statuses, win or lose on HP or on the clock, and land on a victory/defeat screen.
@@ -77,7 +78,7 @@ abandons the rest, so one typo disables an arbitrary subset while the mod still 
 still logs "loaded". `SpirePvpInit` therefore applies each patch class independently and logs
 a count. **On every launch, confirm the log says `N patch classes applied cleanly`** — if it
 says `PATCH FAILED`, some of the mod is not running and in-game results mean nothing.
-**53 as of this handoff.** The count is per *class*, not per patch: a class holding
+**56 as of this handoff.** The count is per *class*, not per patch: a class holding
 several patch methods still counts once, so grouping patches by concern does not move it.
 
 **Harmony resolves `[HarmonyPatch(typeof(X))]` against methods declared on `X` only.** Naming
@@ -102,6 +103,28 @@ disconnected service for 21 seconds — 46 error lines on the host, a matching "
 handlers are registered" on the client. `DuelClockService.Tick` now stops on any run that is no
 longer `IsInProgress`, and the host's broadcast additionally checks `NetService.IsConnected`.
 Guard on the *condition*, not on each new route out; there is always another route.
+
+**A message that only fires on *change* cannot carry initial state.** The peer that arrives
+late gets its state some other way, so hook the arrival too. Four instances now: the duel
+handshake, race progress, the decklist reveal, and most recently the joining client showing the
+plain Custom lobby — the host applied the preset before anyone was connected, so
+`LobbyModifiersChangedMessage` had nothing left to announce and the client's opening state came
+in its `ClientLobbyJoinResponseMessage` instead. Same family as arming handlers at run start
+rather than on first local use. The diagnostic is an *absent* log line, so check that the
+message you are relying on actually arrived before assuming the handler is wrong.
+
+**If any patch class fails, duelling refuses to start.** `SpirePvpInit.PatchesHealthy` gates
+both the Duel menu entry (which locks, showing `DUEL_MP.LOCKED.description`) and
+`DuelMatch.OnRunCreated` (which bails, leaving the run as ordinary co-op). Every other kind of
+mod degrades gracefully with a patch missing; this one arbitrates a two-player game, so a hole
+in it is a hang or a desync that reads as a gameplay bug. The run is deliberately not torn down
+— refusing to arbitrate is the safe failure.
+
+**Patch targets are `nameof`, not strings.** A game update that moves one is then a build error
+naming the method, on the machine that pulled it, rather than a runtime `PATCH FAILED` and a
+mod running with a hole. Publicizer makes even private members work. The one exception is
+`Neow.GenerateInitialOptions`, which is virtual and so not publicized — the only target that can
+still fail at runtime.
 
 **Ask the condition you mean, not one that happens to correlate.** `DuelClockService` learned
 this the hard way: its top bar keyed the one-clock/two-clock choice on the *phase*, and a race
@@ -455,7 +478,23 @@ Keep that split if you extend this.
 
 ## Immediate next step
 
-### M7 — the dedicated Duel host menu
+### Playtest with a second person, and take the list
+
+Everything scoped is built and played: the loop, the result screen, the Duel menu and lobby, and
+distribution. What has *not* happened is a match against someone who did not build it, on their
+own machine, without being told which bugs to ignore. That is the next thing, and it is the only
+thing that generates a real list.
+
+Send them the repo and the README's "Playing with a friend" section. Both sides must be on the
+same commit — the engine now enforces that itself, refusing the connection rather than letting
+two builds desync.
+
+Known-good afterwards, worth re-reading before diagnosing anything: the client's "internal
+error" when launched before the host is in a lobby is `--fastmp=join` firing at startup with
+nothing listening, and it is a dev-harness artefact that cannot happen for someone launching
+through Steam.
+
+### M7 — the dedicated Duel host menu (done; kept for the reasoning)
 
 **Everything that was pending here has been playtested and closed.** The 2026-08-11 session ran
 the loop end to end repeatedly and fixed what it found; the result screen, the arena, the
