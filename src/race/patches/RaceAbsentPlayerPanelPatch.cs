@@ -27,7 +27,7 @@ namespace SpirePvp.Race.Patches;
 /// not gated on race mode — dereferencing a null combat state is never correct, and the
 /// symmetric teardown already agrees.
 /// </summary>
-[HarmonyPatch(typeof(NMultiplayerPlayerState), "OnCombatSetUp")]
+[HarmonyPatch(typeof(NMultiplayerPlayerState), nameof(NMultiplayerPlayerState.OnCombatSetUp))]
 public static class RaceAbsentPlayerPanelPatch
 {
     public static bool Prefix(NMultiplayerPlayerState __instance)

@@ -16,9 +16,19 @@ Both players need the mod, and both must be on the **same commit** — net messa
 positional and the model database is hashed into the connection handshake, so mismatched builds
 are refused by the engine before anything of ours runs.
 
+You must also both be on the **same Steam branch** — either both on `public-beta` or both on
+default. That is a vanilla constraint rather than ours: different game builds cannot play
+together with or without this mod.
+
+**There is no version to keep in step with beyond that.** The mod compiles against whatever
+`sts2.dll` your own install has, so a game patch is picked up by rebuilding. Patch targets are
+resolved at compile time wherever the language allows it, so if a game update genuinely moves
+something we patch, you get a build error naming the method rather than a mod that loads and
+then misbehaves.
+
 ### Install
 
-1. **Slay the Spire 2** on Steam (built against **v0.110.1**).
+1. **Slay the Spire 2** on Steam, on the same branch as the person you want to play with.
 2. **[.NET SDK 9](https://dotnet.microsoft.com/download)** and **git**.
 3. Then:
 
@@ -65,7 +75,8 @@ git pull
 dotnet build
 ```
 
-Both of you, to the same commit. If one side has pulled and the other has not, the connection is
+Both of you, to the same commit. Rebuild after a *game* update too — that is what re-binds the
+mod to the new `sts2.dll`. If one side has pulled and the other has not, the connection is
 rejected rather than silently desyncing — which is the good outcome, but it does mean a fix is
 only live once you have both pulled it.
 

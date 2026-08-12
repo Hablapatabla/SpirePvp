@@ -39,6 +39,10 @@ namespace SpirePvp.Duel.Patches;
 /// all. Every bail-out below therefore names itself in the log, because an empty option list is
 /// indistinguishable in game from Neow being skipped.
 /// </summary>
+// The one target that cannot be `nameof`: GenerateInitialOptions is virtual, and the csproj
+// publicizes with IncludeVirtualMembers="false", so it stays inaccessible at compile time. This
+// one therefore keeps the runtime-resolved string, and is the only patch here that can fail as
+// "Undefined target method" rather than as a build error.
 [HarmonyPatch(typeof(Neow), "GenerateInitialOptions")]
 public static class DuelNeowOptionsPatch
 {

@@ -22,7 +22,7 @@ namespace SpirePvp.Duel.Patches;
 /// the rule that has cost this project two multi-session hunts. It is handed our own async
 /// method, so the caller awaits our animation exactly as it would vanilla's.
 /// </summary>
-[HarmonyPatch(typeof(NGameOverScreen), "AnimateBadges")]
+[HarmonyPatch(typeof(NGameOverScreen), nameof(NGameOverScreen.AnimateBadges))]
 public static class DuelBadgesPatch
 {
     public static bool Prefix(NGameOverScreen __instance, ref Task __result)

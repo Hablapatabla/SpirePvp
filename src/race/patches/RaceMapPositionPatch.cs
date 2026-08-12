@@ -46,7 +46,7 @@ namespace SpirePvp.Race.Patches;
 /// OnPlayerVoteChangedInternal call is now only doing the repaint of the two affected nodes.
 /// Left in place for exactly that reason.
 /// </summary>
-[HarmonyPatch(typeof(NMapPoint), "ShouldDisplayPlayerVote")]
+[HarmonyPatch(typeof(NMapPoint), nameof(NMapPoint.ShouldDisplayPlayerVote))]
 public static class RaceMapPositionPatch
 {
     public static bool Prefix(NMapPoint __instance, Player player, ref bool __result)

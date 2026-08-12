@@ -29,7 +29,7 @@ namespace SpirePvp.Race.Patches;
 /// Seeding runs once at run creation, so with the modifier present Neow is drawn from
 /// mirrored seeds too, and nothing has to be re-seeded after the fact.
 /// </summary>
-[HarmonyPatch(typeof(Player), "InitializeSeed")]
+[HarmonyPatch(typeof(Player), nameof(Player.InitializeSeed))]
 public static class RaceMirrorRngPatch
 {
     public static bool Prefix(Player __instance, string seed)

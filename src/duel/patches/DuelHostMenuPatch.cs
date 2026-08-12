@@ -38,7 +38,7 @@ namespace SpirePvp.Duel.Patches;
 /// lobby, which exposes the seed field that epoch protects. Same-seed rematches are a stated
 /// design goal (DESIGN §5b), so that is part of the mode rather than a leak.
 /// </summary>
-[HarmonyPatch(typeof(NMultiplayerHostSubmenu), "_Ready")]
+[HarmonyPatch(typeof(NMultiplayerHostSubmenu), nameof(NMultiplayerHostSubmenu._Ready))]
 public static class DuelHostMenuPatch
 {
     private const string IconPath = "res://SpirePvp/map/duel_node.png";

@@ -29,7 +29,7 @@ namespace SpirePvp.Race.Patches;
 ///
 /// Fire-and-forget via RunSafely matches the original's own handling of that task.
 /// </summary>
-[HarmonyPatch(typeof(NMapScreen), "OnMapPointSelectedLocally")]
+[HarmonyPatch(typeof(NMapScreen), nameof(NMapScreen.OnMapPointSelectedLocally))]
 public static class RaceMapTravelPatch
 {
     public static bool Prefix(NMapPoint point)

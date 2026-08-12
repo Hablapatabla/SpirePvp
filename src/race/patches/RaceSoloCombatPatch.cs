@@ -32,7 +32,7 @@ namespace SpirePvp.Race.Patches;
 ///
 /// Note this is race-only. The duel deliberately wants both players in one combat.
 /// </summary>
-[HarmonyPatch(typeof(CombatRoom), "EnterInternal")]
+[HarmonyPatch(typeof(CombatRoom), nameof(CombatRoom.EnterInternal))]
 public static class RaceSoloCombatPatch
 {
     public static void Prefix(CombatRoom __instance, IRunState? runState)

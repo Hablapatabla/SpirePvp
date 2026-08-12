@@ -29,7 +29,7 @@ namespace SpirePvp.Duel.Patches;
 ///   SaveRun / progress / achievements — duel arenas are not part of run progression.
 ///   OfferRoomEndRewards    — DuelEncounter.ShouldGiveRewards is already false.
 /// </summary>
-[HarmonyPatch(typeof(CombatManager), "EndCombatInternal", typeof(CombatTurnState))]
+[HarmonyPatch(typeof(CombatManager), nameof(CombatManager.EndCombatInternal), typeof(CombatTurnState))]
 public static class DuelEndCombatPatch
 {
     public static bool Prefix(CombatManager __instance, CombatTurnState turnState, ref Task __result)

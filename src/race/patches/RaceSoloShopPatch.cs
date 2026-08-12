@@ -25,7 +25,7 @@ namespace SpirePvp.Race.Patches;
 /// and centre at (0, 0), and the characters are appended in that order. That also means no
 /// slot-0 correction is needed here, unlike the rest site — vanilla already did it.
 /// </summary>
-[HarmonyPatch(typeof(NMerchantRoom), "AfterRoomIsLoaded")]
+[HarmonyPatch(typeof(NMerchantRoom), nameof(NMerchantRoom.AfterRoomIsLoaded))]
 public static class RaceSoloShopPatch
 {
     public static void Postfix(NMerchantRoom __instance)

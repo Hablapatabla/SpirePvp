@@ -43,7 +43,7 @@ namespace SpirePvp.Race.Patches;
 /// coord would reach them. Keeping the node and hiding it leaves every lookup valid — the same
 /// reasoning as the treasure room's phantom hand.
 /// </summary>
-[HarmonyPatch(typeof(NRestSiteRoom), "_Ready")]
+[HarmonyPatch(typeof(NRestSiteRoom), nameof(NRestSiteRoom._Ready))]
 public static class RaceSoloRestSiteArtPatch
 {
     public static void Postfix(NRestSiteRoom __instance)

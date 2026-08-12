@@ -33,25 +33,25 @@ public static class RaceIgnoreRemoteActionsPatch
     internal static bool ShouldDrop() => DuelSession.IsRaceActive;
 }
 
-[HarmonyPatch(typeof(ActionQueueSynchronizer), "HandleActionEnqueuedMessage")]
+[HarmonyPatch(typeof(ActionQueueSynchronizer), nameof(ActionQueueSynchronizer.HandleActionEnqueuedMessage))]
 public static class RaceIgnoreActionEnqueuedPatch
 {
     public static bool Prefix() => !RaceIgnoreRemoteActionsPatch.ShouldDrop();
 }
 
-[HarmonyPatch(typeof(ActionQueueSynchronizer), "HandleHookActionEnqueuedMessage")]
+[HarmonyPatch(typeof(ActionQueueSynchronizer), nameof(ActionQueueSynchronizer.HandleHookActionEnqueuedMessage))]
 public static class RaceIgnoreHookActionEnqueuedPatch
 {
     public static bool Prefix() => !RaceIgnoreRemoteActionsPatch.ShouldDrop();
 }
 
-[HarmonyPatch(typeof(ActionQueueSynchronizer), "HandleRequestEnqueueActionMessage")]
+[HarmonyPatch(typeof(ActionQueueSynchronizer), nameof(ActionQueueSynchronizer.HandleRequestEnqueueActionMessage))]
 public static class RaceIgnoreRequestEnqueuePatch
 {
     public static bool Prefix() => !RaceIgnoreRemoteActionsPatch.ShouldDrop();
 }
 
-[HarmonyPatch(typeof(ActionQueueSynchronizer), "HandleRequestEnqueueHookActionMessage")]
+[HarmonyPatch(typeof(ActionQueueSynchronizer), nameof(ActionQueueSynchronizer.HandleRequestEnqueueHookActionMessage))]
 public static class RaceIgnoreRequestEnqueueHookPatch
 {
     public static bool Prefix() => !RaceIgnoreRemoteActionsPatch.ShouldDrop();

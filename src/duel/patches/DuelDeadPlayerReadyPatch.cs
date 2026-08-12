@@ -26,7 +26,7 @@ namespace SpirePvp.Duel.Patches;
 ///
 /// Reads under turnState.ReadyLock, matching the original.
 /// </summary>
-[HarmonyPatch(typeof(CombatManager), "AllPlayersReadyToEndTurn", typeof(CombatTurnState))]
+[HarmonyPatch(typeof(CombatManager), nameof(CombatManager.AllPlayersReadyToEndTurn), typeof(CombatTurnState))]
 public static class DuelDeadPlayerReadyPatch
 {
     public static void Postfix(CombatTurnState turnState, ref bool __result)

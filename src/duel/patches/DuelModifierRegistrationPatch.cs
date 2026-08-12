@@ -21,7 +21,7 @@ namespace SpirePvp.Duel.Patches;
 /// own mechanism (`NCustomRunModifiersList` consults `MutuallyExclusiveModifiers` on every
 /// toggle), so we declare the groups rather than policing them.
 /// </summary>
-[HarmonyPatch(typeof(ModelDb), "GoodModifiers", MethodType.Getter)]
+[HarmonyPatch(typeof(ModelDb), nameof(ModelDb.GoodModifiers), MethodType.Getter)]
 public static class DuelModifierListPatch
 {
     public static void Postfix(ref IReadOnlyList<ModifierModel> __result)
@@ -45,7 +45,7 @@ public static class DuelModifierListPatch
     }
 }
 
-[HarmonyPatch(typeof(ModelDb), "MutuallyExclusiveModifiers", MethodType.Getter)]
+[HarmonyPatch(typeof(ModelDb), nameof(ModelDb.MutuallyExclusiveModifiers), MethodType.Getter)]
 public static class DuelModifierExclusivityPatch
 {
     public static void Postfix(ref IReadOnlyList<IReadOnlySet<ModifierModel>> __result)

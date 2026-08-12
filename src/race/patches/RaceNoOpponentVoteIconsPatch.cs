@@ -42,7 +42,7 @@ namespace SpirePvp.Race.Patches;
 [HarmonyPatch]
 public static class RaceNoOpponentVoteIconsPatch
 {
-    [HarmonyPatch(typeof(NTreasureRoom), "IsPlayerVotingForSkip")]
+    [HarmonyPatch(typeof(NTreasureRoom), nameof(NTreasureRoom.IsPlayerVotingForSkip))]
     [HarmonyPrefix]
     public static bool NoOpponentSkipVote(Player player, ref bool __result)
     {
@@ -55,7 +55,7 @@ public static class RaceNoOpponentVoteIconsPatch
         return false;
     }
 
-    [HarmonyPatch(typeof(NEventOptionButton), "ShouldDisplayPlayerVote")]
+    [HarmonyPatch(typeof(NEventOptionButton), nameof(NEventOptionButton.ShouldDisplayPlayerVote))]
     [HarmonyPrefix]
     public static bool NoOpponentEventVote(Player player, ref bool __result)
     {

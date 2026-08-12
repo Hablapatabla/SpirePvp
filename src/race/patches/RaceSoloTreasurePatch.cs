@@ -153,7 +153,7 @@ public static class RaceSoloTreasurePatch
     ///
     /// In a race the sole holder belongs to the local player by construction, so it is index 0.
     /// </summary>
-    [HarmonyPatch(typeof(NTreasureRoomRelicCollection), "DefaultFocusedControl", MethodType.Getter)]
+    [HarmonyPatch(typeof(NTreasureRoomRelicCollection), nameof(NTreasureRoomRelicCollection.DefaultFocusedControl), MethodType.Getter)]
     [HarmonyPrefix]
     public static bool LocalRelicHolderFocus(NTreasureRoomRelicCollection __instance,
                                              ref Control? __result)

@@ -21,7 +21,7 @@ namespace SpirePvp.Race.Patches;
 /// gets to lay itself out with no lines, which is a state it already handles, instead of being
 /// left holding whatever the previous event set.
 /// </summary>
-[HarmonyPatch(typeof(NAncientEventLayout), "SetDialogue")]
+[HarmonyPatch(typeof(NAncientEventLayout), nameof(NAncientEventLayout.SetDialogue))]
 public static class RaceSkipNeowDialoguePatch
 {
     private static readonly List<AncientDialogueLine> None = new List<AncientDialogueLine>();

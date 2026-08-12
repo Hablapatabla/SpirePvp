@@ -19,7 +19,7 @@ namespace SpirePvp.Duel.Patches;
 /// match: an ordinary co-op run inherits nothing if we have already let go, and it was exactly
 /// that run which caught the host still broadcasting clock syncs into it.
 /// </summary>
-[HarmonyPatch(typeof(RunManager), "CleanUp")]
+[HarmonyPatch(typeof(RunManager), nameof(RunManager.CleanUp))]
 public static class DuelRunCleanupPatch
 {
     public static void Prefix()

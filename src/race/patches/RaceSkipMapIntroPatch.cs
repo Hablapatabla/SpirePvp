@@ -25,7 +25,7 @@ namespace SpirePvp.Race.Patches;
 /// The act banner is deliberately left alone: it is a brief overlay, it names the act, and it
 /// does not gate input.
 /// </summary>
-[HarmonyPatch(typeof(NMapScreen), "StartOfActAnim")]
+[HarmonyPatch(typeof(NMapScreen), nameof(NMapScreen.StartOfActAnim))]
 public static class RaceSkipMapIntroPatch
 {
     private static readonly Vector2 Settled = new Vector2(0f, -600f);

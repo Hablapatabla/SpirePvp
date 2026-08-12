@@ -37,7 +37,7 @@ namespace SpirePvp.Duel.Patches;
 /// (`_deathQuote`, `_victoryDamageLabel`, both `MegaRichTextLabel`) do take markup, which is
 /// exactly what makes the distinction easy to get wrong.
 /// </summary>
-[HarmonyPatch(typeof(NGameOverScreen), "AnimateScoreLines")]
+[HarmonyPatch(typeof(NGameOverScreen), nameof(NGameOverScreen.AnimateScoreLines))]
 public static class DuelResultLinesPatch
 {
     private const string Table = "game_over_screen";

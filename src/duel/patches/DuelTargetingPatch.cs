@@ -115,7 +115,7 @@ public static class DuelPotionTargetingPatch
 ///
 /// So the rules patch alone is not enough; the UI needs the same permission.
 /// </summary>
-[HarmonyPatch(typeof(NTargetManager), "AllowedToTargetCreature")]
+[HarmonyPatch(typeof(NTargetManager), nameof(NTargetManager.AllowedToTargetCreature))]
 public static class DuelHoverTargetingPatch
 {
     public static void Postfix(NTargetManager __instance, Creature creature, ref bool __result)

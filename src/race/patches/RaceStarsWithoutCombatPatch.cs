@@ -27,7 +27,7 @@ namespace SpirePvp.Race.Patches;
 /// right call regardless of which cause it turns out to be: a player outside the combat has no
 /// combat state to gain stars into.
 /// </summary>
-[HarmonyPatch(typeof(PlayerCmd), "GainStars")]
+[HarmonyPatch(typeof(PlayerCmd), nameof(PlayerCmd.GainStars))]
 public static class RaceStarsWithoutCombatPatch
 {
     // GainStars returns Task, and callers await it. Skipping the original without assigning

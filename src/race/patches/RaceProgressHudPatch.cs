@@ -20,7 +20,7 @@ namespace SpirePvp.Race.Patches;
 /// returning null — so the obvious version threw a NullReferenceException on every map screen
 /// built. The instance being constructed is right here; there is no reason to go looking for it.
 /// </summary>
-[HarmonyPatch(typeof(NMapScreen), "_Ready")]
+[HarmonyPatch(typeof(NMapScreen), nameof(NMapScreen._Ready))]
 public static class RaceProgressHudPatch
 {
     public static void Postfix(NMapScreen __instance) => RaceProgressHud.Refresh(__instance);

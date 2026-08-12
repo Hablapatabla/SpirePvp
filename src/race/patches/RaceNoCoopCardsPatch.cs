@@ -44,7 +44,7 @@ internal static class NoCoopCards
 /// keys straight off <c>runState.Players.Count > 1</c> rather than off the run's constraint
 /// property — which is why patching the property alone would miss every card reward in the game.
 /// </summary>
-[HarmonyPatch(typeof(CardFactory), "FilterForPlayerCount")]
+[HarmonyPatch(typeof(CardFactory), nameof(CardFactory.FilterForPlayerCount))]
 public static class RaceNoCoopCardRewardsPatch
 {
     public static void Postfix(IRunState runState, ref IEnumerable<CardModel> __result)
@@ -67,7 +67,7 @@ public static class RaceNoCoopCardRewardsPatch
 /// interface member, which is an awkward Harmony target, and the pool is where every one of
 /// these paths converges anyway.
 /// </summary>
-[HarmonyPatch(typeof(CardPoolModel), "GetUnlockedCards")]
+[HarmonyPatch(typeof(CardPoolModel), nameof(CardPoolModel.GetUnlockedCards))]
 public static class RaceNoCoopCardPoolPatch
 {
     public static void Postfix(ref IEnumerable<CardModel> __result)
@@ -96,7 +96,7 @@ public static class RaceNoCoopCardPoolPatch
 /// it is the only file under <c>Models/Relics</c> that mentions a multiplayer constraint or a
 /// player count at all. If a game update adds another, that grep is how to find it.
 /// </summary>
-[HarmonyPatch(typeof(MassiveScroll), "IsAllowed")]
+[HarmonyPatch(typeof(MassiveScroll), nameof(MassiveScroll.IsAllowed))]
 public static class RaceNoCoopNeowRelicPatch
 {
     public static void Postfix(IRunState runState, ref bool __result)

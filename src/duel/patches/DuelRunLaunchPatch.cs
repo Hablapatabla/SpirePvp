@@ -19,7 +19,7 @@ namespace SpirePvp.Duel.Patches;
 ///
 /// Postfix, not prefix: the identity must already be assigned when we run.
 /// </summary>
-[HarmonyPatch(typeof(RunManager), "Launch")]
+[HarmonyPatch(typeof(RunManager), nameof(RunManager.Launch))]
 public static class DuelRunLaunchPatch
 {
     public static void Postfix(RunState __result)

@@ -27,7 +27,7 @@ namespace SpirePvp.Duel.Patches;
 /// a boss this run never fought, and a number that means nothing in a duel. Blanked rather than
 /// rewritten: the duel's own numbers are already on the screen, in the score lines.
 /// </summary>
-[HarmonyPatch(typeof(NGameOverScreen), "InitializeBannerAndQuote")]
+[HarmonyPatch(typeof(NGameOverScreen), nameof(NGameOverScreen.InitializeBannerAndQuote))]
 public static class DuelResultBannerPatch
 {
     public static void Postfix(NGameOverScreen __instance)
