@@ -652,41 +652,58 @@ Keep that split if you extend this.
 
 ## Immediate next step
 
-### Start here: the desync fix, built 2026-08-12 and never played
+### Start here: M8's lock-in turn model
 
-**The stale peer-choice fix is confirmed working, through a complete duel** (2026-08-12): `dropped
-1 stale peer choice(s) held by the race (1001#0) — 0 still pending` on the host and `(1#0)` on the
-client, a full HP-decided duel, and **zero** `State divergence` or `Tried to get combat cards` in
-either log. The result wording is confirmed too, from loc rather than fallback and correctly paired
-to the ending — `Won, reason 0 — "They died in the arena. You did not." [wonHp 1/4]` against
-`Lost, reason 0 — "Your whole run, ended by their deck." [lostHp 2/4]`. Badges reached the screen
-(`duel badges: 3 awarded` / `0 awarded`) with no `duel badges failed`.
+**Everything from the 2026-08-12 session is built and playtested.** The loop, the desync fixes, the
+result screen, rematch — all confirmed in play on both clients, with the only errors in either log
+being vanilla's `Error deleting path …current_run_mp.save.backup`, which is noise and predates this
+work. Patch count is **62 classes / 98 methods**; confirm that line on every launch.
 
-**Confirmed since:** both portraits on the starting node at Neow, and **two back-to-back matches in
-one process with zero mod errors on either client** — the only errors in that log are vanilla's
-`Error deleting path modded/profile1/saves/current_run_mp.save.backup`, which is noise and predates
-this work. No `duel badges failed` on any run.
+Closed and confirmed this session, so nothing below needs re-testing:
 
-**Still unplayed:** the void draw — it needs a divergence to provoke, and divergences are now rare,
-so it may simply stay unplayed. And the **badge teardown guard** is *still* unexercised for a
-reason worth writing down: **the Main Menu button does not appear until the badges have finished
-animating**, so the window this guard covers cannot be reached by clicking that button. Whatever
-route reaches it — the Continue button, Escape, an earlier click target — find it before assuming
-the guard works, or drop the guard as unreachable.
+| Fix | Evidence |
+|---|---|
+| Stale peer choices desynced the duel | `dropped 1 stale peer choice(s) held by the race` on both, then a full duel with no divergence |
+| A desync gave *both* players the win | `DuelEndReason.Desync` voids it as a draw (unplayed — needs a divergence to provoke, and those are now rare) |
+| Only your own portrait at Neow | Both now sit on the map's starting node |
+| Winner's line missing on the summary screen | `victory line re-shown on the summary screen` |
+| Score lines shoved up when badges arrived | A sized spacer above the grid; measured settled at grid `(0, 40)`, badges `(0, 294)` |
+| **Rematch** | Offer/accept, same seed both sides (`seed 'MAPF5LWGZS9E'` twice), transport held open through teardown |
+| Rematch vote marker, and greying out when the opponent leaves | Confirmed from both seats |
 
-What a run must show:
+**M8 slice 1 is in and is deliberately a no-op:** `IDuelTurnModel`, `BlitzTurnModel` and
+`DuelTurnModelPatch` — the gate on `ActionQueueSynchronizer.RequestEnqueue` — are live, and blitz
+answers "never defer", so the seam is exercised by every existing match before its alternative
+exists. `turn model: blitz` appears once per duel.
 
-- `duel: dropped N stale peer choice(s) held by the race (…)` at the phase flip, with a nonzero N
-  whenever either player took a reward during the race — which is every real match.
-- **Both players playing choice-gathering cards in the duel** (Photon Cut is the one that caught
-  it; anything ending in a card select does) with **no** `Tried to get combat cards from player
-  choice result of type Index!` and no `State divergence detected`.
-- If a divergence ever does happen again, both screens must now read **DRAW** with a
-  `drawDesync` line — never two victories.
+**Slice 2 is the lock-in model itself**, and the design is settled in DESIGN §3.1b: interleaved
+submission (A1, B1, A2, B2 …) starting on fixed slot order. The shape:
 
-`0 still pending` is the expected tail of that log line; a nonzero pending count means something
-in a race now awaits a remote choice, which nothing should, and wants reading rather than
-handling.
+1. `LockInTurnModel.ShouldDefer` returns true for the local player's play-phase actions, buffering
+   them instead of submitting.
+2. A lock-in control — the end-turn button is the obvious host for it — and a message saying so.
+3. On both locked in, **the host** interleaves the two buffers and enqueues each play with
+   `ActionQueueSynchronizer.EnqueueAction(action, actionOwnerId)`. That is I5's finding, proven in
+   M3 research and unused since: the public `RequestEnqueue` hardcodes the host's own id, but the
+   private `EnqueueAction` takes an owner, and a **client cannot** spoof one (the host derives it
+   from `senderId`), so the flush must originate host-side — which is what determinism wants anyway.
+4. The client's buffered plays have to reach the host as data: `GameAction.ToNetAction()` is what
+   `RequestEnqueueActionMessage` already uses, so a list of those is the wire format.
+
+**Do not tune the order** (DESIGN §3.1b). Fixed slot order is arbitrary on purpose; the seam where
+initiative belongs is named in §3.1b and the candidate is Lucas's first-to-arena, alternating each
+round, in M9.
+
+### Two known gaps, neither blocking
+
+- **The killing blow hangs in mid-air behind the result screen.** Root-caused, not fixed:
+  `DuelEndCombatPatch` skips `CombatManager.EndCombatInternal` wholesale, so nothing winds the
+  combat down. It is the `RunManager.EnterRoom` trap at the other end of the combat and wants the
+  same treatment — read the method, reproduce the safe steps, comment each one. Its own pass.
+- **The badge teardown guard is still unexercised**, and for a reason worth knowing: the Main Menu
+  button does not appear until the badges have finished animating, so the window the guard covers
+  cannot be reached by clicking it. Find the route (Continue? Escape?) before assuming the guard
+  works, or drop it as unreachable.
 
 ### Also unplaytested: both portraits on the map from the start
 
