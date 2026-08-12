@@ -1,6 +1,7 @@
 using HarmonyLib;
 using MegaCrit.Sts2.Core.Context;
 using MegaCrit.Sts2.Core.Entities.Players;
+using MegaCrit.Sts2.Core.Map;
 using MegaCrit.Sts2.Core.Nodes.Screens.Map;
 using SpirePvp.Duel;
 
@@ -39,8 +40,9 @@ namespace SpirePvp.Race.Patches;
 /// The fix is to stop inferring position from a dictionary vanilla clears at will, and ask the
 /// question we actually mean. For the opponent the authoritative answer is RaceProgress, which
 /// is fed by their own broadcasts; for us it is the local run state, which is what vanilla's
-/// fallback already says. Before their first report OpponentCoord is null and they are drawn
-/// nowhere — better than drawing them on top of you, which is the failure being removed.
+/// fallback already says. Before their first report OpponentCoord is null, and they are drawn on
+/// the map's starting node — where an unmoved run necessarily is — rather than on top of you,
+/// which is the failure being removed. See the comment on that default in the body.
 ///
 /// This makes the portraits independent of PlayerVoteDictionary entirely, so RaceProgress's
 /// OnPlayerVoteChangedInternal call is now only doing the repaint of the two affected nodes.
@@ -65,18 +67,33 @@ public static class RaceMapPositionPatch
         // Getting this wrong is how the first version of this patch silently removed the only
         // on-screen feedback that clicking the arena had done anything (playtest 2026-08-11:
         // "no visible change"). ShowWaitingPortrait routes through this same predicate.
+
+        // **Before anyone has moved there is no coord to compare against, and the map drew
+        // nobody.** `CurrentMapCoord` is the last entry in `_visitedMapCoords`, which is empty
+        // until a room is entered, and `RaceProgress` has heard nothing because the opponent has
+        // not travelled yet — so through Neow both branches below answered "nowhere". Reported
+        // 2026-08-12 as seeing only your own icon at Neow.
+        //
+        // A run that has not moved is standing on the map's starting node, by definition. That is
+        // the one position both players share *and both already know*, so it needs no message:
+        // each side simply defaults the other to it until their first real report arrives. Adding
+        // a broadcast for it was tried first and backed out — it announces a fact the receiver can
+        // derive, and it cannot fire any earlier than this anyway.
+        MapCoord? start = __instance._runState.Map?.StartingMapPoint.coord;
+
         if (LocalContext.IsMe(player))
         {
+            MapCoord? mine = __instance._runState.MapLocation.coord ?? start;
             __result = DuelRendezvous.LocalArrived
                 ? DuelRendezvous.IsArenaCoord(__instance.Point.coord)
-                : __instance._runState.MapLocation.coord == __instance.Point.coord;
+                : mine == __instance.Point.coord;
             return false;
         }
 
+        MapCoord? theirs = RaceProgress.OpponentCoord ?? start;
         __result = DuelRendezvous.RemoteArrived
             ? DuelRendezvous.IsArenaCoord(__instance.Point.coord)
-            : RaceProgress.OpponentCoord.HasValue
-              && RaceProgress.OpponentCoord.Value == __instance.Point.coord;
+            : theirs.HasValue && theirs.Value == __instance.Point.coord;
         return false;
     }
 }
