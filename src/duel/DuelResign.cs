@@ -130,7 +130,7 @@ public static class DuelResign
         // before the message is on the wire risks the run teardown taking the transport with
         // it — the same ordering that left the host talking to a disconnected service.
         DuelFlagDisarmAndStop();
-        DuelResult.DeclareWinner(localPlayerWon: false);
+        DuelResult.DeclareWinner(localPlayerWon: false, DuelEndReason.Resign);
         return true;
     }
 
@@ -185,7 +185,7 @@ public static class DuelResign
         if (accept)
         {
             DuelFlagDisarmAndStop();
-            DuelResult.DeclareDraw();
+            DuelResult.DeclareDraw(DuelEndReason.AgreedDraw);
         }
     }
 
@@ -210,7 +210,7 @@ public static class DuelResign
                 DrawOfferPending = false;
                 DuelDrawPrompt.DismissNotice();
                 DuelFlagDisarmAndStop();
-                DuelResult.DeclareDraw();
+                DuelResult.DeclareDraw(DuelEndReason.AgreedDraw);
                 return;
             }
 
@@ -229,7 +229,7 @@ public static class DuelResign
         {
             Log.Warn("[SpirePvp] opponent accepted the draw");
             DuelFlagDisarmAndStop();
-            DuelResult.DeclareDraw();
+            DuelResult.DeclareDraw(DuelEndReason.AgreedDraw);
         }
         else
         {

@@ -121,7 +121,7 @@ public static class DuelFlag
                 reason = DuelEndReason.RaceExpired
             });
 
-            DuelResult.DeclareDraw();
+            DuelResult.DeclareDraw(DuelEndReason.RaceExpired);
             return;
         }
 
@@ -140,7 +140,7 @@ public static class DuelFlag
         RunManager.Instance.NetService.SendMessage(message);
 
         // The host does not receive its own broadcast, so apply it here too.
-        Declare(winner);
+        Declare(winner, DuelEndReason.Flag);
     }
 
     /// <summary>
@@ -155,11 +155,14 @@ public static class DuelFlag
         {
             Disarm();
             DuelClockService.Stop();
-            DuelResult.DeclareDraw();
+
+            // The peer's reason, not a guess. Both codes land here and they read very
+            // differently on the result screen.
+            DuelResult.DeclareDraw(message.reason);
             return;
         }
 
-        Declare(message.winnerId);
+        Declare(message.winnerId, message.reason);
     }
 
     private static void OnClockSync(ClockSyncMessage message, ulong senderId)
@@ -167,7 +170,7 @@ public static class DuelFlag
         DuelClockService.ApplySync(message);
     }
 
-    private static void Declare(ulong winnerId)
+    private static void Declare(ulong winnerId, int reason)
     {
         Disarm();
         DuelClockService.Stop();
@@ -179,6 +182,6 @@ public static class DuelFlag
         // flag (a flag requires a clock), so it sat harmless. Resigning is reachable in an
         // untimed match and would have made both players see DEFEATED.
         bool localWon = LocalContext.NetId == winnerId;
-        DuelResult.DeclareWinner(localWon);
+        DuelResult.DeclareWinner(localWon, reason);
     }
 }

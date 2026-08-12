@@ -78,7 +78,7 @@ public static class DuelResult
             return;
         }
 
-        DeclareWinner(LocalPlayerSurvived(combatState));
+        DeclareWinner(LocalPlayerSurvived(combatState), DuelEndReason.Hp);
     }
 
     /// <summary>
@@ -87,17 +87,31 @@ public static class DuelResult
     /// calls are ignored, so a flag landing at the same moment as a kill cannot show two
     /// screens or overwrite the first result.
     /// </summary>
-    public static void DeclareWinner(bool localPlayerWon) =>
-        Declare(localPlayerWon ? DuelOutcome.Won : DuelOutcome.Lost);
+    public static void DeclareWinner(bool localPlayerWon, int reason = DuelEndReason.Hp) =>
+        Declare(localPlayerWon ? DuelOutcome.Won : DuelOutcome.Lost, reason);
 
     /// <summary>
-    /// Ends the match with no winner. Only the race clock produces this: both race banks run
-    /// continuously and never pause, so they empty in the same tick and neither player reached
-    /// the arena. See <see cref="DuelOutcome"/>.
+    /// Ends the match with no winner — either the race deadline passing with nobody at the
+    /// arena, or both players agreeing. See <see cref="DuelOutcome"/>.
     /// </summary>
-    public static void DeclareDraw() => Declare(DuelOutcome.Draw);
+    public static void DeclareDraw(int reason) => Declare(DuelOutcome.Draw, reason);
 
-    private static void Declare(DuelOutcome outcome)
+    /// <summary>
+    /// Why the match ended, for anything that has to describe it rather than merely score it.
+    ///
+    /// **The outcome is not the reason, and the result screen needs both.** Two very different
+    /// endings share `DuelOutcome.Draw` — the race deadline passing with neither player at the
+    /// arena, and the two of you shaking hands — and the banner was wording every draw as the
+    /// first, so an agreed draw read "Time ran out before either of you reached the arena."
+    /// That is the same shape as the mistake DuelClockService and DuelFlag both made: asking a
+    /// question that correlates with the one you mean instead of the one you mean.
+    ///
+    /// The codes already existed as a wire format on DuelResultMessage; this simply keeps the
+    /// one that applies locally, so the screen can say what happened.
+    /// </summary>
+    public static int EndReason { get; private set; } = DuelEndReason.Hp;
+
+    private static void Declare(DuelOutcome outcome, int reason)
     {
         if (DuelSession.Phase == DuelPhase.Complete)
         {
@@ -105,6 +119,7 @@ public static class DuelResult
         }
 
         Disarm();
+        EndReason = reason;
         DuelSession.CompleteDuel(outcome);
         Log.Warn($"[SpirePvp] duel over — {outcome.ToString().ToUpperInvariant()}");
 

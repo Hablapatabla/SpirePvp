@@ -37,23 +37,39 @@ public static class DuelResultBannerPatch
             return;
         }
 
+        // **The outcome says who won; only the reason says what happened.** Every line here was
+        // once worded from the outcome alone, which meant each of the three read as an HP finish:
+        // an agreed draw claimed time had run out, and a race resignation congratulated the
+        // survivor on winning a duel that was never fought. Same trap DuelClockService and
+        // DuelFlag both hit — a question that correlates with the one you mean.
         string quote;
         switch (DuelSession.Outcome)
         {
             case DuelOutcome.Won:
                 __instance._banner.label.SetTextAutoSize("VICTORY");
-                quote = "You won the duel.";
+                quote = DuelResult.EndReason switch
+                {
+                    DuelEndReason.Flag => "Your opponent ran out of time.",
+                    DuelEndReason.Resign => "Your opponent resigned.",
+                    _ => "You won the duel."
+                };
                 break;
 
-            // No duel was played: the race deadline passed with neither player at the arena.
             case DuelOutcome.Draw:
                 __instance._banner.label.SetTextAutoSize("DRAW");
-                quote = "Time ran out before either of you reached the arena.";
+                quote = DuelResult.EndReason == DuelEndReason.AgreedDraw
+                    ? "You agreed to a draw."
+                    : "Time ran out before either of you reached the arena.";
                 break;
 
             default:
                 __instance._banner.label.SetTextAutoSize("DEFEATED");
-                quote = "Your opponent won the duel.";
+                quote = DuelResult.EndReason switch
+                {
+                    DuelEndReason.Flag => "You ran out of time.",
+                    DuelEndReason.Resign => "You resigned.",
+                    _ => "Your opponent won the duel."
+                };
                 break;
         }
 
