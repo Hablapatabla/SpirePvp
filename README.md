@@ -12,83 +12,141 @@ Remaining: rematch, and the turn-based turn model (M8). See `docs/HANDOFF.md`.
 
 ## Playing with a friend
 
-Both players need the mod, and both must be on the **same commit** — net message ids are
-positional and the model database is hashed into the connection handshake, so mismatched builds
-are refused by the engine before anything of ours runs.
+This section is written for the person you are inviting, start to finish, assuming no
+programming experience. Windows instructions; everything is copy-paste.
 
-You must also both be on the **same Steam branch** — either both on `public-beta` or both on
-default. That is a vanilla constraint rather than ours: different game builds cannot play
-together with or without this mod.
+### What you need
 
-**There is no version to keep in step with beyond that.** The mod compiles against whatever
-`sts2.dll` your own install has, so a game patch is picked up by rebuilding. Patch targets are
-resolved at compile time wherever the language allows it, so if a game update genuinely moves
-something we patch, you get a build error naming the method rather than a mod that loads and
-then misbehaves.
+- **Slay the Spire 2** on Steam.
+- About ten minutes, once. After that, updates take about thirty seconds.
 
-### Install
+### Step 1 — switch Steam to the same branch
 
-1. **Slay the Spire 2** on Steam, on the same branch as the person you want to play with.
-2. **[.NET SDK 9](https://dotnet.microsoft.com/download)** and **git**.
-3. Then:
+Both players must be on the same version of the game, or Steam's multiplayer will not connect
+you. This project is played on the **public beta** branch.
 
-   ```
-   git clone <repo url>
-   cd SpirePvp
-   dotnet build
-   ```
+1. In Steam, right-click **Slay the Spire 2** → **Properties**.
+2. Click **Betas** on the left.
+3. Under *Beta Participation*, choose **public-beta** from the dropdown.
+4. Close the window. Steam will download an update.
 
-`dotnet build` installs everything into the game's `mods/SpirePvp/` folder for you — dll, json
-and the `.pck`. **No Godot install is needed**: the `.pck` is committed precisely so that a
-clone is playable without the editor.
+*(If the person who invited you is on the normal version instead, skip this step — just make
+sure you are both on the same one.)*
 
-The game is found automatically in the usual Steam locations on Windows, macOS and Linux. If
-Steam lives somewhere else, point at it once:
+### Step 2 — install the two tools
 
-```
-dotnet build -p:Sts2Path="E:/Games/steamapps/common/Slay the Spire 2"
-```
+Both are normal installers. Click through with the default options.
 
-### Enable mods, once per save profile
+1. **.NET SDK 9** — <https://dotnet.microsoft.com/download/dotnet/9.0>
+   On that page, under **.NET 9.0**, find the **SDK** column and download the
+   **Windows x64 installer**. Make sure it says *SDK*, not *Runtime*.
+2. **Git for Windows** — <https://git-scm.com/download/win>
+   Take the 64-bit standalone installer and click Next through every screen.
 
-**This step is a silent killer.** Without it the game loads *no mods at all* while otherwise
-looking completely normal — no error, no missing-mod message, just a game with no Duel entry.
+**Restart your computer after installing these**, so Windows picks them up.
 
-Launch the game, open **Mods** from the main menu, and accept the warning. The log line to look
-for if something is wrong is `Skipping loading mod SpirePvp, user has not yet seen the mods
-warning`.
+### Step 3 — open a terminal
 
-### Play
+Press the **Windows key**, type `terminal`, and press Enter. A black or blue window opens. This
+is where you paste the commands below.
 
-Launch normally through Steam (no command-line flags — those are for the two-local-clients dev
-setup and force a LAN transport instead of Steam).
+To paste into it, use **Ctrl+V** or right-click.
 
-- **Host:** Multiplayer → Host → **Duel**. Pick a preset or set the clocks by hand, then start.
-- **Join:** Multiplayer → **Join**, and pick the host from your Steam friends list.
+### Step 4 — download and build the mod
 
-The joining player sees the agreed time control in the lobby before committing.
-
-### Updating
+Paste these one at a time, pressing Enter after each and waiting for it to finish:
 
 ```
-git pull
+cd Documents
+```
+
+```
+git clone https://github.com/Hablapatabla/SpirePvp.git
+```
+
+```
+cd SpirePvp
+```
+
+```
 dotnet build
 ```
 
-Both of you, to the same commit. Rebuild after a *game* update too — that is what re-binds the
-mod to the new `sts2.dll`. If one side has pulled and the other has not, the connection is
-rejected rather than silently desyncing — which is the good outcome, but it does mean a fix is
-only live once you have both pulled it.
+The last one prints a lot of text. You are looking for **`Build succeeded.`** near the end. That
+also installs the mod into the game for you — there is nothing to copy or drag anywhere.
 
-### Known: you cannot join an unmodded friend while this is installed
+> **If it says `Build succeeded` but the game shows no Duel button**, your Steam games are
+> probably on a different drive. Run this instead, with the path to your own Steam library:
+> ```
+> dotnet build -p:Sts2Path="D:/SteamLibrary/steamapps/common/Slay the Spire 2"
+> ```
 
-The mod is inert at runtime — every patch is guarded, and normal runs are untouched — but its
-mere presence changes the multiplayer handshake, and the engine refuses the connection on
-either a mod-list mismatch or a model-database hash mismatch. This is the engine correctly
-refusing a configuration that would desync.
+### Step 5 — turn mods on, once
 
-To play vanilla co-op with someone who does not have it, disable SpirePvp on the **Mods** screen
-(the setting is per profile) and restart.
+The game ignores mods until you have seen its warning screen, and it does this **silently** —
+no error, the mod is just missing.
+
+1. Launch Slay the Spire 2 normally from Steam.
+2. From the main menu, open **Mods**.
+3. Accept the warning.
+4. Go back to the main menu.
+
+### Step 6 — play
+
+- **To host:** **Multiplayer → Host → Duel.** Pick a time control (or leave it on No clock) and
+  start.
+- **To join:** **Multiplayer → Join**, then pick your friend from the list.
+
+If you can see a **Duel** button under Multiplayer → Host, everything worked.
+
+### Updating when you are told there is a fix
+
+Open a terminal (Step 3) and paste:
+
+```
+cd Documents\SpirePvp
+```
+
+```
+git pull
+```
+
+```
+dotnet build
+```
+
+**Close the game first** — if it is running, the last command fails because the game is holding
+the mod file open.
+
+Both of you need to do this at the same time. If one has updated and the other has not, the game
+will refuse to connect you rather than misbehaving — annoying, but it is the safe outcome.
+
+### If something goes wrong
+
+- **No Duel button, or it has a padlock on it.** The mod did not fully load. Rebuild (see
+  Updating). The padlock means the game has changed underneath the mod and it is refusing to run
+  a match it cannot referee properly — that is deliberate, not a crash.
+- **`git` or `dotnet` "is not recognized".** The installers from Step 2 have not been picked up
+  yet — restart your computer.
+- **You cannot join each other.** Check you are both on the same Steam branch (Step 1) and that
+  you both ran the update at the same time.
+- **You cannot join a friend who does *not* have this mod.** That is expected. The game refuses
+  to connect players with different mods. To play normal co-op, turn SpirePvp off on the
+  game's **Mods** screen and restart.
+
+### For the person running the project
+
+Both players must be on the **same commit** — net message ids are positional and the model
+database is hashed into the connection handshake, so mismatched builds are refused by the engine
+before anything of ours runs. Same for the Steam branch.
+
+**There is no version to keep in step with beyond that.** The mod compiles against whatever
+`sts2.dll` the local install has, so a game patch is picked up by rebuilding. Patch targets are
+resolved at compile time wherever the language allows it, so if a game update genuinely moves
+something we patch, you get a build error naming the method rather than a mod that loads and
+then misbehaves. If a patch still fails to bind at runtime, the Duel entry locks itself and
+`DuelMatch.OnRunCreated` refuses to activate, rather than playing a match that cannot be
+trusted.
 
 ## Agent handover prompt
 
