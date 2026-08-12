@@ -847,6 +847,33 @@ One turn-based match, and the whole checklist is in the first two rounds. `Duel:
   the hand rather than hanging over the play area for the rest of the duel. This is the client's
   by-identity miss, so it only shows on the client.
 
+### Also from that playtest: the round is now paced, and the clock stops for it
+
+**A resolved round was unreadable.** The cards queued and resolved correctly and neither player
+could say afterwards what had been played at them — six plays drained as fast as the queue allowed.
+`DuelPace` now leaves a gap after each play: 1.2s at Normal, 0.6s at Fast, nothing at Instant, taken
+from the game's own Fast Mode so the duel speeds up exactly as everything else does. It is
+**M8.5's thesis arriving early**, in the model that needed it first — and it is the
+delay-the-resolution half of the choice §7 names, not the lengthen-the-animation half.
+
+Paced **on each client from that client's own preference**, which is why it is a local
+`ActionExecutor.Pause` rather than the host releasing one action per tick as M8.5 sketched: host
+release would have made the host's personal setting decide the pace on both screens and handed the
+client's reading window to network jitter. Pacing locally cannot desync — it changes *when* a
+client executes, never what or in what order. Leaving the executor paused would be a hard lock, so
+the unpause is in a `finally` and teardown clears it unconditionally.
+
+**And the duel clock was measuring the wrong thing in this mode.** It paused a player's clock on
+`IsPlayerReadyToEndTurn`, which only becomes true when `EndPlayerTurnAction` *executes* — at the
+flush. So in turn-based you locked in, watched your opponent think, and were charged for all of it.
+**Third instance of the same trap** (the phase test in `DuelClockService`, its duplicate in
+`DuelFlag`, now this): a condition that correlates with the one you mean until a new mode separates
+them. It asks the turn model now, and counts resolution as committed for *both* players — which
+matters far more with a paced round than an instant one. Missed until now because both turn-based
+sessions ran on `Duel Clock: Off`; **test this one with a duel clock on**.
+
+**Confirmed working 2026-08-12:** the lock-in icons show over the end turn button on both sides.
+
 ### Two more from that playtest, both unfixed and both about the same property
 
 **You cannot back out of a lock-in.** `NEndTurnButton.CallReleaseLogic` sets the button
