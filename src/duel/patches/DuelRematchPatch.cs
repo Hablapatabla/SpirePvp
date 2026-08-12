@@ -120,7 +120,8 @@ public static class DuelRematchPatch
             // captured *the source's already-shifted* position, so left alone it would animate to
             // 140px left of the menu button and onto the same row. Setting the rest position is
             // what makes the shared animation land it in the right place.
-            rematch._showPosition = menuButton._showPosition + new Vector2(0f, -RematchButtonRise);
+            float step = menuButton.Size.X > 1f ? menuButton.Size.X + 40f : RematchButtonGap;
+            rematch._showPosition = menuButton._showPosition + new Vector2(-step, 0f);
 
             rematch.Connect(NClickableControl.SignalName.Released, Callable.From<NButton>(OnRematchPressed));
 
@@ -129,7 +130,8 @@ public static class DuelRematchPatch
             // inherits that. Forcing it visible now would put Rematch on screen during the death
             // intermission, before vanilla offers any way off the screen at all.
             Log.Warn($"[SpirePvp] rematch: button added beside {menuButton.Name}, resting at "
-                     + $"{rematch._showPosition} (menu button rests at {menuButton._showPosition})");
+                     + $"{rematch._showPosition} (menu button rests at {menuButton._showPosition}, "
+                     + $"width {menuButton.Size.X}, step {step})");
         }
         catch (Exception e)
         {
@@ -138,8 +140,18 @@ public static class DuelRematchPatch
         }
     }
 
-    /// <summary>How far above the Main Menu button the Rematch button sits.</summary>
-    private const float RematchButtonRise = 80f;
+    /// <summary>
+    /// How far to the *left* of the Main Menu button the Rematch button sits.
+    ///
+    /// Horizontal rather than stacked, at Lucas's request 2026-08-12, and it also leaves the row
+    /// open for a third button without pushing anything off the bottom of the screen.
+    ///
+    /// Used only when the menu button reports no width of its own — at `_Ready` a control that has
+    /// not been through a layout pass can still be `Size = (0, 0)`, and a gap measured from zero
+    /// would stack the two buttons on the same pixel, which reads exactly like the button being
+    /// missing.
+    /// </summary>
+    private const float RematchButtonGap = 260f;
 
     /// <summary>
     /// Shows and hides the Rematch button exactly when vanilla shows and hides Main Menu.
@@ -198,6 +210,43 @@ public static class DuelRematchPatch
         }
 
         Log.Warn($"[SpirePvp] rematch: button {(enable ? "shown" : "hidden")} with the menu button");
+
+        if (enable)
+        {
+            // **Both sides, dumped and diffed.** The button reports itself added, placed and
+            // shown, and is not on screen — so the next question is which property differs from
+            // the one beside it, and that is not answerable from a screenshot. Two placement bugs
+            // in this project were "corrected" from screenshots and one of those corrections was
+            // wrong; what settled them was logging both and diffing. Deferred a frame because
+            // `Enable` starts a half-second tween, and the interesting values are the ones it
+            // lands on.
+            SceneTreeTimer? settled = source.GetTree()?.CreateTimer(0.75);
+            if (settled != null)
+            {
+                settled.Timeout += () => DumpPlacement(source, rematch);
+            }
+        }
+    }
+
+    /// <summary>Every property that could make a placed, enabled control invisible.</summary>
+    private static void DumpPlacement(NClickableControl menu, NClickableControl rematch)
+    {
+        if (!menu.IsValid() || !rematch.IsValid())
+        {
+            return;
+        }
+
+        Node? parent = menu.GetParent();
+        Log.Warn($"[SpirePvp] rematch placement — parent={parent?.Name} ({parent?.GetType().Name})"
+                 + (parent is Control pc
+                        ? $" size={pc.Size} clip={pc.ClipContents} global={pc.GlobalPosition}"
+                        : ""));
+        Log.Warn($"[SpirePvp] rematch placement — MENU  pos={menu.Position} global={menu.GlobalPosition} "
+                 + $"size={menu.Size} scale={menu.Scale} vis={menu.Visible} mod={menu.Modulate} "
+                 + $"z={menu.ZIndex} idx={menu.GetIndex()}");
+        Log.Warn($"[SpirePvp] rematch placement — OURS  pos={rematch.Position} global={rematch.GlobalPosition} "
+                 + $"size={rematch.Size} scale={rematch.Scale} vis={rematch.Visible} mod={rematch.Modulate} "
+                 + $"z={rematch.ZIndex} idx={rematch.GetIndex()}");
     }
 
     private static void OnRematchPressed(NButton _)
