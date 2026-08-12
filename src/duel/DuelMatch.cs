@@ -156,6 +156,23 @@ public static class DuelMatch
     /// </summary>
     public static void OnRunCreated(RunState runState)
     {
+        // The menu entry is locked when patches are missing, but the modifiers can still be
+        // ticked by hand through the plain Custom lobby — and a client can be handed them by a
+        // host whose own install is fine. So the refusal lives here too, at the one point every
+        // route to a PvP run passes through.
+        //
+        // The run itself is left alone deliberately: it carries on as an ordinary co-op run
+        // rather than being torn down. Refusing to *arbitrate* is the safe failure; destroying
+        // someone's run because a patch did not bind would be a worse one.
+        if (!SpirePvpInit.PatchesHealthy)
+        {
+            Log.Error("[SpirePvp] refusing to start a PvP match: some patch classes failed to " +
+                      "apply, so this client cannot arbitrate one. The run continues as normal " +
+                      "co-op. Rebuild the mod — patch targets bind at compile time, so a rebuild " +
+                      "will name anything the game moved.");
+            return;
+        }
+
         Log.Warn($"[SpirePvp] PvP match: turnModel={(IsTurnBased(runState) ? "turn-based" : "blitz")}, " +
                  $"raceClock={RaceClockMinutes(runState)} min, duelClock={DuelClockMinutes(runState)} min, " +
                  $"seed '{runState.Rng.StringSeed}'");

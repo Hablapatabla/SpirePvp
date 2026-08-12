@@ -105,7 +105,12 @@ public static class DuelHostMenuPatch
         duel.Connect(NClickableControl.SignalName.Released,
                      Callable.From<NButton>(_ => OnDuelPressed(__instance)));
         duel.SetIconAndLocalization("DUEL_MP");
-        duel.SetEnabled(true);
+
+        // Locked when the mod did not fully apply, rather than offering a match it cannot
+        // arbitrate. NSubmenuButton already draws a lock and greys the icon when disabled, and
+        // RefreshLabels swaps to `.LOCKED.description` — so the reason is on screen, in vanilla's
+        // own presentation, before anyone commits to a lobby.
+        duel.SetEnabled(SpirePvpInit.PatchesHealthy);
 
         // SetIconAndLocalization does not touch the icon despite its name — without this the
         // clone keeps Custom's texture.

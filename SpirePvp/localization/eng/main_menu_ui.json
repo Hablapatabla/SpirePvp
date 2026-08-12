@@ -9,5 +9,6 @@
   "SPIREPVP_PRESET.blitz": "Blitz",
   "SPIREPVP_PRESET.rapid": "Rapid",
   "SPIREPVP_PRESET.untimed": "No clock",
-  "SPIREPVP_LOBBY.title": "Duel"
+  "SPIREPVP_LOBBY.title": "Duel",
+  "DUEL_MP.LOCKED.description": "This mod did not fully load, so it cannot run a fair match. If the game has just updated, rebuild SpirePvp."
 }

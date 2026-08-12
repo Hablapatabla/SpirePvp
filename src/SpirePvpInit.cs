@@ -10,6 +10,23 @@ public static class SpirePvpInit
 {
     public const string Id = "SpirePvp";
 
+    /// <summary>
+    /// False when any patch class failed to apply, which means some of this mod is not running.
+    ///
+    /// **A half-applied patch set must not be allowed to host a match.** Every other kind of mod
+    /// degrades gracefully when a patch is missing — a relic does nothing, a screen looks wrong —
+    /// but this one arbitrates a two-player game. A missing patch here is a hang, a desync, or a
+    /// match decided by a rule that only one client is enforcing, and all three read as gameplay
+    /// bugs rather than as a broken install. Refusing to start is strictly better than playing a
+    /// competitive match whose result cannot be trusted.
+    ///
+    /// This is also the failure mode a game update produces, which is the realistic case: patch
+    /// targets are `nameof` and so break the build, but Harmony can still fail to bind at runtime
+    /// for a signature change the compiler accepted, and one target stays a runtime-resolved
+    /// string (see DuelNeowOptionsPatch).
+    /// </summary>
+    public static bool PatchesHealthy { get; private set; }
+
     public static void OnLoaded()
     {
         Log.Warn($"[{Id}] loaded — hello from the PvP mod.");
@@ -51,10 +68,14 @@ public static class SpirePvpInit
             }
         }
 
+        PatchesHealthy = failed == 0;
+
         if (failed > 0)
         {
-            Log.Error($"[{Id}] {applied} patch classes applied, {failed} FAILED — the mod is " +
-                      "running with missing behaviour. Fix the targets above.");
+            Log.Error($"[{Id}] {applied} patch classes applied, {failed} FAILED — duelling is " +
+                      "disabled. Normal runs are unaffected; this mod is inert outside a PvP " +
+                      "match. If the game has just updated, rebuild the mod: patch targets bind " +
+                      "at compile time, so a rebuild will name anything that moved.");
         }
         else
         {
