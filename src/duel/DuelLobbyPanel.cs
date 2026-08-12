@@ -141,8 +141,7 @@ public static class DuelLobbyPanel
         // list of run modifiers that has nothing to do with configuring a duel. Still reachable
         // rather than removed, because a duel is genuinely a Custom run underneath and every one
         // of those modifiers remains legal — some are interesting in a race.
-        panel.AddChildSafely(Heading("SPIREPVP_LOBBY.advanced"));
-        BuildCollapsible(panel, "SPIREPVP_LOBBY.showOthers", tickboxes.Except(promoted).ToList());
+        BuildCollapsible(panel, "SPIREPVP_LOBBY.advanced", tickboxes.Except(promoted).ToList());
 
         Log.Warn($"[SpirePvp] duel lobby: promoted {promoted.Count} duel modifier(s) into " +
                  $"{Groups.Length} groups, {tickboxes.Count - promoted.Count} left below");
@@ -172,6 +171,8 @@ public static class DuelLobbyPanel
         };
         panel.AddChildSafely(row);
 
+        List<NRunModifierTickbox> chips = new List<NRunModifierTickbox>();
+
         foreach ((string locKey, ModifierModel race, ModifierModel duel) in DuelHostFlow.Presets)
         {
             NRunModifierTickbox? chip = MakeChip(row, Loc(locKey));
@@ -180,8 +181,30 @@ public static class DuelLobbyPanel
                 continue;
             }
 
-            chip.Connect(NTickbox.SignalName.Toggled, Callable.From<NTickbox>(_ =>
+            chips.Add(chip);
+
+            chip.Connect(NTickbox.SignalName.Toggled, Callable.From<NTickbox>(box =>
             {
+                if (!box.IsTicked)
+                {
+                    // Unticking the active preset is allowed and means nothing beyond "no preset
+                    // is selected" — the clocks it set stay set. There is no such thing as an
+                    // un-chosen time control, so there is nothing to undo.
+                    return;
+                }
+
+                // Presets are alternatives, so exactly one at a time. Vanilla's own exclusivity
+                // machinery cannot help here — MutuallyExclusiveModifiers is keyed on modifier
+                // types, and these chips deliberately carry no modifier at all — so the row
+                // enforces it itself.
+                foreach (NRunModifierTickbox other in chips)
+                {
+                    if (other != box)
+                    {
+                        other.IsTicked = false;
+                    }
+                }
+
                 List<ModifierModel> ticked = list.GetModifiersTickedOn()
                     .Where(m => m is not ClockModifierBase)
                     .ToList();
@@ -312,27 +335,64 @@ public static class DuelLobbyPanel
     private static void BuildCollapsible(Control panel, string locKey,
                                          List<NRunModifierTickbox> hidden)
     {
-        foreach (NRunModifierTickbox tickbox in hidden)
-        {
-            tickbox.Visible = false;
-        }
+        string text = Loc(locKey);
+        bool expanded = false;
 
-        NRunModifierTickbox? toggle = MakeChip(panel, Loc(locKey));
-        if (toggle == null)
-        {
-            return;
-        }
+        // A disclosure caret rather than a tickbox. A tickbox was tried and reads wrong here:
+        // it looks like a *choice*, sitting among rows of real choices, when this only reveals
+        // things. The caret says "there is more below" and nothing else.
+        MegaLabel label = (MegaLabel)Heading(locKey);
+        label.MouseFilter = Control.MouseFilterEnum.Stop;
+        label.MouseDefaultCursorShape = Control.CursorShape.PointingHand;
 
-        // Full width: this is a section header, not one option among several.
-        toggle.SizeFlagsHorizontal = Control.SizeFlags.Fill;
-
-        toggle.Connect(NTickbox.SignalName.Toggled, Callable.From<NTickbox>(box =>
+        void Refresh()
         {
+            label.Text = (expanded ? "▾  " : "▸  ") + text;
             foreach (NRunModifierTickbox tickbox in hidden)
             {
-                tickbox.Visible = box.IsTicked;
+                tickbox.Visible = expanded;
+            }
+        }
+
+        // **Hover has to be a font colour, not Modulate.** The first attempt brightened via
+        // Modulate above 1.0, which does nothing to text that is already white — which is why
+        // the hover was reported as still missing after it was supposedly added.
+        label.Connect(Control.SignalName.MouseEntered, Callable.From(() =>
+            label.AddThemeColorOverride("font_color", HoverColour)));
+        label.Connect(Control.SignalName.MouseExited, Callable.From(() =>
+            label.RemoveThemeColorOverride("font_color")));
+
+        label.Connect(Control.SignalName.GuiInput, Callable.From<InputEvent>(inputEvent =>
+        {
+            if (inputEvent is InputEventMouseButton { Pressed: true } click
+                && click.ButtonIndex == MouseButton.Left)
+            {
+                expanded = !expanded;
+                Refresh();
             }
         }));
+
+        Refresh();
+        panel.AddChildSafely(label);
+    }
+
+    /// <summary>Vanilla's gold, so a hovered heading matches the rest of the menu.</summary>
+    private static readonly Color HoverColour = new Color(1f, 0.82f, 0.4f);
+
+    /// <summary>
+    /// Renames the lobby's own title when it is hosting a duel.
+    ///
+    /// The screen says "Custom Mode" because a duel *is* a Custom run underneath — true, and not
+    /// what someone who pressed Duel wants to read. Set on every ModifiersChanged rather than
+    /// once, because the submenu stack reuses this screen node: a lobby opened later through the
+    /// plain Custom entry would otherwise inherit the previous run's title.
+    /// </summary>
+    public static void SetTitle(NCustomRunScreen screen, bool isDuel)
+    {
+        MegaLabel? title = screen.GetNodeOrNull<MegaLabel>("%CustomModeTitle");
+        title?.SetTextAutoSize(Loc(isDuel
+            ? "SPIREPVP_LOBBY.title"
+            : "CUSTOM_RUN_SCREEN.CUSTOM_MODE_TITLE"));
     }
 
     private static Control Heading(string locKey)

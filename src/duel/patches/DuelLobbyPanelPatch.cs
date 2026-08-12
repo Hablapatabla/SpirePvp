@@ -29,7 +29,14 @@ public static class DuelLobbyPanelPatch
 {
     public static void Postfix(NCustomRunScreen __instance)
     {
-        if (__instance.Lobby == null || !DuelMatch.HasTurnModel(__instance.Lobby.Modifiers))
+        bool isDuel = __instance.Lobby != null
+                      && DuelMatch.HasTurnModel(__instance.Lobby.Modifiers);
+
+        // Set unconditionally, both ways. The submenu stack reuses this screen node, so a plain
+        // Custom lobby opened after a duel would otherwise still be titled "Duel".
+        DuelLobbyPanel.SetTitle(__instance, isDuel);
+
+        if (!isDuel)
         {
             return;
         }
