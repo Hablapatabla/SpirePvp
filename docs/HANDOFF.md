@@ -872,6 +872,23 @@ Smaller known gaps, none blocking:
   one shows up; only poison is fixed.
 - The duel entry screen's confirm feedback is a colour tint standing in for the intended
   green check + opponent portrait (DESIGN §6, wants an asset pass).
+- **The arena's top-bar icon still hovers as a boss** — *"Boss — the deadliest foe in the
+  area…"*. Reported 2026-08-12 and **deliberately deferred, with the seam found so it does not
+  have to be found twice.** `NTopBarBossIcon.OnFocus` builds the tip from
+  `static_hover_tips` — `BOSS.title`/`BOSS.description`, or `DOUBLE_BOSS.*` while both bosses are
+  ahead — and interpolates `EncounterModel.Title`. The *title* is already ours, since the
+  encounter is `DuelEncounter`; only the description is vanilla's.
+
+  Neither obvious fix is cheap. `OnFocus` is `protected override`, so it cannot be named with
+  `nameof` (the publicizer runs with `IncludeVirtualMembers="false"`) and patching it means a
+  string target, giving up the build-error-on-rename property. Rewriting `BOSS.description` in
+  the loc table would change the tooltip for *every real boss in the game*, since that table is
+  shared. The remaining seam is a patch on `NHoverTipSet.CreateAndShow` swapping the tip when the
+  caller is the boss icon and a duel is live — workable, but it is a global UI entry point being
+  special-cased for one icon, which is more risk than a tooltip is worth today.
+
+  Note the arena takes the `DOUBLE_BOSS` branch until the act boss is dead and the `BOSS` branch
+  after (`ShouldOnlyShowSecondBossIcon`), so a fix has to cover both.
 ### Art still wanted
 
 The `.pck` currently holds the mod image, the duel node texture and its outline, and two loc
