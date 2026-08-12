@@ -41,11 +41,26 @@ public static class DuelHostFlow
     ///
     /// Real-time rather than turn-based because turn-based is M8 and currently plays as blitz
     /// anyway — offering it as the default would be offering something that does not exist yet.
+    ///
+    /// **`ToMutable()` is not optional.** `ModelDb.Modifier&lt;T&gt;()` hands back the canonical
+    /// instance, and `ModifierModel.IsEquivalent` — which is how `SetTickedModifiers` decides
+    /// which boxes to tick — refuses to match across that boundary:
+    ///
+    ///     if (IsCanonical == other.IsCanonical) return GetType() == other.GetType();
+    ///     return false;
+    ///
+    /// The tickboxes hold mutable copies (`GetAllModifiers` yields `item.ToMutable()`), so a
+    /// canonical preset is the same type with the opposite flag and matches nothing. It fails
+    /// *silently* — the loop simply ticks no boxes — which is the failure mode to remember: an
+    /// empty lobby with both log lines present and no exception anywhere.
+    ///
+    /// It is also the instance kind anything downstream wants, since `ToSerializable` asserts
+    /// mutability.
     /// </summary>
     public static IReadOnlyList<ModifierModel> BlitzPreset => new List<ModifierModel>
     {
-        ModelDb.Modifier<DuelBlitz>(),
-        ModelDb.Modifier<RaceClockTen>(),
-        ModelDb.Modifier<DuelClockTwo>()
+        ModelDb.Modifier<DuelBlitz>().ToMutable(),
+        ModelDb.Modifier<RaceClockTen>().ToMutable(),
+        ModelDb.Modifier<DuelClockTwo>().ToMutable()
     };
 }
