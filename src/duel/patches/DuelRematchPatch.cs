@@ -4,7 +4,10 @@ using MegaCrit.Sts2.Core.Entities.Multiplayer;
 using MegaCrit.Sts2.Core.Localization;
 using MegaCrit.Sts2.Core.Logging;
 using MegaCrit.Sts2.Core.Multiplayer;
+using MegaCrit.Sts2.Core.Context;
+using MegaCrit.Sts2.Core.Entities.Players;
 using MegaCrit.Sts2.Core.Nodes.CommonUi;
+using MegaCrit.Sts2.Core.Runs;
 using MegaCrit.Sts2.Core.Nodes.GodotExtensions;
 using MegaCrit.Sts2.Core.Nodes.Screens.GameOverScreen;
 using MegaCrit.Sts2.addons.mega_text;
@@ -160,6 +163,24 @@ public static class DuelRematchPatch
             // real transition and plays the real animation.
             rematch.Disable();
 
+            // **Their portrait, over the button, when they have voted to play again.** Lucas asked
+            // for an unspoken way to read the other player's intent, and noted that seeing the
+            // opponent's *mouse* on this screen already does some of that — so this is the same
+            // idea made explicit rather than a replacement for it. See the cursor note in HANDOFF:
+            // that behaviour is wanted and must not be suppressed.
+            //
+            // `CharacterModel.IconTexture` is the top-bar character icon, so the marker reads as
+            // part of the game rather than as a mod's badge, and it costs no new art.
+            AddVoteMarker(rematch);
+
+            _button = rematch;
+            DuelRematch.StateChanged += RefreshFromState;
+            rematch.TreeExiting += () =>
+            {
+                DuelRematch.StateChanged -= RefreshFromState;
+                _button = null;
+            };
+
             rematch.Connect(NClickableControl.SignalName.Released, Callable.From<NButton>(OnRematchPressed));
 
             // Not shown here, deliberately — see MirrorMenuButtonEnable. `_Ready` ends with
@@ -245,6 +266,24 @@ public static class DuelRematchPatch
             if (rematch.IsEnabled)
             {
                 rematch.Disable();
+
+            // **Their portrait, over the button, when they have voted to play again.** Lucas asked
+            // for an unspoken way to read the other player's intent, and noted that seeing the
+            // opponent's *mouse* on this screen already does some of that — so this is the same
+            // idea made explicit rather than a replacement for it. See the cursor note in HANDOFF:
+            // that behaviour is wanted and must not be suppressed.
+            //
+            // `CharacterModel.IconTexture` is the top-bar character icon, so the marker reads as
+            // part of the game rather than as a mod's badge, and it costs no new art.
+            AddVoteMarker(rematch);
+
+            _button = rematch;
+            DuelRematch.StateChanged += RefreshFromState;
+            rematch.TreeExiting += () =>
+            {
+                DuelRematch.StateChanged -= RefreshFromState;
+                _button = null;
+            };
             }
 
             rematch.Visible = true;
@@ -253,6 +292,24 @@ public static class DuelRematchPatch
         else
         {
             rematch.Disable();
+
+            // **Their portrait, over the button, when they have voted to play again.** Lucas asked
+            // for an unspoken way to read the other player's intent, and noted that seeing the
+            // opponent's *mouse* on this screen already does some of that — so this is the same
+            // idea made explicit rather than a replacement for it. See the cursor note in HANDOFF:
+            // that behaviour is wanted and must not be suppressed.
+            //
+            // `CharacterModel.IconTexture` is the top-bar character icon, so the marker reads as
+            // part of the game rather than as a mod's badge, and it costs no new art.
+            AddVoteMarker(rematch);
+
+            _button = rematch;
+            DuelRematch.StateChanged += RefreshFromState;
+            rematch.TreeExiting += () =>
+            {
+                DuelRematch.StateChanged -= RefreshFromState;
+                _button = null;
+            };
         }
 
         Log.Warn($"[SpirePvp] rematch: button {(enable ? "shown" : "hidden")} with the menu button");
@@ -294,6 +351,83 @@ public static class DuelRematchPatch
                  + $"size={rematch.Size} scale={rematch.Scale} vis={rematch.Visible} mod={rematch.Modulate} "
                  + $"z={rematch.ZIndex} idx={rematch.GetIndex()}");
     }
+
+    /// <summary>
+    /// The opponent's character icon, hidden until they have offered.
+    ///
+    /// Parented to the button and drawn at its top-right corner, so it moves with the button
+    /// through the enable tween rather than needing its own placement kept in step — the mistake
+    /// the victory line made twice.
+    /// </summary>
+    private static void AddVoteMarker(Control button)
+    {
+        IRunState? state = RunManager.Instance?.State;
+        Player? opponent = state?.Players.FirstOrDefault(p => !LocalContext.IsMe(p));
+        if (opponent == null)
+        {
+            Log.Warn("[SpirePvp] rematch: no opponent to draw a vote marker for");
+            return;
+        }
+
+        TextureRect marker = new TextureRect
+        {
+            Name = VoteMarkerName,
+            Texture = opponent.Character.IconTexture,
+            ExpandMode = TextureRect.ExpandModeEnum.IgnoreSize,
+            StretchMode = TextureRect.StretchModeEnum.KeepAspectCentered,
+            Size = new Vector2(VoteMarkerSize, VoteMarkerSize),
+            Position = new Vector2(button.Size.X - VoteMarkerSize * 0.75f, -VoteMarkerSize * 0.4f),
+            MouseFilter = Control.MouseFilterEnum.Ignore,
+            Visible = false
+        };
+
+        button.AddChild(marker);
+    }
+
+    /// <summary>
+    /// Redraws the button whenever the rematch state changes.
+    ///
+    /// **Greying out when the opponent leaves is the important half.** Once they have pressed Main
+    /// Menu there is nobody to play again, and a button that still looks live is a promise the
+    /// screen cannot keep — you would press it and nothing would happen, with the reason only in
+    /// the log. `CanOffer` already answers this, so the control asks it rather than keeping a
+    /// second copy of the same question.
+    /// </summary>
+    private static void RefreshFromState()
+    {
+        // Held rather than looked up: there is no `NGameOverScreen.Instance` to search from, and
+        // `IsValid()` is the same freed-node guard the rest of this file uses. Cleared by the
+        // `TreeExiting` handler that also unsubscribes, so it cannot outlive one screen.
+        NReturnToMainMenuButton? rematch = _button;
+        if (!rematch.IsValid())
+        {
+            return;
+        }
+
+        bool live = DuelRematch.CanOffer;
+        if (!live && rematch!.IsEnabled)
+        {
+            rematch.Disable();
+            rematch.Visible = true;
+            rematch.Modulate = DisabledTint;
+            Log.Warn("[SpirePvp] rematch: button greyed out — no opponent to play again");
+        }
+
+        if (rematch!.GetNodeOrNull<TextureRect>(VoteMarkerName) is TextureRect marker)
+        {
+            marker.Visible = DuelRematch.IncomingOfferPending && live;
+        }
+    }
+
+    /// <summary>The button we built, for as long as its screen is alive.</summary>
+    private static NReturnToMainMenuButton? _button;
+
+    private const string VoteMarkerName = "SpirePvpRematchVote";
+
+    private const float VoteMarkerSize = 48f;
+
+    /// <summary>Dimmed rather than hidden: a missing button is a worse answer than a dead one.</summary>
+    private static readonly Color DisabledTint = new Color(1f, 1f, 1f, 0.35f);
 
     private static void OnRematchPressed(NButton _)
     {

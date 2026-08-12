@@ -64,6 +64,39 @@ public static class DuelRematch
     public static bool IncomingOfferPending { get; private set; }
 
     /// <summary>
+    /// The opponent has left the result screen, so nothing on it can involve them any more.
+    ///
+    /// Tracked separately from `IsConnected` because the two do not fall at the same moment: a
+    /// client pressing Main Menu tears its own run down and the host learns of it through
+    /// `RemotePlayerDisconnected`, while the host pressing it disconnects outright. This is the
+    /// one answer both routes agree on.
+    /// </summary>
+    public static bool PeerGone { get; private set; }
+
+    /// <summary>
+    /// Raised whenever anything a result-screen control would draw has changed — an offer
+    /// arriving, an offer being answered, or the opponent leaving.
+    ///
+    /// An event rather than the buttons polling, because the interesting moments all arrive as
+    /// messages on another thread of control and there is no frame hook on that screen worth
+    /// borrowing. Subscribers must unsubscribe on `TreeExiting`; the screen outlives none of this.
+    /// </summary>
+    public static event Action? StateChanged;
+
+    /// <summary>The opponent has gone. Called from both disconnect routes.</summary>
+    public static void NotePeerGone()
+    {
+        if (PeerGone)
+        {
+            return;
+        }
+
+        PeerGone = true;
+        Log.Warn("[SpirePvp] rematch: opponent left — no rematch from here");
+        StateChanged?.Invoke();
+    }
+
+    /// <summary>
     /// Whether a rematch can be offered at all.
     ///
     /// Asks whether there is a finished PvP match with a live connection, rather than testing the
@@ -79,7 +112,8 @@ public static class DuelRematch
             return DuelSession.Phase == DuelPhase.Complete
                    && net is { IsConnected: true }
                    && net.Type != NetGameType.Singleplayer
-                   && !Relaunching;
+                   && !Relaunching
+                   && !PeerGone;
         }
     }
 
@@ -87,6 +121,8 @@ public static class DuelRematch
     {
         OfferPending = false;
         IncomingOfferPending = false;
+        PeerGone = false;
+        StateChanged?.Invoke();
     }
 
     /// <summary>
@@ -144,6 +180,7 @@ public static class DuelRematch
 
         OfferPending = true;
         Log.Warn("[SpirePvp] rematch offered");
+        StateChanged?.Invoke();
 
         RunManager.Instance.NetService.SendMessage(new DuelRematchMessage
         {
@@ -196,10 +233,12 @@ public static class DuelRematch
             }
 
             IncomingOfferPending = true;
+            StateChanged?.Invoke();
             return;
         }
 
         OfferPending = false;
+        StateChanged?.Invoke();
 
         if (message.accepted)
         {

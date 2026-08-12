@@ -80,6 +80,12 @@ public static class DuelDisconnectPatch
     {
         NetError? reason = DuelDisconnect.TakeClientDropReason();
 
+        // **Before the ShouldDecide guard, because that guard is about deciding a *match* and
+        // this is not.** A match already `Complete` returns false there, which is right — a
+        // finished match must not be re-decided — but the result screen still has live controls
+        // that involve the opponent, and they have to learn the opponent has gone.
+        DuelRematch.NotePeerGone();
+
         if (!DuelDisconnect.ShouldDecide(__instance))
         {
             return;
@@ -116,6 +122,10 @@ public static class DuelDisconnectPatch
     [HarmonyPrefix]
     public static bool BeforeLocalPlayerDisconnected(RunManager __instance, NetErrorInfo info)
     {
+        // Same reasoning as the remote route: a `QuitGameOver` or an already-finished match is
+        // not a forfeit, but it does mean nothing on the result screen can involve the peer again.
+        DuelRematch.NotePeerGone();
+
         // The same test vanilla makes one line above, for the same reason: this is only a forfeit
         // when it is not one of the ordinary ways a connection ends.
         if (info.GetReason() == NetError.QuitGameOver || !DuelDisconnect.ShouldDecide(__instance))

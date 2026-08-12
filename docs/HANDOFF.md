@@ -311,6 +311,21 @@ re-shows it. **Note this is the third distinct thing that had to be told the win
 a different label** — set it, place it, and now keep it visible — which is the cost of borrowing
 the only label that animates in on a win.
 
+**The opponent's mouse cursor on the result screen is a FEATURE. Do not suppress it.** Decided by
+Lucas 2026-08-12, after seeing it in play: with both players sitting on a result screen and no chat,
+watching the other cursor drift toward Rematch is the only way to read their intent, and it arrived
+for free. It is the one place in the mod where a co-op presence surface is *wanted*.
+
+This is worth writing down because the standing rule points the other way. DESIGN §I6 says to
+suppress hover and pointer leaks **at the broadcast, not at the display**, precisely so that a
+surface added later cannot quietly reveal something — and `HoverSuppressionPatch` exists to do it.
+A future pass that tightens that rule would kill this without anyone noticing it had been a
+decision. If pointer broadcasting is ever gated, gate it on the *duel* rather than on the run, and
+leave `DuelPhase.Complete` alone.
+
+The rematch vote marker (`DuelRematchPatch`) makes the same intent explicit rather than replacing
+it — the opponent's character icon appears over the Rematch button once they have offered.
+
 **No BBCode in score lines.** `[gold]…[/gold]` was drawn literally, tags and all, across every
 result line: `NScoreLine` puts its text in a `MegaLabel`, which is a plain Godot `Label`. The
 other labels on that same screen — `_deathQuote`, `_victoryDamageLabel` — are `MegaRichTextLabel`
