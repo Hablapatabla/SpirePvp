@@ -35,7 +35,7 @@ sure you are both on the same one.)*
 
 ### Step 2 — install the two tools
 
-Both are normal installers. Click through with the default options.
+**On Windows.** Both are normal installers; click through with the default options.
 
 1. **.NET SDK 9** — <https://dotnet.microsoft.com/download/dotnet/9.0>
    On that page, under **.NET 9.0**, find the **SDK** column and download the
@@ -45,12 +45,24 @@ Both are normal installers. Click through with the default options.
 
 **Restart your computer after installing these**, so Windows picks them up.
 
+**On macOS.** Git is already there, or macOS offers to install it the first time you type `git`
+— say yes.
+
+1. **.NET SDK 9** — <https://dotnet.microsoft.com/download/dotnet/9.0>
+   Under **.NET 9.0**, in the **SDK** column, download the macOS installer. Pick **Arm64** for
+   an Apple Silicon Mac (M1/M2/M3/M4) or **x64** for an older Intel one — if you are not sure,
+   click the Apple menu → *About This Mac* and read the chip. Make sure it says *SDK*, not
+   *Runtime*.
+2. No restart needed, but **close and reopen Terminal** afterwards so it finds `dotnet`.
+
 ### Step 3 — open a terminal
 
-Press the **Windows key**, type `terminal`, and press Enter. A black or blue window opens. This
-is where you paste the commands below.
+**Windows:** press the **Windows key**, type `terminal`, and press Enter. A black or blue window
+opens. To paste into it, use **Ctrl+V** or right-click.
 
-To paste into it, use **Ctrl+V** or right-click.
+**macOS:** press **Cmd+Space**, type `terminal`, and press Enter. To paste, use **Cmd+V**.
+
+This is where you paste the commands below.
 
 ### Step 4 — download and build the mod
 
@@ -75,10 +87,17 @@ dotnet build
 The last one prints a lot of text. You are looking for **`Build succeeded.`** near the end. That
 also installs the mod into the game for you — there is nothing to copy or drag anywhere.
 
-> **If it says `Build succeeded` but the game shows no Duel button**, your Steam games are
-> probably on a different drive. Run this instead, with the path to your own Steam library:
+> **If it says `Build succeeded` but the game shows no Duel button**, the mod could not find your
+> game. Run the build again with the path to your own copy:
+>
+> Windows — Steam games on another drive:
 > ```
 > dotnet build -p:Sts2Path="D:/SteamLibrary/steamapps/common/Slay the Spire 2"
+> ```
+>
+> macOS — the default location, which you will need if Steam is not on the internal drive:
+> ```
+> dotnet build -p:Sts2Path="$HOME/Library/Application Support/Steam/steamapps/common/Slay the Spire 2"
 > ```
 
 ### Step 5 — turn mods on, once
@@ -90,6 +109,8 @@ no error, the mod is just missing.
 2. From the main menu, open **Mods**.
 3. Accept the warning.
 4. Go back to the main menu.
+
+Same on both Windows and macOS — the warning is per save profile, not per machine.
 
 ### Step 6 — play
 

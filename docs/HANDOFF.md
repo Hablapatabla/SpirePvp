@@ -705,6 +705,10 @@ milestone's four ordering bugs happened in the first place.
   an empty turn-model row means the run carries no `DuelBlitz`/`DuelTurnBased` modifier, so
   `DuelMatch.IsPvpRun` is false and the run is not a duel at all. Until it is fixed, check that one
   chip in each of the three rows is ticked before starting.
+- **The energy counter by the end-turn button is not visible at all** in a duel. Reported
+  2026-08-12, not investigated. Worth checking whether it is duel-specific or turn-based-specific
+  before assuming either — and note the top-bar deck counter has a known vanilla staleness quirk
+  nearby, so confirm which widget is actually missing rather than stale.
 - **Cards reported still playable past 3 energy spent.** Reported in the same message as the energy
   reservation landing, so it is genuinely unclear whether it was observed on the build *before*
   that fix. Re-test before investigating: the fix mirrors
