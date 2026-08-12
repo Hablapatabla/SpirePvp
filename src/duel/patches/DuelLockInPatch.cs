@@ -14,9 +14,10 @@ using SpirePvp.Duel.Turns;
 namespace SpirePvp.Duel.Patches;
 
 /// <summary>
-/// The three places the lock-in turn model has to touch the engine (DESIGN §3.1b).
+/// The host's side of the lock-in turn model (DESIGN §3.1b): a client's plays arrive here, and
+/// they must be held rather than ordered on arrival.
 ///
-/// All are inert under blitz, because they ask the model rather than the mode — the seam
+/// Inert under blitz, because it asks the model rather than the mode — the seam
 /// `DuelTurnModelPatch` already established.
 /// </summary>
 [HarmonyPatch]
@@ -47,11 +48,31 @@ public static class DuelLockInPatch
             return true;
         }
 
-        // An undo is handled by the model but must still reach vanilla: it is the engine that
-        // un-readies the player, and swallowing it would leave them ready on the host while their
-        // own screen says otherwise.
+        // **Held means held: vanilla must not see it.** This returned the inverse until
+        // 2026-08-12 — `action is not UndoEndPlayerTurnAction`, which passes every *play* through
+        // and swallows only the undo, i.e. exactly backwards. The host therefore held each of the
+        // client's plays in the round buffer *and* enqueued it on arrival, so the client's whole
+        // round resolved the moment it locked in, in arrival order, while the host's own plays
+        // correctly waited for the flush. Both logs say it in three consecutive lines:
+        //
+        //     lock-in: holding opponent's PlayCardAction CARD.DEFEND_SILENT (1 held)
+        //     [ActionQueueSynchronizer] Enqueueing action PlayCardAction CARD.DEFEND_SILENT
+        //     [ActionExecutor] Executing action: PlayCardAction CARD.DEFEND_SILENT
+        //
+        // The flush then enqueued the same plays a second time, where they no-opped because the
+        // cards had already left the hand (`PlayCardAction.ExecuteAction` returns early when the
+        // pile is not Hand). **So the interleaved merge had never actually run**, on either of the
+        // two sessions this model has been played in: `resolving round — 3 then 3` was three real
+        // plays and three already-spent ones. It did not desync only because both sims took their
+        // ordering from the same host stream, which is also why nothing in the logs looked wrong.
+        //
+        // An undo does still reach vanilla, which is what the inverted expression was reaching
+        // for: it is the engine that un-readies a player. Note that path is currently unreachable
+        // from the UI — the end turn button is disabled from the click until the flush, so nobody
+        // can request one (reported 2026-08-12, and backing out of a lock-in wants a decision
+        // before it is built).
         model.HoldRemote(action);
-        return action is not UndoEndPlayerTurnAction;
+        return action is UndoEndPlayerTurnAction;
     }
 
 }
