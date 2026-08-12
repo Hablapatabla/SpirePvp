@@ -149,6 +149,7 @@ public static class DuelMatch
         RaceProgress.Disarm();
         RaceProgressHud.Clear();
         DuelLayout.Reset();
+        Turns.DuelTurnModel.Reset();
         MaskedModifiers = null;
     }
 

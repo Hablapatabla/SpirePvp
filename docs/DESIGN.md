@@ -154,7 +154,42 @@ behind a single policy object (`IDuelTurnModel` with `ShouldDeferAction` / `OnLo
 **Resolution order is deferred to M9 — do not let it block M8.** Decided 2026-08-05: get the
 lock-in loop working first with the cheapest possible order (submission order — flush both
 players' buffered queues in the sequence they were queued, which is what blitz already does,
-merely batched). That requires no new concepts and no per-character data. Tuning which order
+merely batched). That requires no new concepts and no per-character data.
+
+**But "submission order" is underspecified for two players, and M8 has to pick a merge rule.**
+Noticed 2026-08-12 while explaining it. Both players queue simultaneously and there is no shared
+clock to order them by, so "the sequence they were queued" does not define a single stream. Three
+rules produce three different games:
+
+| Merge rule | What it plays like |
+|---|---|
+| All of A's, then all of B's | A resolves a whole hand against a defenceless opponent. A priority rule wearing a disguise |
+| Interleaved — A1, B1, A2, B2 … | Advantage is one card at a time; neither player is ever more than a play ahead |
+| Arrival order at the host | Nearly blitz again: flush timing leaks network latency back in, which is the thing model B exists to remove |
+
+**Decided 2026-08-12: interleaved, starting on fixed slot order (host first).**
+
+Interleaving still needs a tiebreak, and it is worth being clear why, because it looks symmetric
+and is not: "mine first, then theirs" reads identically from both seats and both cannot be true.
+Someone's first card resolves first. With `[Strike, Block]` against `[Block, Strike]`, starting
+with A wastes B's block entirely; starting with B absorbs the strike. Same hands, opposite winner.
+
+What interleaving buys is that the tiebreak stops being *decisive* — one card of advantage rather
+than a whole hand — which is exactly what makes shipping an arbitrary one acceptable for M8.
+
+**The tiebreak is the seam where initiative goes later.** Fixed slot order is deterministic and
+costs nothing; it is not a design statement. The candidate to replace it (M9) is **whoever reached
+the duel arena first starts the alternation, alternating each round after** — proposed by Lucas
+2026-08-12. It is the best of the options considered because it is *earned*: it gives the race a
+tactical consequence rather than only a material one (HP, deck, relics), and alternating keeps it
+from being a first-strike advantage in every round of the duel.
+
+**Rejected for the same reason, and it is a project principle rather than taste: a random
+initiative.** Deciding it with the relic-contention rock-paper-scissors animation, or the map-icon
+coin flip co-op uses for contested paths, puts luck back into the one place §1 works hardest to
+remove it — *"neither player can be luckier than the other; every difference traces back to a
+choice one of them made."* Those animations are the right way to **display** priority; they are the
+wrong way to decide it. Tuning which order
 makes the *best game* is a question worth asking only once the mode is playable, because the
 answer depends on how it feels. The options, for when we come back to it:
 - *Cost order* — cheaper cards resolve first. Readable, makes energy a tempo currency.
