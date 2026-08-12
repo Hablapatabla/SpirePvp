@@ -63,4 +63,33 @@ public static class DuelHostFlow
         ModelDb.Modifier<RaceClockTen>().ToMutable(),
         ModelDb.Modifier<DuelClockTwo>().ToMutable()
     };
+
+    /// <summary>
+    /// Named time controls, on chess conventions — bullet, blitz, rapid, and none.
+    ///
+    /// **Clocks only.** A preset deliberately does not touch the turn model: that is a different
+    /// decision about what kind of game this is, not how long it lasts, and conflating them would
+    /// mean picking Rapid silently changed the rules. It also means a preset can never leave the
+    /// lobby without a turn model, which is the one modifier that marks the run as PvP at all.
+    ///
+    /// Bullet is the pair that makes flagging reachable inside a single test run, which is why it
+    /// stays in the real list rather than behind a dev flag — it is a legitimate time control as
+    /// well as the only practical way to exercise the clock.
+    /// </summary>
+    public static IReadOnlyList<(string LocKey, ModifierModel Race, ModifierModel Duel)> Presets =>
+        new List<(string, ModifierModel, ModifierModel)>
+        {
+            ("SPIREPVP_PRESET.bullet",
+                ModelDb.Modifier<RaceClockOne>().ToMutable(),
+                ModelDb.Modifier<DuelClockOne>().ToMutable()),
+            ("SPIREPVP_PRESET.blitz",
+                ModelDb.Modifier<RaceClockTen>().ToMutable(),
+                ModelDb.Modifier<DuelClockTwo>().ToMutable()),
+            ("SPIREPVP_PRESET.rapid",
+                ModelDb.Modifier<RaceClockTwenty>().ToMutable(),
+                ModelDb.Modifier<DuelClockFive>().ToMutable()),
+            ("SPIREPVP_PRESET.untimed",
+                ModelDb.Modifier<RaceClockNone>().ToMutable(),
+                ModelDb.Modifier<DuelClockNone>().ToMutable())
+        };
 }

@@ -4,5 +4,10 @@
   "SPIREPVP_LOBBY.turnModel": "Turn model",
   "SPIREPVP_LOBBY.raceClock": "Race clock",
   "SPIREPVP_LOBBY.duelClock": "Duel clock",
-  "SPIREPVP_LOBBY.advanced": "Other modifiers"
+  "SPIREPVP_LOBBY.advanced": "Other modifiers",
+  "SPIREPVP_LOBBY.preset": "Preset",
+  "SPIREPVP_PRESET.bullet": "Bullet",
+  "SPIREPVP_PRESET.blitz": "Blitz",
+  "SPIREPVP_PRESET.rapid": "Rapid",
+  "SPIREPVP_PRESET.untimed": "No clock"
 }

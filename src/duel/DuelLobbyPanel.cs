@@ -86,6 +86,8 @@ public static class DuelLobbyPanel
         container.AddChildSafely(panel);
         container.MoveChildSafely(panel, 0);
 
+        BuildPresetRow(panel, list);
+
         List<NRunModifierTickbox> promoted = new List<NRunModifierTickbox>();
 
         foreach ((string locKey, System.Type group) in Groups)
@@ -143,6 +145,95 @@ public static class DuelLobbyPanel
         Log.Warn($"[SpirePvp] duel lobby: promoted {promoted.Count} duel modifier(s) into " +
                  $"{Groups.Length} groups, {tickboxes.Count - promoted.Count} left below");
     }
+
+    /// <summary>
+    /// A row of named time controls that set both clocks at once.
+    ///
+    /// The three groups below are the truth and stay editable — a preset is a shortcut to a
+    /// common pair, not a mode. Picking one ticks the corresponding clocks, and picking a clock
+    /// by hand afterwards simply leaves the lobby somewhere between presets, which is fine and
+    /// needs no state of its own to represent.
+    ///
+    /// **Applied by merging rather than replacing.** SetTickedModifiers takes the complete set of
+    /// what should be ticked, so handing it two clocks would untick the turn model and any other
+    /// custom modifier the host had chosen — a preset would quietly wipe the rest of the lobby.
+    /// So the current selection is read back, its clocks dropped, and the preset's added.
+    /// </summary>
+    private static void BuildPresetRow(Control panel, NCustomRunModifiersList list)
+    {
+        panel.AddChildSafely(Heading("SPIREPVP_LOBBY.preset"));
+
+        HBoxContainer row = new HBoxContainer
+        {
+            Name = "SpirePvpPresetRow",
+            SizeFlagsHorizontal = Control.SizeFlags.ExpandFill
+        };
+        panel.AddChildSafely(row);
+
+        foreach ((string locKey, ModifierModel race, ModifierModel duel) in DuelHostFlow.Presets)
+        {
+            MegaLabel chip = ClickableLabel(Loc(locKey), PresetFontSize, () =>
+            {
+                List<ModifierModel> ticked = list.GetModifiersTickedOn()
+                    .Where(m => m is not ClockModifierBase)
+                    .ToList();
+
+                ticked.Add(race);
+                ticked.Add(duel);
+                list.SetTickedModifiers(ticked);
+            });
+
+            chip.SizeFlagsHorizontal = Control.SizeFlags.ExpandFill;
+            row.AddChildSafely(chip);
+        }
+    }
+
+    /// <summary>
+    /// A label that responds to the mouse.
+    ///
+    /// Vanilla's interactive widgets cannot be constructed by a mod — NRunModifierTickbox.Create
+    /// demands a ModifierModel and NTickbox has no factory — so anything clickable here is a
+    /// MegaLabel with its mouse filter opened up. That works, but a bare label has no hover
+    /// state, and a control that does something on click while looking completely inert reads as
+    /// broken rather than as a button. The brighten-on-hover and the pointing-hand cursor are
+    /// the whole affordance.
+    /// </summary>
+    private static MegaLabel ClickableLabel(string text, int fontSize, System.Action onClick)
+    {
+        MegaLabel label = new MegaLabel
+        {
+            AutoSizeEnabled = false,
+            Text = text,
+            HorizontalAlignment = HorizontalAlignment.Left,
+            AutowrapMode = TextServer.AutowrapMode.WordSmart,
+            MouseFilter = Control.MouseFilterEnum.Stop,
+            MouseDefaultCursorShape = Control.CursorShape.PointingHand,
+            Modulate = Idle
+        };
+
+        label.SetFontSize(fontSize);
+        label.CustomMinimumSize = new Vector2(0, fontSize + HeadingTopMargin);
+
+        label.Connect(Control.SignalName.MouseEntered,
+                      Callable.From(() => label.Modulate = Hovered));
+        label.Connect(Control.SignalName.MouseExited,
+                      Callable.From(() => label.Modulate = Idle));
+        label.Connect(Control.SignalName.GuiInput, Callable.From<InputEvent>(inputEvent =>
+        {
+            if (inputEvent is InputEventMouseButton { Pressed: true } click
+                && click.ButtonIndex == MouseButton.Left)
+            {
+                onClick();
+            }
+        }));
+
+        return label;
+    }
+
+    private static readonly Color Idle = new Color(1f, 1f, 1f);
+    private static readonly Color Hovered = new Color(1.35f, 1.35f, 1.35f);
+
+    private const int PresetFontSize = 32;
 
     /// <summary>
     /// Shrinks a tickbox to a chip so several fit on one row.
@@ -221,29 +312,24 @@ public static class DuelLobbyPanel
     /// </summary>
     private static Control CollapsibleHeading(string locKey, List<NRunModifierTickbox> hidden)
     {
-        MegaLabel label = (MegaLabel)Heading(locKey);
         string text = Loc(locKey);
         bool expanded = false;
+        MegaLabel? label = null;
 
         void Refresh()
         {
-            label.Text = (expanded ? "▾  " : "▸  ") + text;
+            label!.Text = (expanded ? "▾  " : "▸  ") + text;
             foreach (NRunModifierTickbox tickbox in hidden)
             {
                 tickbox.Visible = expanded;
             }
         }
 
-        label.MouseFilter = Control.MouseFilterEnum.Stop;
-        label.Connect(Control.SignalName.GuiInput, Callable.From<InputEvent>(inputEvent =>
+        label = ClickableLabel(text, HeadingFontSize, () =>
         {
-            if (inputEvent is InputEventMouseButton { Pressed: true } click
-                && click.ButtonIndex == MouseButton.Left)
-            {
-                expanded = !expanded;
-                Refresh();
-            }
-        }));
+            expanded = !expanded;
+            Refresh();
+        });
 
         Refresh();
         return label;
