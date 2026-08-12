@@ -1,5 +1,6 @@
 using MegaCrit.Sts2.Core.Context;
 using MegaCrit.Sts2.Core.Entities.Players;
+using MegaCrit.Sts2.Core.GameActions.Multiplayer;
 using MegaCrit.Sts2.Core.Logging;
 using MegaCrit.Sts2.Core.Runs;
 
@@ -227,14 +228,25 @@ public static class RaceCoordinator
     /// diverged on the first card played, so they are reset here too rather than found later.
     ///
     /// Zeroed rather than adopting the host's values: both sides reach the same answer with no
-    /// message and no ordering hazard, and it covers the console duel paths for free. The
-    /// counters only need to agree with each other from here on — the duel is a fresh combat
-    /// entered with empty queues, so nothing is still holding one of the old ids.
+    /// message and no ordering hazard, and it covers the console duel paths for free.
+    ///
+    /// **Resetting a counter is not enough on its own, and the missing half cost a match.** An
+    /// earlier version of this comment finished "the duel is a fresh combat entered with empty
+    /// queues, so nothing is still holding one of the old ids". The queues are empty; the
+    /// *synchronizer* is not. `PlayerChoiceSynchronizer` keeps a `_receivedChoices` list of
+    /// choices that arrived from a peer with nobody waiting for them, matched later by
+    /// `(choiceId, senderId)` alone — and `FastForwardChoiceIds` only touches the counter, so
+    /// those entries survive the reset with ids the duel is about to hand out again.
+    ///
+    /// The race fills that list by construction: a card reward pick travels as a player choice,
+    /// so every reward either player takes is broadcast, stored by the peer, and never consumed —
+    /// the two runs are decoupled and nobody is waiting. See <see cref="ClearStaleReceivedChoices"/>.
     /// </summary>
     private static void ResetSynchronizerCounters(RunManager run)
     {
         int playerCount = run.State?.Players.Count ?? 0;
         run.PlayerChoiceSynchronizer.FastForwardChoiceIds(Enumerable.Repeat(0u, playerCount).ToList());
+        ClearStaleReceivedChoices(run);
 
         // Sized off the synchronizer's own state rather than the player count: FastForward
         // indexes into _rewardStates, so a longer list would throw.
@@ -246,5 +258,50 @@ public static class RaceCoordinator
 
         Log.Warn($"[SpirePvp] duel: reset {playerCount} choice / {rewardStateCount} reward / action / hook " +
                  "counters — the race diverged them and the state sync does not cover them");
+    }
+
+    /// <summary>
+    /// Drops the peer choices the race left sitting in `PlayerChoiceSynchronizer`, which the
+    /// counter reset above would otherwise hand to the duel under reused ids.
+    ///
+    /// **Measured 2026-08-12, and it ended a match in a way that read as a network fault.** The
+    /// client took two card rewards during the race, which the host stored as choices 0 and 1
+    /// (`indexes 1`, `indexes 2` — nobody was waiting for them, so `OnReceivePlayerChoice` parked
+    /// them). The counters were then zeroed here. In the duel the client played Photon Cut, whose
+    /// `OnPlay` ends in `CardSelectCmd.FromHand`; the host reserved choice id 0 for the client,
+    /// found the *race's* choice 0 already in the list — `Was going to wait for remote choice 0
+    /// but we've already received it` — and handed a reward index to a card asking for a card:
+    /// `InvalidOperationException: Tried to get combat cards from player choice result of type
+    /// Index!`. The host's put-back never happened, the client's did, and the very next checksum
+    /// diverged. The host kicked the client for `StateDivergence`, and *both* players were then
+    /// shown a victory by disconnect (fixed separately in <see cref="Duel.DuelDisconnect"/>).
+    ///
+    /// Note what made it look random: it needs a duel card that gathers a player choice, and only
+    /// the *peer's* choices are stored this way — the host consumes its own locally. So it fires
+    /// on the first choosing card the client plays, and never on the host's.
+    ///
+    /// Everything in the list is stale by construction at this point. A race-era choice has no
+    /// consumer in the duel: the phase it belonged to is over, and the duel's own waits are all
+    /// reserved after this call. The completed/pending split is logged rather than acted on
+    /// because pending entries should not exist here at all — `RaceIgnoreRemoteActionsPatch`
+    /// discards the opponent's actions, so nothing in a race ever awaits a remote choice — and a
+    /// nonzero count means that premise has changed and wants reading, not silent handling.
+    /// </summary>
+    private static void ClearStaleReceivedChoices(RunManager run)
+    {
+        List<PlayerChoiceSynchronizer.ReceivedChoice> stale = run.PlayerChoiceSynchronizer._receivedChoices;
+        if (stale.Count == 0)
+        {
+            return;
+        }
+
+        int dropped = stale.Count;
+        int pending = stale.Count(c => !c.completionSource.Task.IsCompleted);
+        string detail = string.Join(", ", stale.Select(c => $"{c.senderId}#{c.choiceId}"));
+        stale.Clear();
+
+        Log.Warn($"[SpirePvp] duel: dropped {dropped} stale peer choice(s) held by the race " +
+                 $"({detail}) — {pending} still pending. They are keyed by id alone, and the duel " +
+                 "reuses those ids from 0.");
     }
 }
