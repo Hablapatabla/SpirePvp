@@ -57,6 +57,18 @@ public sealed class LockInTurnModel : IDuelTurnModel
     /// <summary>The opponent's plays, held by the host until both sides are in.</summary>
     private readonly List<GameAction> _remote = new List<GameAction>();
 
+    /// <summary>
+    /// The two end-turn actions, held apart from the plays and enqueued after them.
+    ///
+    /// **They cannot go through early and they cannot be dropped.** Letting them through means the
+    /// turn rolls over before the round's cards resolve; dropping them means nobody is ever ready
+    /// and the round never ends. So the round is one ordered thing — every play, interleaved, then
+    /// both players ending their turn.
+    /// </summary>
+    private GameAction? _localEnd;
+
+    private GameAction? _remoteEnd;
+
     private bool _localLockedIn;
     private bool _remoteLockedIn;
     private bool _flushing;
@@ -96,18 +108,32 @@ public sealed class LockInTurnModel : IDuelTurnModel
             return false;
         }
 
-        // **Ending your turn is the lock-in, not a play, and it must never be buffered.**
-        // `EndPlayerTurnAction` is itself a `CombatPlayPhaseOnly` action, so the category test
-        // below swallowed it — and swallowing it is a deadlock, not a glitch: end turn never
-        // reaches `SetReadyToEndTurn`, so the lock-in never fires, so the buffer is never released
-        // and the round can never end. Measured 2026-08-12, and it read exactly as reported —
-        // "nothing happens when clicking end turn" — with the log saying
-        // `holding EndPlayerTurnAction for player 1 turn 1 (3 planned)`.
+        // **Requesting an end turn *is* the lock-in, and it is the trigger rather than a play.**
+        // Catching it here rather than at `SetReadyToEndTurn` is what gets the ordering right: this
+        // runs when the button is clicked, so the buffered plays are handed over *before* the
+        // end-turn request leaves, and a host reading its inbox sees plays then end-turn. Hooked at
+        // `SetReadyToEndTurn` instead, the client's end turn had to survive a round trip and be
+        // executed before it locked in, which put its own plays after its end turn.
         //
-        // Undo goes through for the same reason: backing out of a lock-in is a decision about the
-        // round, not a play within it.
-        if (action is EndPlayerTurnAction or UndoEndPlayerTurnAction)
+        // Undo is let straight through: backing out is a decision about the round, not a play
+        // within it.
+        if (action is UndoEndPlayerTurnAction)
         {
+            return false;
+        }
+
+        if (action is EndPlayerTurnAction)
+        {
+            LockIn();
+
+            // The host holds its own so the flush can put it after the plays; a client lets it go
+            // to the host, which holds it there for the same reason.
+            if (RunManager.Instance?.NetService.Type == NetGameType.Host)
+            {
+                _localEnd = action;
+                return true;
+            }
+
             return false;
         }
 
@@ -169,9 +195,22 @@ public sealed class LockInTurnModel : IDuelTurnModel
         TryFlush();
     }
 
-    /// <summary>Holds a play the opponent requested, instead of letting the host enqueue it now.</summary>
+    /// <summary>
+    /// Holds something the opponent requested, instead of letting the host enqueue it now.
+    ///
+    /// **Their end turn is held too, and separately.** Enqueuing it on arrival would roll the turn
+    /// over before the round's cards had resolved; the first version of this let it through and
+    /// the round simply ended with every play still in a buffer.
+    /// </summary>
     public void HoldRemote(GameAction action)
     {
+        if (action is EndPlayerTurnAction)
+        {
+            _remoteEnd = action;
+            Log.Info("[SpirePvp] lock-in: holding opponent's end turn until the round resolves");
+            return;
+        }
+
         _remote.Add(action);
         Log.Info($"[SpirePvp] lock-in: holding opponent's {action} ({_remote.Count} held)");
     }
@@ -229,6 +268,20 @@ public sealed class LockInTurnModel : IDuelTurnModel
             }
         }
 
+        // Both end turns last, so the round rolls over only once every play in it has resolved.
+        // Without these the players are never marked ready and the round hangs with the cards
+        // already spent — which is the failure that looks most like "the mod ate my turn".
+        if (_localEnd != null)
+        {
+            run.ActionQueueSynchronizer.EnqueueAction(_localEnd, me);
+        }
+
+        if (_remoteEnd != null)
+        {
+            run.ActionQueueSynchronizer.EnqueueAction(_remoteEnd, opponent);
+        }
+
+        Log.Warn("[SpirePvp] lock-in: round enqueued, both end turns appended");
         BeginNextRound();
     }
 
@@ -237,6 +290,8 @@ public sealed class LockInTurnModel : IDuelTurnModel
     {
         _local.Clear();
         _remote.Clear();
+        _localEnd = null;
+        _remoteEnd = null;
         _localLockedIn = false;
         _remoteLockedIn = false;
         _flushing = false;

@@ -25,30 +25,6 @@ public static class DuelLockInPatch
     private static LockInTurnModel? Model => DuelTurnModel.Current as LockInTurnModel;
 
     /// <summary>
-    /// Ending your turn is locking in.
-    ///
-    /// **Reusing end-turn rather than adding a button is the whole reason model B is cheap.** The
-    /// round already ends when both players have readied (`AllPlayersReadyToEndTurn`), so the
-    /// engine's existing both-players gate *is* the both-locked-in gate; the model only has to
-    /// hand its buffer over before that readiness travels.
-    ///
-    /// A prefix, so the plays are submitted before the peer is told we are ready — the ordering
-    /// `DuelLockInMessage` depends on.
-    /// </summary>
-    [HarmonyPatch(typeof(CombatManager), nameof(CombatManager.SetReadyToEndTurn))]
-    [HarmonyPrefix]
-    public static void BeforeSetReadyToEndTurn(Player player)
-    {
-        if (Model is not LockInTurnModel model || !DuelSession.IsDuelActive
-            || !LocalContext.IsMe(player))
-        {
-            return;
-        }
-
-        model.LockIn();
-    }
-
-    /// <summary>
     /// The host holds a client's plays instead of enqueuing them as they arrive.
     ///
     /// Without this the host would order the round by arrival time, which is blitz — the thing
