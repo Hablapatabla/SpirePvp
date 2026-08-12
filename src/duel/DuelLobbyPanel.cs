@@ -1,8 +1,10 @@
 using System.Collections.Generic;
 using System.Linq;
 using Godot;
+using MegaCrit.Sts2.Core.Assets;
 using MegaCrit.Sts2.Core.Helpers;
 using MegaCrit.Sts2.Core.Localization;
+using MegaCrit.Sts2.Core.Nodes.CommonUi;
 using MegaCrit.Sts2.Core.Models;
 using MegaCrit.Sts2.Core.Logging;
 using MegaCrit.Sts2.Core.Nodes.Screens.CustomRun;
@@ -139,8 +141,8 @@ public static class DuelLobbyPanel
         // list of run modifiers that has nothing to do with configuring a duel. Still reachable
         // rather than removed, because a duel is genuinely a Custom run underneath and every one
         // of those modifiers remains legal — some are interesting in a race.
-        panel.AddChildSafely(CollapsibleHeading("SPIREPVP_LOBBY.advanced",
-                                                tickboxes.Except(promoted).ToList()));
+        panel.AddChildSafely(Heading("SPIREPVP_LOBBY.advanced"));
+        BuildCollapsible(panel, "SPIREPVP_LOBBY.showOthers", tickboxes.Except(promoted).ToList());
 
         Log.Warn($"[SpirePvp] duel lobby: promoted {promoted.Count} duel modifier(s) into " +
                  $"{Groups.Length} groups, {tickboxes.Count - promoted.Count} left below");
@@ -172,7 +174,13 @@ public static class DuelLobbyPanel
 
         foreach ((string locKey, ModifierModel race, ModifierModel duel) in DuelHostFlow.Presets)
         {
-            MegaLabel chip = ClickableLabel(Loc(locKey), PresetFontSize, () =>
+            NRunModifierTickbox? chip = MakeChip(row, Loc(locKey));
+            if (chip == null)
+            {
+                continue;
+            }
+
+            chip.Connect(NTickbox.SignalName.Toggled, Callable.From<NTickbox>(_ =>
             {
                 List<ModifierModel> ticked = list.GetModifiersTickedOn()
                     .Where(m => m is not ClockModifierBase)
@@ -181,59 +189,43 @@ public static class DuelLobbyPanel
                 ticked.Add(race);
                 ticked.Add(duel);
                 list.SetTickedModifiers(ticked);
-            });
-
-            chip.SizeFlagsHorizontal = Control.SizeFlags.ExpandFill;
-            row.AddChildSafely(chip);
+            }));
         }
     }
 
     /// <summary>
-    /// A label that responds to the mouse.
+    /// A real vanilla tickbox carrying our own text.
     ///
-    /// Vanilla's interactive widgets cannot be constructed by a mod — NRunModifierTickbox.Create
-    /// demands a ModifierModel and NTickbox has no factory — so anything clickable here is a
-    /// MegaLabel with its mouse filter opened up. That works, but a bare label has no hover
-    /// state, and a control that does something on click while looking completely inert reads as
-    /// broken rather than as a button. The brighten-on-hover and the pointing-hand cursor are
-    /// the whole affordance.
+    /// An earlier pass claimed a mod could not build one of these and fell back to labels with
+    /// their mouse filter opened up. That was wrong, and the labels looked it — no hover, no
+    /// pressed state, no tick, just text that happened to respond to clicks.
+    /// `NRunModifierTickbox.Create` is nothing more than instantiating
+    /// `modifier_tickbox.tscn` and assigning `Modifier`, and the scene path is a plain resource
+    /// any mod can load. **Leaving `Modifier` null is the trick**: `_Ready` guards its label
+    /// setup on `Modifier != null`, so the widget builds completely — highlight, tick, hover,
+    /// focus — and simply leaves the text to us.
+    ///
+    /// Text is set *after* the node enters the tree, because `_label` is resolved in `_Ready`
+    /// and is null until then.
     /// </summary>
-    private static MegaLabel ClickableLabel(string text, int fontSize, System.Action onClick)
+    private static NRunModifierTickbox? MakeChip(Control parent, string text)
     {
-        MegaLabel label = new MegaLabel
+        NRunModifierTickbox chip = PreloadManager.Cache
+            .GetScene("res://scenes/screens/custom_run/modifier_tickbox.tscn")
+            .Instantiate<NRunModifierTickbox>(PackedScene.GenEditState.Disabled);
+
+        chip.SizeFlagsHorizontal = Control.SizeFlags.ExpandFill;
+        parent.AddChildSafely(chip);
+
+        if (chip._label == null)
         {
-            AutoSizeEnabled = false,
-            Text = text,
-            HorizontalAlignment = HorizontalAlignment.Left,
-            AutowrapMode = TextServer.AutowrapMode.WordSmart,
-            MouseFilter = Control.MouseFilterEnum.Stop,
-            MouseDefaultCursorShape = Control.CursorShape.PointingHand,
-            Modulate = Idle
-        };
+            Log.Warn("[SpirePvp] duel lobby: tickbox scene had no description label");
+            return chip;
+        }
 
-        label.SetFontSize(fontSize);
-        label.CustomMinimumSize = new Vector2(0, fontSize + HeadingTopMargin);
-
-        label.Connect(Control.SignalName.MouseEntered,
-                      Callable.From(() => label.Modulate = Hovered));
-        label.Connect(Control.SignalName.MouseExited,
-                      Callable.From(() => label.Modulate = Idle));
-        label.Connect(Control.SignalName.GuiInput, Callable.From<InputEvent>(inputEvent =>
-        {
-            if (inputEvent is InputEventMouseButton { Pressed: true } click
-                && click.ButtonIndex == MouseButton.Left)
-            {
-                onClick();
-            }
-        }));
-
-        return label;
+        chip._label.Text = $"[color=green]{text}[/color]";
+        return chip;
     }
-
-    private static readonly Color Idle = new Color(1f, 1f, 1f);
-    private static readonly Color Hovered = new Color(1.35f, 1.35f, 1.35f);
-
-    private const int PresetFontSize = 32;
 
     /// <summary>
     /// Shrinks a tickbox to a chip so several fit on one row.
@@ -310,29 +302,37 @@ public static class DuelLobbyPanel
     ///
     /// The caret carries the state, since a label cannot show a tick.
     /// </summary>
-    private static Control CollapsibleHeading(string locKey, List<NRunModifierTickbox> hidden)
+    /// <summary>
+    /// Shows and hides the modifiers below it.
+    ///
+    /// A tickbox rather than a label, which is what it always was semantically — "show me the
+    /// rest" is a boolean — and it means the control looks and behaves like every other control
+    /// on the screen instead of like underlined text on a web page.
+    /// </summary>
+    private static void BuildCollapsible(Control panel, string locKey,
+                                         List<NRunModifierTickbox> hidden)
     {
-        string text = Loc(locKey);
-        bool expanded = false;
-        MegaLabel? label = null;
-
-        void Refresh()
+        foreach (NRunModifierTickbox tickbox in hidden)
         {
-            label!.Text = (expanded ? "▾  " : "▸  ") + text;
-            foreach (NRunModifierTickbox tickbox in hidden)
-            {
-                tickbox.Visible = expanded;
-            }
+            tickbox.Visible = false;
         }
 
-        label = ClickableLabel(text, HeadingFontSize, () =>
+        NRunModifierTickbox? toggle = MakeChip(panel, Loc(locKey));
+        if (toggle == null)
         {
-            expanded = !expanded;
-            Refresh();
-        });
+            return;
+        }
 
-        Refresh();
-        return label;
+        // Full width: this is a section header, not one option among several.
+        toggle.SizeFlagsHorizontal = Control.SizeFlags.Fill;
+
+        toggle.Connect(NTickbox.SignalName.Toggled, Callable.From<NTickbox>(box =>
+        {
+            foreach (NRunModifierTickbox tickbox in hidden)
+            {
+                tickbox.Visible = box.IsTicked;
+            }
+        }));
     }
 
     private static Control Heading(string locKey)

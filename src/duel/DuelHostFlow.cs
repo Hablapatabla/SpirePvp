@@ -79,15 +79,12 @@ public static class DuelHostFlow
     public static IReadOnlyList<(string LocKey, ModifierModel Race, ModifierModel Duel)> Presets =>
         new List<(string, ModifierModel, ModifierModel)>
         {
-            ("SPIREPVP_PRESET.bullet",
-                ModelDb.Modifier<RaceClockOne>().ToMutable(),
-                ModelDb.Modifier<DuelClockOne>().ToMutable()),
             ("SPIREPVP_PRESET.blitz",
                 ModelDb.Modifier<RaceClockTen>().ToMutable(),
-                ModelDb.Modifier<DuelClockTwo>().ToMutable()),
+                ModelDb.Modifier<DuelClockOne>().ToMutable()),
             ("SPIREPVP_PRESET.rapid",
-                ModelDb.Modifier<RaceClockTwenty>().ToMutable(),
-                ModelDb.Modifier<DuelClockFive>().ToMutable()),
+                ModelDb.Modifier<RaceClockFifteen>().ToMutable(),
+                ModelDb.Modifier<DuelClockThree>().ToMutable()),
             ("SPIREPVP_PRESET.untimed",
                 ModelDb.Modifier<RaceClockNone>().ToMutable(),
                 ModelDb.Modifier<DuelClockNone>().ToMutable())

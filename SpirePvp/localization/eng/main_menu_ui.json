@@ -6,8 +6,8 @@
   "SPIREPVP_LOBBY.duelClock": "Duel clock",
   "SPIREPVP_LOBBY.advanced": "Other modifiers",
   "SPIREPVP_LOBBY.preset": "Preset",
-  "SPIREPVP_PRESET.bullet": "Bullet",
   "SPIREPVP_PRESET.blitz": "Blitz",
   "SPIREPVP_PRESET.rapid": "Rapid",
-  "SPIREPVP_PRESET.untimed": "No clock"
+  "SPIREPVP_PRESET.untimed": "No clock",
+  "SPIREPVP_LOBBY.showOthers": "Show all custom run modifiers"
 }
