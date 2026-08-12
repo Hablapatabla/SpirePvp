@@ -26,9 +26,22 @@ namespace SpirePvp.Duel;
 /// rollover — without any room-entry work. Real duel entry belongs with the automatic flow
 /// in M6.
 ///
-/// IsNetworked = true matters: the console routes networked commands through
-/// NetConsoleCmdGameAction, so one player typing <c>duel on</c> flips both clients in the
-/// same deterministic action stream. That is what keeps the two sims in agreement.
+/// **IsNetworked is false, and that reversed an earlier decision for a measured reason.** It was
+/// true so that one player typing <c>duel on</c> flipped both clients through the same
+/// deterministic action stream. What that actually produced was a desync, twice on 2026-08-12, and
+/// the mechanism is worth keeping because it is not obvious:
+///
+/// `ActionEnqueuedMessage` carries no action id — **each side assigns ids from its own counter as
+/// it enqueues**, so the two agree only while both enqueue the same actions in the same order.
+/// During a race `RaceIgnoreRemoteActionsPatch` drops peer action traffic, which is symmetric and
+/// fine. But a client typing <c>duel now</c> *ends the race locally*, which un-gags that patch — so
+/// the host's copy, arriving a moment later, is no longer dropped and executes too. The client
+/// enqueues two console actions, the host one, and every id after that is off by one. Both state
+/// dumps were otherwise identical: `Last executed action ID: 0` against `1`.
+///
+/// Local-only removes the whole family: nothing this command does reaches the shared queue, so it
+/// cannot renumber it. Both players type it, which is what was happening anyway — <c>duel now</c>
+/// never moved the client reliably, and that is the same fact seen from the other side.
 /// </summary>
 public class DuelConsoleCmd : AbstractConsoleCmd
 {
@@ -40,7 +53,7 @@ public class DuelConsoleCmd : AbstractConsoleCmd
         "SpirePvp: turn the current combat into a 1v1 duel — clears the enemy side and makes " +
         "attack cards target the other player. 'off' reverts to normal combat rules.";
 
-    public override bool IsNetworked => true;
+    public override bool IsNetworked => false;
 
     // Vanilla commands default to DebugOnly, which hides them unless debug commands are
     // allowed. The duel spike has to be usable in a normal build, so opt out.

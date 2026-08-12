@@ -9,9 +9,16 @@ namespace SpirePvp.Race;
 /// <summary>
 /// M5 spike entry: <c>race on</c> / <c>race off</c>.
 ///
-/// Networked for the same reason DuelConsoleCmd is: both clients must stop synchronizing at
-/// the same instant. If one side decoupled first it would travel alone while the other was
-/// still waiting on a vote that will never come.
+/// **Local-only, for the same reason DuelConsoleCmd is** (see its comment for the measurement).
+/// A networked console command is enqueued into the shared action stream, and each side assigns
+/// action ids from its own counter — so any asymmetry in which copies get executed renumbers one
+/// side permanently. `race on` has exactly the shape that produces that asymmetry, since it changes
+/// whether peer action traffic is being dropped at all.
+///
+/// The original reasoning was that both clients must stop synchronizing at the same instant, or one
+/// would travel alone while the other waited on a vote that never comes. That is still true and is
+/// still satisfied: both players type it, which is what a two-player debug command was always going
+/// to require.
 /// </summary>
 public class RaceConsoleCmd : AbstractConsoleCmd
 {
@@ -23,7 +30,7 @@ public class RaceConsoleCmd : AbstractConsoleCmd
         "SpirePvp: decouple the two clients so each traverses the shared map on its own " +
         "(M5 spike). 'off' restores normal co-op party movement.";
 
-    public override bool IsNetworked => true;
+    public override bool IsNetworked => false;
 
     public override bool DebugOnly => false;
 

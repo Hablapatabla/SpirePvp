@@ -590,7 +590,7 @@ Mod commands:
 | Command | Effect |
 |---|---|
 | `duel start` | Opens the opponent's decklist as the duel entry screen. Both players confirm, then the arena loads. |
-| `duel now` | Skips the entry screen, straight into the arena. Debug shortcut. **Exactly one player types it** — it is networked, so one command moves both clients, and a second one desyncs the match (see the ordered-counter entry above). Do not "fix" that with a guard inside the command; that was tried and is strictly worse. |
+| `duel now` | Skips the entry screen, straight into the arena. Debug shortcut. **Both players type it**, and the mod commands are now **local-only** (`IsNetworked = false`) so that is safe: a networked console command is enqueued into the shared stream, where each side assigns ids from its own counter, and the asymmetry desynced two sessions running. Do not make them networked again without reading `DuelConsoleCmd`'s comment. |
 | ~~`duel clock <minutes>`~~ | **Removed.** The clocks are part of the match agreement, picked in the lobby as `Race Clock` and `Duel Clock`. The race bank runs from run creation and the duel gets a fresh one when it begins. A mid-run command could only hand someone a bank they never agreed to or reset one already spent — either silently invalidates the match. Pick the 1-minute options to test flagging. |
 | `duel on` / `duel off` | Converts the combat you are already in into a duel, and back. Legacy path from M1; `duel start` is the real flow. |
 | `duel hud` / `duel hud off` | **Debug only.** Shows the opponent's floor, HP and deck size on your map during the race. Off by default and deliberately not a feature — see M6 item 1. Useful when diagnosing the race; not something to leave on in a real match. |
