@@ -186,14 +186,15 @@ public sealed class LockInTurnModel : IDuelTurnModel
         TryFlush();
     }
 
-    /// <summary>The opponent has locked in. Host-side this also means their plays have all arrived.</summary>
-    public void RemoteLockedIn(int playCount)
-    {
-        _remoteLockedIn = true;
-        Log.Warn($"[SpirePvp] lock-in: opponent locked in {playCount} play(s), "
-                 + $"{_remote.Count} held");
-        TryFlush();
-    }
+    /// <summary>
+    /// The opponent says they have locked in.
+    ///
+    /// **Informational on the host**, which decides from their end turn arriving instead — see
+    /// `HoldRemote`. Kept because it is what a client learns from, and a client showing "they are
+    /// waiting on you" is the obvious next piece of presentation.
+    /// </summary>
+    public void RemoteLockedIn(int playCount) =>
+        Log.Warn($"[SpirePvp] lock-in: opponent announced {playCount} play(s), {_remote.Count} held");
 
     /// <summary>
     /// Holds something the opponent requested, instead of letting the host enqueue it now.
@@ -206,8 +207,15 @@ public sealed class LockInTurnModel : IDuelTurnModel
     {
         if (action is EndPlayerTurnAction)
         {
+            // **Their end turn *is* their lock-in, and using it as the signal removes a race.**
+            // `DuelLockInMessage` is sent from `LockIn`, which runs before the end-turn request
+            // leaves — so the message can reach the host first and flush a round whose end turn is
+            // still in flight, leaving nobody marked ready and the round hung. The end turn is the
+            // last thing a player sends, so treating its arrival as the lock-in cannot be early.
             _remoteEnd = action;
-            Log.Info("[SpirePvp] lock-in: holding opponent's end turn until the round resolves");
+            _remoteLockedIn = true;
+            Log.Warn("[SpirePvp] lock-in: opponent's end turn arrived — they are locked in");
+            TryFlush();
             return;
         }
 
