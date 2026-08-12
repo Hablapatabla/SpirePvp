@@ -24,10 +24,36 @@ namespace SpirePvp.Duel.Patches;
 /// `DuelLobbyPanel.Apply` is idempotent — it returns immediately if the panel already exists —
 /// which matters because this fires on every subsequent modifier change too.
 /// </summary>
-[HarmonyPatch(typeof(NCustomRunScreen), nameof(NCustomRunScreen.ModifiersChanged))]
+[HarmonyPatch]
 public static class DuelLobbyPanelPatch
 {
-    public static void Postfix(NCustomRunScreen __instance)
+    /// <summary>Any later change to the lobby's modifiers, on either side.</summary>
+    [HarmonyPatch(typeof(NCustomRunScreen), nameof(NCustomRunScreen.ModifiersChanged))]
+    [HarmonyPostfix]
+    public static void AfterModifiersChanged(NCustomRunScreen __instance) => Refresh(__instance);
+
+    /// <summary>
+    /// The client's *first* sight of the lobby, and the case ModifiersChanged cannot cover.
+    ///
+    /// A joining client showed the ordinary Custom Mode screen — right modifiers, wrong
+    /// presentation — and the logs said why by omission: no `Received ModifiersChangedMessage`
+    /// anywhere. That message is a broadcast sent when the host *changes* something, and the
+    /// host had picked the preset before anyone joined. The client's opening state arrives in
+    /// its `ClientLobbyJoinResponseMessage` instead, which `InitializeFromMessage` unpacks
+    /// without the listener callback ever firing.
+    ///
+    /// So the panel only appeared on a client if the host happened to touch a modifier after
+    /// they joined — which is the one thing a host with a preset already applied has no reason
+    /// to do.
+    ///
+    /// A postfix, because Lobby.Modifiers is not populated until InitializeFromMessage has run
+    /// inside this method.
+    /// </summary>
+    [HarmonyPatch(typeof(NCustomRunScreen), nameof(NCustomRunScreen.InitializeMultiplayerAsClient))]
+    [HarmonyPostfix]
+    public static void AfterClientJoined(NCustomRunScreen __instance) => Refresh(__instance);
+
+    private static void Refresh(NCustomRunScreen __instance)
     {
         bool isDuel = __instance.Lobby != null
                       && DuelMatch.HasTurnModel(__instance.Lobby.Modifiers);
