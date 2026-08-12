@@ -726,7 +726,7 @@ than a fix:
 | Work | Size | Notes |
 |---|---|---|
 | **Rematch** | milestone | The biggest remaining hole in the loop. Scoped under Open Issues below: the run is torn down by result-screen time, so it needs a handshake, a route into a lobby that skips the menu, and teardown ordering that keeps the transport alive across a run boundary |
-| **Per-round damage stats** | medium | The last unfinished piece of DESIGN §6. The result screen has space where the match's own numbers belong, and nothing accumulates damage across the duel |
+| ~~**Per-round damage stats**~~ | — | **Done, and confirmed in play 2026-08-12.** `DuelStats` tracks cards and damage through the duel, broadcasts them as the match is decided, and `DuelResultLinesPatch` draws six `yours · theirs` comparison rows. A per-*round* breakdown is deliberately not built — see below |
 | **True rejoin** | milestone | Scoped in `docs/PLAYTEST_LIST.md`. Vanilla's rejoin is half-built and the missing half is the UI; the run-state rule is already decided |
 | **Random as a character choice** | small feature | Deferred with a full scope in `docs/PLAYTEST_LIST.md` |
 | **M8 turn-based** | milestone | On hold until blitz is polished (DESIGN §7) |
@@ -1020,13 +1020,29 @@ decision before it is coded.
 like the campfire. Lucas is drawing something; until then the fix is whatever `NDeckCardSelectScreen`
 uses behind the grid.
 
-**The result screen is still vanilla's game-over screen**, with the banner rewritten
-(`DuelResultBannerPatch`) and the run-score lines suppressed (`DuelResultScoreLinesPatch`).
-What is missing is what should stand in their place. `RaceProgress` already retains the
-opponent's final HP and deck size; **per-round damage needs a tracker that does not exist** —
-nothing accumulates damage across the duel. That tracker is the prerequisite for DESIGN §6's
-stats, and it is also what would make post-match analysis possible, which is the stated reason
-the race HUD's data was kept.
+**The result screen is vanilla's game-over screen, and it is now finished.** The banner is
+rewritten (`DuelResultBannerPatch`), the run-score lines are suppressed, and **what stands in their
+place is built and confirmed in play (2026-08-12)**: `DuelStats` counts cards played and damage
+dealt through the duel, `DuelStatsTrackingPatch` feeds it, `Broadcast` sends the pair before
+teardown takes the transport, and `DuelResultLinesPatch` draws six rows as `yours · theirs` —
+damage, cards, HP, gold, elites, deck size. Measured across a match: `stats sent: 17 cards, 56 dmg`
+against `stats received: 1 cards, 6 dmg`.
+
+Two things worth knowing about those numbers, both already handled and both non-obvious:
+
+- **Damage is duel-only and opponent-only.** Gated on `IsDuelActive`, so the race's elites do not
+  inflate it, and on `DuelLayout.BelongsToOpponent` rather than `target.Player` — a pet's `Player`
+  is null and its owner lives in `PetOwner`, so the plain test counted damage to *your own* summon
+  as offence.
+- **A summon's damage is credited to nobody.** Symmetric on both clients for both duelists, so the
+  comparison stays honest, and "damage you dealt" meaning damage *you* dealt is the simpler thing
+  to explain.
+
+**A per-*round* breakdown is deliberately not built.** DESIGN §6 asked for one before the
+comparative design existed, and the comparison answers the question a player actually has — *did I
+out-damage them* — in one row. A per-round table needs space the flat score list does not have, and
+it is the same shape of addition that got the race HUD cut: more numbers, not more insight. Revisit
+only if play asks for it.
 
 **Rematch: deliberately deferred, 2026-08-06, and it is milestone-sized rather than a button.**
 The run is already over by the time the result screen is up: `RunManager.CleanUp` has fired,
