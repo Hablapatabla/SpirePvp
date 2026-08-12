@@ -39,8 +39,16 @@ because it bites anything that waits on a peer: **ENet never reports a hard drop
 (`ENetHost.Update` answers the transport's own `Disconnect` event with a bare `continue`), so
 absence has to be *measured* via `ConnectionStats.LastReceivedTime` rather than waited for.
 
-**Remaining:** rematch (deliberately deferred — milestone-sized, not a button; see HANDOFF),
-per-round damage stats on the result screen, and M8's turn-based turn model.
+**Rematch and M8 are done and playtested (2026-08-12).** A Rematch button on the result screen
+replays the same seed without passing through the main menu — the transport is held open through
+run teardown, which works because `CleanUp` has *not* fired while that screen is up. And
+`1v1 Duel: Turn-Based` now plays turn-based: each side plans a round privately, ending your turn is
+the lock-in, and the host resolves the two buffers interleaved.
+
+**Remaining:** turn-based has an open *design* problem — draw cards are near-dead, because the
+round is planned from the opening hand (options and the leaning are in HANDOFF). Then M8.5,
+tick-paced blitz, which is the most promising idea the playtests produced. See HANDOFF for the
+current list and two open bugs.
 
 **The one idea that explains most of the code:** the duel never breaks card logic — it breaks
 every place the engine encodes "enemy" as a *side* rather than a *relationship*. Both duelists
@@ -51,9 +59,7 @@ side comparison before suspecting the mechanic. DESIGN §7 has the symptom → c
 - `dotnet build` must stay green; it auto-installs the mod into the local game.
 - **Never use `Harmony.PatchAll`.** It throws on the first bad target and silently abandons the
   rest. `SpirePvpInit` patches per class and logs a count — confirm `N patch classes applied
-  cleanly` in the log on every launch, or in-game results are meaningless. **61 as of
-  2026-08-12** (rematch added one), confirmed against a live log (this line said 56 while HANDOFF said 58 — when they
-  disagree, HANDOFF wins, and the log settles it). Note the count is per *class*, not per patch: a class holding several patch
+  cleanly` in the log on every launch, or in-game results are meaningless. **63 as of 2026-08-12** (98 methods). Note the count is per *class*, not per patch: a class holding several patch
   methods still counts once, so grouping patches by concern does not move it.
 - **The engine assumes the party is standing together, and in a race it is not.** This is the
   single most productive thing to suspect when a race-phase room misbehaves — it has now
