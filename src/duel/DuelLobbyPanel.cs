@@ -145,7 +145,15 @@ public static class DuelLobbyPanel
         {
             Name = "SpirePvpHeading",
             AutoSizeEnabled = false,
-            Text = Loc(locKey)
+            Text = Loc(locKey),
+
+            // Left-aligned and wrapping, because the alternative is what shipped first: a
+            // centred, non-wrapping label wider than the column, clipped at *both* ends so the
+            // heading read as "…odel". Headings are short now — the tickboxes beneath each one
+            // already explain the options, so the heading does not need to — but wrapping means
+            // a longer translation degrades into two lines instead of into nonsense.
+            HorizontalAlignment = HorizontalAlignment.Left,
+            AutowrapMode = TextServer.AutowrapMode.WordSmart
         };
 
         label.SetFontSize(HeadingFontSize);

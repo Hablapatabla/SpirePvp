@@ -1,5 +1,9 @@
 .godot/
-*.pck
+# The exported .pck is committed on purpose: it is the only build output that needs the Godot
+# editor to produce, and without it a clone cannot run without installing Godot 4.5.1 mono.
+# Committing it makes "git pull && dotnet build" the whole install. Re-export before pushing if
+# anything under SpirePvp/ changed — host.ps1 does it automatically when it launches.
+!SpirePvp.pck
 bin/
 obj/
 sts2.dll
