@@ -672,13 +672,49 @@ paired result screens, and zero mod errors on either side. Picking `1v1 Duel: Tu
 turn-based. The four ordering constraints that took four attempts to find are written up in
 DESIGN §7 — read them before touching the round loop.
 
+**BLOCKING DESIGN QUESTION, found by playing 2026-08-12: draw cards are close to dead in
+turn-based.** You plan the whole round from your opening hand, so a draw card does not resolve
+until lock-in — the cards it draws arrive *after* planning is over, and then the round ends and the
+hand is discarded. You pay energy for cards you can never plan with. This is inherent to model B,
+not an implementation bug, and it is exactly the kind of thing DESIGN said could only be found by
+playing.
+
+Four options, none free:
+
+| Option | Cost |
+|---|---|
+| Accept it | Draw is dead weight in one mode only, and the card pool is shared with blitz |
+| **Resolve draws at plan time** | Drawing is private, so nothing leaks — but the plan-time effect and the resolved action must not both draw, and that split is where it desyncs |
+| **Two planning passes** — plan, resolve draws only, plan again, then resolve | Coherent and closest to how the cards were designed; doubles the round's ceremony |
+| Ban draw cards from turn-based runs | Cheap (`RaceNoCoopCardsPatch` already filters at generation) but a real content cut |
+
+**Leaning: two passes** (Lucas, 2026-08-12), with a fallback idea worth keeping — **tag cards as
+"must be queued" versus "can be played freely"**, so a draw resolves immediately while an attack
+waits. That is a per-card property and therefore the most work, but it is the only option that
+makes every card behave sensibly rather than choosing which ones to sacrifice.
+
+**Not started deliberately.** It is a change to the round loop, and it was raised at a point where
+it could not be playtested; shipping an untested round loop on top of a working one is how this
+milestone's four ordering bugs happened in the first place.
+
+### Two bugs found 2026-08-12, both unfixed
+
+- **The lobby's radio rows can be emptied.** Unticking the last option in a group leaves *no*
+  selection, and there should always be exactly one. Vanilla's `MutuallyExclusiveModifiers` gives
+  the one-at-a-time behaviour but does not enforce a minimum. **This matters more than it looks:**
+  an empty turn-model row means the run carries no `DuelBlitz`/`DuelTurnBased` modifier, so
+  `DuelMatch.IsPvpRun` is false and the run is not a duel at all. Until it is fixed, check that one
+  chip in each of the three rows is ticked before starting.
+- **Cards reported still playable past 3 energy spent.** Reported in the same message as the energy
+  reservation landing, so it is genuinely unclear whether it was observed on the build *before*
+  that fix. Re-test before investigating: the fix mirrors
+  `PlayerCombatState.HasEnoughResourcesFor` exactly and only ever makes a card *less* playable, so
+  if it is still wrong the likely cause is `Owner`/`PlayerCombatState` being null during planning
+  rather than the arithmetic.
+
 What is left, in order:
 
-1. **Energy reservation.** It is spent at execution, so nothing stops planning ten Strikes on
-   three energy and watching seven fizzle. A postfix on `CardModel.CanPlay` subtracting the
-   buffered cost, against `CardEnergyCost` rather than a guessed accessor. Cut from the first
-   slice on purpose: a wrong predicate there makes cards *unplayable*, which would have made the
-   mode untestable rather than merely rough.
+1. ~~**Energy reservation.**~~ **Built 2026-08-12, unverified** — see the bug note above.
 2. **Presentation for held cards.** A buffered play currently looks like nothing happened. Also
    worth showing that the opponent has locked in — `DuelLockInMessage` already arrives and is
    logged, and is otherwise unused.
