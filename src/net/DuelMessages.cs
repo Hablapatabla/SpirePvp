@@ -418,3 +418,35 @@ public record struct DuelRematchMessage : INetMessage
         accepted = reader.ReadBool();
     }
 }
+
+/// <summary>
+/// "I have locked in" — one player's half of a turn-based round (DESIGN §3.1b).
+///
+/// **Carries no actions, and that is the point.** The plays themselves travel by the engine's own
+/// `RequestEnqueueActionMessage`, exactly as they do in blitz; the only difference is that the
+/// client sends them all at lock-in rather than as it clicks, and the host holds them instead of
+/// enqueuing on arrival. So the lock-in model needs no wire format of its own for actions, and the
+/// action path stays the one the engine already debugs and the mod already trusts.
+///
+/// **Ordering is what makes that safe.** The transport is reliable and ordered, and the client
+/// sends its plays *before* this message — so a host holding this in its hand knows the client's
+/// buffer is complete. There is no "have I got them all yet" question to answer, which is the kind
+/// of question this project keeps getting wrong.
+/// </summary>
+public record struct DuelLockInMessage : INetMessage
+{
+    public bool ShouldBroadcast => true;
+
+    public NetTransferMode Mode => NetTransferMode.Reliable;
+
+    public LogLevel LogLevel => LogLevel.Info;
+
+    public bool ShouldBuffer => true;
+
+    /// <summary>How many plays the sender locked in. Host-side sanity check, and a log line worth having.</summary>
+    public int playCount;
+
+    public void Serialize(PacketWriter writer) => writer.WriteInt(playCount);
+
+    public void Deserialize(PacketReader reader) => playCount = reader.ReadInt();
+}

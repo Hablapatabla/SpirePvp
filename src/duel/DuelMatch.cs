@@ -252,6 +252,7 @@ public static class DuelMatch
         DuelStats.Arm();
         DuelRematch.Reset();
         DuelRematch.Arm();
+        Turns.DuelTurnModel.Arm();
 
         // Started at run creation because the *race* bank is already counting (DESIGN §9): it
         // is the deadline for reaching the arena. During the race both clocks simply run down —

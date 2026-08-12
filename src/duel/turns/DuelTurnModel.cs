@@ -1,6 +1,10 @@
 using MegaCrit.Sts2.Core.GameActions;
 using MegaCrit.Sts2.Core.Logging;
+using MegaCrit.Sts2.Core.Context;
+using MegaCrit.Sts2.Core.Multiplayer.Game;
 using MegaCrit.Sts2.Core.Runs;
+using SpirePvp.Duel;
+using SpirePvp.Net;
 
 namespace SpirePvp.Duel.Turns;
 
@@ -38,7 +42,54 @@ public static class DuelTurnModel
     }
 
     /// <summary>Released with the run, like every other piece of static match state.</summary>
-    public static void Reset() => _current = null;
+    public static void Reset()
+    {
+        Disarm();
+        _current = null;
+    }
+
+    /// <summary>
+    /// Armed at run start with every other handler, not when the duel begins.
+    ///
+    /// The rule this project has paid for five times: the peer can announce something before you
+    /// act on it locally, and a handler registered on first local use drops that message silently.
+    /// A lock-in is precisely such an announcement — the opponent can lock in before you have
+    /// played a single card.
+    /// </summary>
+    public static void Arm()
+    {
+        if (_armed)
+        {
+            return;
+        }
+
+        INetGameService? net = RunManager.Instance?.NetService;
+        if (net == null)
+        {
+            return;
+        }
+
+        net.RegisterMessageHandler<DuelLockInMessage>(OnLockIn);
+        _armed = true;
+    }
+
+    public static void Disarm()
+    {
+        RunManager.Instance?.NetService?.UnregisterMessageHandler<DuelLockInMessage>(OnLockIn);
+        _armed = false;
+    }
+
+    private static void OnLockIn(DuelLockInMessage message, ulong senderId)
+    {
+        if (LocalContext.NetId == senderId)
+        {
+            return;
+        }
+
+        (Current as LockInTurnModel)?.RemoteLockedIn(message.playCount);
+    }
+
+    private static bool _armed;
 
     /// <summary>Convenience for the one patch that asks per action.</summary>
     public static bool ShouldDefer(GameAction action) =>
@@ -50,12 +101,8 @@ public static class DuelTurnModel
         // state DESIGN §7 recorded and accepted, and this is where that ends when the lock-in model
         // lands. Logged rather than silent, because "I picked turn-based and got blitz" is
         // otherwise indistinguishable from the modifier not being read at all.
-        if (DuelMatch.IsTurnBased(runState))
-        {
-            Log.Warn("[SpirePvp] turn model: turn-based was selected, but the lock-in model is not "
-                     + "built yet — playing blitz (DESIGN §3.1b, M8)");
-        }
-
-        return new BlitzTurnModel();
+        return DuelMatch.IsTurnBased(runState)
+            ? new LockInTurnModel()
+            : (IDuelTurnModel)new BlitzTurnModel();
     }
 }
