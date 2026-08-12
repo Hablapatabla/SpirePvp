@@ -3,6 +3,7 @@ using System.Linq;
 using Godot;
 using MegaCrit.Sts2.Core.Helpers;
 using MegaCrit.Sts2.Core.Localization;
+using MegaCrit.Sts2.Core.Models;
 using MegaCrit.Sts2.Core.Logging;
 using MegaCrit.Sts2.Core.Nodes.Screens.CustomRun;
 using MegaCrit.Sts2.Core.Nodes.Screens.MainMenu;
@@ -71,7 +72,17 @@ public static class DuelLobbyPanel
             return;
         }
 
-        VBoxContainer panel = new VBoxContainer { Name = PanelName };
+        // Fill the container's width and never exceed it. A child's minimum width propagates
+        // outward through containers, so a wide heading would widen this panel, which widens the
+        // tickboxes inside it, which pushes them past the scroll mask and clips their
+        // descriptions on the right — the panel dragging vanilla's own widgets out of the visible
+        // area with it. Headings wrap for the same reason.
+        VBoxContainer panel = new VBoxContainer
+        {
+            Name = PanelName,
+            SizeFlagsHorizontal = Control.SizeFlags.Fill,
+            ClipContents = true
+        };
         container.AddChildSafely(panel);
         container.MoveChildSafely(panel, 0);
 
@@ -94,10 +105,21 @@ public static class DuelLobbyPanel
 
             panel.AddChildSafely(Heading(locKey));
 
+            // One row per group, so a decision reads as a row of alternatives rather than as
+            // four more entries in a vertical list. This is what makes the three groups look
+            // like three choices.
+            HBoxContainer row = new HBoxContainer
+            {
+                Name = $"SpirePvpRow_{group.Name}",
+                SizeFlagsHorizontal = Control.SizeFlags.ExpandFill
+            };
+            panel.AddChildSafely(row);
+
             foreach (NRunModifierTickbox tickbox in members)
             {
                 tickbox.GetParent()?.RemoveChild(tickbox);
-                panel.AddChildSafely(tickbox);
+                CompactForRow(tickbox);
+                row.AddChildSafely(tickbox);
                 promoted.Add(tickbox);
             }
         }
@@ -122,6 +144,47 @@ public static class DuelLobbyPanel
 
         Log.Warn($"[SpirePvp] duel lobby: promoted {promoted.Count} duel modifier(s) into " +
                  $"{Groups.Length} groups, {tickboxes.Count - promoted.Count} left below");
+    }
+
+    /// <summary>
+    /// Shrinks a tickbox to a chip so several fit on one row.
+    ///
+    /// The widget is list-shaped by construction: `NRunModifierTickbox._Ready` builds one
+    /// `MegaRichTextLabel` holding the modifier's title *and* its full description in a single
+    /// BBCode string. Five of those side by side is a wall of text, which is why the first pass
+    /// left them stacked.
+    ///
+    /// So the label is cut back to the coloured title and the description moves to the hover
+    /// tooltip. **Nothing is lost** — the descriptions are the only place the options explain
+    /// themselves ("A fresh 2 minute bank each when the duel begins"), and they matter most to
+    /// someone meeting the mode for the first time, so they have to remain reachable rather than
+    /// be deleted for tidiness.
+    ///
+    /// Green because every duel modifier registers into `GoodModifiers`, which is the same test
+    /// vanilla applies when it colours these; asked the same way rather than hardcoded, so a
+    /// modifier moved to another list keeps matching its neighbours.
+    /// </summary>
+    private static void CompactForRow(NRunModifierTickbox tickbox)
+    {
+        ModifierModel? modifier = tickbox.Modifier;
+        MegaRichTextLabel? label = tickbox._label;
+        if (modifier == null || label == null)
+        {
+            return;
+        }
+
+        string colour = ModelDb.GoodModifiers.Any(m => m.GetType() == modifier.GetType())
+            ? "green"
+            : ModelDb.BadModifiers.Any(m => m.GetType() == modifier.GetType())
+                ? "red"
+                : "blue";
+
+        label.Text = $"[color={colour}]{modifier.Title.GetFormattedText()}[/color]";
+        tickbox.TooltipText = modifier.Description.GetFormattedText();
+
+        // Share the row evenly, so the options line up as a segmented control instead of each
+        // one taking the width of its own label.
+        tickbox.SizeFlagsHorizontal = Control.SizeFlags.ExpandFill;
     }
 
     /// <summary>
