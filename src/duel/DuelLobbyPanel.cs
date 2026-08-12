@@ -130,17 +130,15 @@ public static class DuelLobbyPanel
             return;
         }
 
-        // Everything not promoted keeps its place in the container, which is directly below this
-        // panel — so a heading is all that is needed to separate them. No collapsing widget: the
-        // vanilla tickbox has no constructor a mod can call (NRunModifierTickbox.Create needs a
-        // ModifierModel and NTickbox has no factory at all), so a toggle would mean authoring a
-        // scene for one checkbox. The ordering is what made the real choices hard to find; the
-        // list being long underneath is a much smaller problem.
+        // Everything not promoted keeps its place in the container, directly below this panel,
+        // behind a heading that collapses it.
         //
-        // Left visible rather than hidden, deliberately: a duel is still a Custom run, so every
-        // one of those modifiers remains legal and some are interesting in a race. This stops
-        // them being the *first* thing the screen says.
-        panel.AddChildSafely(Heading("SPIREPVP_LOBBY.advanced"));
+        // Collapsed by default: the three groups above *are* the match, and the rest is a long
+        // list of run modifiers that has nothing to do with configuring a duel. Still reachable
+        // rather than removed, because a duel is genuinely a Custom run underneath and every one
+        // of those modifiers remains legal — some are interesting in a race.
+        panel.AddChildSafely(CollapsibleHeading("SPIREPVP_LOBBY.advanced",
+                                                tickboxes.Except(promoted).ToList()));
 
         Log.Warn($"[SpirePvp] duel lobby: promoted {promoted.Count} duel modifier(s) into " +
                  $"{Groups.Length} groups, {tickboxes.Count - promoted.Count} left below");
@@ -179,7 +177,19 @@ public static class DuelLobbyPanel
                 ? "red"
                 : "blue";
 
-        label.Text = $"[color={colour}]{modifier.Title.GetFormattedText()}[/color]";
+        // Under a "Race clock" heading, a chip reading "Race Clock: 10 min" says it twice — and
+        // the repetition costs the width that made the row cramped. So chips prefer a `.short`
+        // label ("10 min") where one exists.
+        //
+        // The full title is left alone rather than shortened at the source, because it is right
+        // everywhere else: in the top bar during a run there is no heading above it, and "10 min"
+        // on its own does not say *which* clock. Same modifier, two contexts, two names.
+        LocString shortLabel = new LocString("modifiers", modifier.Id.Entry + ".short");
+        string title = shortLabel.Exists()
+            ? shortLabel.GetFormattedText()
+            : modifier.Title.GetFormattedText();
+
+        label.Text = $"[color={colour}]{title}[/color]";
         tickbox.TooltipText = modifier.Description.GetFormattedText();
 
         // Share the row evenly, so the options line up as a segmented control instead of each
@@ -197,6 +207,47 @@ public static class DuelLobbyPanel
 
     /// <summary>Space above each heading, so the groups read as blocks rather than a run-on list.</summary>
     private const int HeadingTopMargin = 28;
+
+    /// <summary>
+    /// A heading that shows and hides the modifiers beneath it.
+    ///
+    /// Built from the heading label rather than a checkbox, because a mod cannot construct
+    /// vanilla's tickboxes: `NRunModifierTickbox.Create` demands a `ModifierModel` and `NTickbox`
+    /// has no factory at all, so a real toggle widget would mean authoring a scene for one
+    /// control. A `MegaLabel` is a `Control`, so giving it `MouseFilterEnum.Stop` and listening
+    /// for a click costs nothing and keeps the heading styling already established above.
+    ///
+    /// The caret carries the state, since a label cannot show a tick.
+    /// </summary>
+    private static Control CollapsibleHeading(string locKey, List<NRunModifierTickbox> hidden)
+    {
+        MegaLabel label = (MegaLabel)Heading(locKey);
+        string text = Loc(locKey);
+        bool expanded = false;
+
+        void Refresh()
+        {
+            label.Text = (expanded ? "▾  " : "▸  ") + text;
+            foreach (NRunModifierTickbox tickbox in hidden)
+            {
+                tickbox.Visible = expanded;
+            }
+        }
+
+        label.MouseFilter = Control.MouseFilterEnum.Stop;
+        label.Connect(Control.SignalName.GuiInput, Callable.From<InputEvent>(inputEvent =>
+        {
+            if (inputEvent is InputEventMouseButton { Pressed: true } click
+                && click.ButtonIndex == MouseButton.Left)
+            {
+                expanded = !expanded;
+                Refresh();
+            }
+        }));
+
+        Refresh();
+        return label;
+    }
 
     private static Control Heading(string locKey)
     {
