@@ -3,7 +3,7 @@
 Raised by playing, not by testing. Grouped by what they actually are rather than by the order
 they were hit, because several are one cause wearing different clothes.
 
-Status: **§1 campfire break and the log flood fixed; rest outstanding.** Being batched deliberately so the playtest is one
+Status: **campfire break, log flood, and all four information-leak/co-op-surface items fixed. Remaining: lobby, presentation, disconnect, RNG.** Being batched deliberately so the playtest is one
 pass rather than five.
 
 ---
@@ -30,10 +30,10 @@ These are all DESIGN §1's information rules and investigation I6, which predict
 currently surface. Anything that later shows a player panel turns the leak visible. Suppress at
 the broadcast, not at the display."* The race surfaces them.
 
-- **Opponent's cursor visible in combat.**
-- **Can see what the opponent is picking in events.**
-- **Co-op overlay showing each other's health and decks** should not be there.
-- **Collaborative multiplayer events should not appear at all** during a race.
+- **FIXED** — opponent's cursor visible in combat. Suppressed at the broadcast (`RaceNoCoopSurfacesPatch`), along with controller focus and mouse-down.
+- **FIXED** — could see what the opponent was picking in events (`RaceIgnoreRemoteRoomPatch`).
+- **FIXED** — co-op overlay showing each other's health and decks (`RaceNoCoopSurfacesPatch`).
+- **FIXED** — shared events no longer roll at all (`EventModel.IsAllowed`).
 
 Treat as one piece of work: find every co-op peer-input/peer-state surface and gate it on the
 race, at the broadcast where possible.
@@ -42,7 +42,7 @@ race, at the broadcast where possible.
 
 The co-located-party pattern again (`src/race/RaceSolo.cs`), now in rooms we have not swept.
 
-- **Mend should not be a campfire option** — co-op-only rest site option.
+- **FIXED** — Mend is no longer offered at the campfire (`RestSiteOption.Generate`).
 - **Random should be a character choice** in the lobby (missing, not extra).
 
 ## 4. Lobby
