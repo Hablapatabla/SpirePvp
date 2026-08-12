@@ -1,3 +1,4 @@
+using System.Linq;
 using System.Reflection;
 using HarmonyLib;
 using MegaCrit.Sts2.Core.Logging;
@@ -79,7 +80,12 @@ public static class SpirePvpInit
         }
         else
         {
-            Log.Warn($"[{Id}] {applied} patch classes applied cleanly.");
+            // The method count alongside the class count, because they can disagree: a class is
+            // counted as applied when *any* of its patches bind, so a single method attribute that
+            // silently resolves to nothing leaves the reassuring "applied cleanly" line intact
+            // while part of the mod is missing.
+            Log.Warn($"[{Id}] {applied} patch classes applied cleanly "
+                     + $"({harmony.GetPatchedMethods().Count()} methods).");
         }
     }
 }

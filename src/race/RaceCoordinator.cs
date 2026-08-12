@@ -26,6 +26,22 @@ public static class RaceCoordinator
     public static void BeginRace()
     {
         RunManager run = RunManager.Instance;
+
+        // **Beginning a race twice would poison the restore, silently.** The snapshot below is
+        // what EndRace hands back to the duel, and a second pass would capture the values this
+        // method had just written — so the "vanilla" state remembered for the duel becomes
+        // "sync disabled, checksums off", and the duel then runs uncoupled with divergence
+        // detection dead. Nothing would report that; it would surface later as a desync nobody
+        // could account for.
+        //
+        // Cheap to hit: `race on` is a debug command and typing it twice is the obvious mistake,
+        // which is exactly how the arena's double-entry was found.
+        if (_raceActive)
+        {
+            Log.Warn("[SpirePvp] race mode already on — ignoring a second start");
+            return;
+        }
+
         _raceActive = true;
 
         // Remember vanilla's values rather than assuming, so EndRace restores rather than
@@ -156,6 +172,27 @@ public static class RaceCoordinator
     /// mean writing the defaults of two fields BeginRace never filled in — switching checksums
     /// off for a duel that had them on.
     /// </summary>
+    /// <summary>
+    /// Forgets that a race was running, without touching the run — which by this point may be
+    /// half torn down.
+    ///
+    /// **Required by the guard in <see cref="BeginRace"/>, and the reason is the trap this
+    /// project keeps walking into.** `EndRace` is called from exactly two places: the arena, and
+    /// `race off`. A run that ends *before* the arena — abandoned, resigned mid-race, race clock
+    /// expired — reaches neither, so `_raceActive` would stay true for the life of the process
+    /// and the *next* match's `BeginRace` would decline to start a race at all. Silently: the run
+    /// would look normal and simply behave as co-op.
+    ///
+    /// So this is the release half of a static flag whose run is not static, called from
+    /// `DuelMatch.OnRunEnded`. Deliberately **not** `EndRace`: that restores synchronizer state
+    /// through `RunManager.Instance`, which is exactly what teardown is in the middle of
+    /// disposing.
+    /// </summary>
+    public static void Reset()
+    {
+        _raceActive = false;
+    }
+
     public static void EndRace()
     {
         if (!_raceActive)

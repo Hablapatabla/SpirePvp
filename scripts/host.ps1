@@ -7,12 +7,15 @@ Run this in tab 1.
 Skip the build and just launch (useful when you only changed the other client).
 
 .PARAMETER Setup
-First-run mode: launch WITHOUT --fastmp, so the game creates this profile and sits at the
-main menu. Needed once per profile before the settings file exists.
+Accepted and ignored. It used to mean "launch without --fastmp", which is now the default;
+kept so older notes and habits still work.
 
 .PARAMETER Custom
-Boot straight into a Custom multiplayer lobby rather than the standard one. Custom is the
-only lobby that exposes the modifier list, so it is the only way to configure a match.
+Boot straight into a Custom multiplayer lobby - the plain modifier list, without the
+duel-first presentation the Duel menu entry gives you.
+
+.PARAMETER Fast
+Boot straight into a Standard multiplayer host. Quickest way to a lobby.
 
 .PARAMETER Fullscreen
 Leave the display setting alone instead of forcing a tiled window.
@@ -24,6 +27,7 @@ param(
     [switch]$NoBuild,
     [switch]$Setup,
     [switch]$Custom,
+    [switch]$Fast,
     [switch]$Fullscreen,
     [int]$Width = 0
 )
@@ -109,7 +113,12 @@ New-Item -ItemType Directory -Force (Split-Path $log) | Out-Null
 Move-Sts2Log $log
 
 $gameArgs = @("--force-steam=off", "--log-file", $log)
-if (-not $Setup) {
+# Title screen by default - no --fastmp. The flag auto-clicks into a lobby and keeps doing
+# so: returning to the main menu after a run re-runs the auto-navigation, shoving the host
+# straight back into a lobby the moment a match ends, which reads as the mod mishandling the
+# end of a match. M7's Duel menu entry also removed the reason to shortcut into Custom.
+# --force-steam=off already selects ENet, so dropping --fastmp does not restore Steam lobbies.
+if ($Custom -or $Fast) {
     $gameArgs += if ($Custom) { "--fastmp=host_custom" } else { "--fastmp=host_standard" }
 }
 

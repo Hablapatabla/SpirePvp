@@ -3,12 +3,29 @@
 # Builds the mod, then launches the HOST client windowed on the left half of the screen.
 # Run this in tab 1. macOS counterpart of host.ps1.
 #
+# Launches at the TITLE SCREEN by default — no --fastmp. That flag does two things, and only
+# one of them is wanted: it auto-clicks into a lobby, and it *keeps doing so*. Returning to the
+# main menu after a run re-creates it, which re-runs the auto-navigation, so the host is shoved
+# straight back into a lobby the moment a match ends. That reads as the mod mishandling the end
+# of a match, and it cost a round of diagnosis before the args line settled it. The client's
+# --fastmp=join does the same in reverse: it re-fires at a host that has gone, times out, and
+# raises vanilla's "internal error" popup.
+#
+# The shortcut is also no longer needed to configure a match. M7 put a Duel entry on the
+# multiplayer host menu, so the route is title screen -> Multiplayer -> Host -> Duel, and
+# --custom exists only for reaching the plain Custom lobby.
+#
+# Note --force-steam=off already selects the ENet transport, so dropping --fastmp does not put
+# these instances back on Steam lobbies: PlatformType is None whenever Steam is uninitialised,
+# fastmp or no fastmp.
+#
 #   --no-build     Skip the build and just launch (when you only changed the other client).
-#   --setup        First-run mode: launch WITHOUT --fastmp, so the game creates this profile
-#                  and sits at the main menu. Needed once per profile, to accept the mod
-#                  warning, before the settings file exists.
-#   --custom       Boot straight into a Custom multiplayer host, which is the only lobby that
-#                  exposes the modifier list — so it is the one you need to configure a match.
+#   --custom       Boot straight into a Custom multiplayer host — the plain modifier list,
+#                  without the duel-first presentation the Duel entry gives you.
+#   --fast         Boot straight into a Standard multiplayer host. Quickest way to a lobby;
+#                  inherits the post-run behaviour described above.
+#   --setup        Accepted and ignored. It used to mean "launch without --fastmp", which is
+#                  now the default; kept so older notes and habits still work.
 #   --fullscreen   Leave the display setting alone instead of forcing a tiled window.
 #   --width N      Window width in points; height follows at 16:9. Default: half the screen.
 #   --size WxH     Exact window size in points, overriding --width.
@@ -23,12 +40,13 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 # shellcheck source=sts2.sh
 . "$SCRIPT_DIR/sts2.sh"
 
-no_build=0; setup=0; fullscreen=0; width=0; size=""; pos=""; custom=0
+no_build=0; fullscreen=0; width=0; size=""; pos=""; custom=0; fast=0
 while [ $# -gt 0 ]; do
     case "$1" in
         --no-build)   no_build=1 ;;
-        --setup)      setup=1 ;;
+        --setup)      ;;  # now the default; see the header
         --custom)     custom=1 ;;
+        --fast)       fast=1 ;;
         --fullscreen) fullscreen=1 ;;
         --width)      width="${2:-}"; shift ;;
         --size)       size="${2:-}"; shift ;;
@@ -100,12 +118,10 @@ mkdir -p "$(dirname "$log")"
 sts2_rotate_log "$log"
 
 args=(--force-steam=off --log-file "$log")
-if [ "$setup" -eq 0 ]; then
-    if [ "$custom" -eq 1 ]; then
-        args+=(--fastmp=host_custom)
-    else
-        args+=(--fastmp=host_standard)
-    fi
+if [ "$custom" -eq 1 ]; then
+    args+=(--fastmp=host_custom)
+elif [ "$fast" -eq 1 ]; then
+    args+=(--fastmp=host_standard)
 fi
 
 echo "Launching HOST (log: $log)"

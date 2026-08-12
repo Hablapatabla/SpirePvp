@@ -632,8 +632,26 @@ mechanic. Note `HittableEnemies` is **not** patchable — it has no acting-playe
   playtested first; simultaneous turn-based is a supported alternative to be built and tried
   rather than a fallback. Decide from play, not from argument. If both hold up, ship both as
   a lobby option — they are different games and people will want different ones.
-- **Co-op-only cards** (ally-targeting) in the duel pool: probably ban at draft/reward
-  level during the race; harmless mechanically.
+- **Co-op-only cards** — **DECIDED 2026-08-12: banned. A PvP run is offered singleplayer
+  content.** No longer a knob. The engine's own `CardMultiplayerConstraint.MultiplayerOnly` set
+  (Beacon Of Hope, Gang Up, Blade Symphony and some forty more) exists to be offered when there
+  is an ally to point it at, and in a race there never is — so an ally-targeting card is a dead
+  draft pick occupying a reward slot.
+  - Implemented by `RaceNoCoopCardsPatch`, at the three places the engine decides this
+    independently: `CardFactory.FilterForPlayerCount` (card rewards and shop stock),
+    `CardPoolModel.GetUnlockedCards` (in-combat generation, Scroll Boxes, the character-cards
+    modifier) and `MassiveScroll.IsAllowed` (the one relic whose *content* is co-op-only, so it
+    has to not be offered rather than be filtered down to nothing).
+  - **A generation-level ban is sufficient, confirmed by sweep 2026-08-12.** Nothing outside
+    those paths introduces a `MultiplayerOnly` card: no event grants one by name and no starting
+    deck holds one, so such a card cannot reach a PvP deck at all. That is why the duel needs no
+    rule of its own about playing one — there is nothing to play.
+  - The cause is the recurring one: the engine reads `Players.Count > 1` as "playing together".
+    Here it fails as *content* rather than as a crash, which is why it survived so long — a run
+    offering slightly wrong cards still looks like a run.
+  - Deliberately still separate: **relics** whose effect involves an ally (Booming Conch) during
+    the duel itself. That is a balance question about something already owned rather than about
+    what the race offers; parked in `docs/PLAYTEST_LIST.md`.
 - **Potions, powers that reference "monsters"**: audit pass in M2 for mechanics that
   hard-reference `MonsterModel` (e.g. on-kill effects, `ContainsMonster<T>`); most Creature-
   level mechanics are fine.

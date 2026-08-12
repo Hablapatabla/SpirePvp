@@ -1,4 +1,8 @@
+using System.Collections.Generic;
+using System.Linq;
 using HarmonyLib;
+using MegaCrit.Sts2.Core.Logging;
+using MegaCrit.Sts2.Core.Models;
 using MegaCrit.Sts2.Core.Nodes.Screens.CustomRun;
 
 namespace SpirePvp.Duel.Patches;
@@ -48,10 +52,42 @@ public static class DuelLobbyPanelPatch
     ///
     /// A postfix, because Lobby.Modifiers is not populated until InitializeFromMessage has run
     /// inside this method.
+    ///
+    /// **The same omission hides a second half, and it is vanilla's.** Building the panel put the
+    /// right *rows* on the client's screen with every box unticked, so the client could see which
+    /// decisions exist and not which ones the host had made — worse than the plain Custom list it
+    /// replaced, because an unticked row reads as "no clock" rather than "not told yet".
+    /// `InitializeFromMessage` fills `Lobby.Modifiers` from the join response but never calls the
+    /// listener back, so `NCustomRunScreen.ModifiersChanged` — the only thing that ever reaches
+    /// `SyncModifierList` — does not run for a client's opening state. Calling it here is the same
+    /// path the client takes for every *later* change, so there is no second notion of "apply the
+    /// host's modifiers" to keep in step.
+    ///
+    /// Vanilla's own guard inside it is the reason this is safe to call unconditionally:
+    /// `SyncModifierList` throws in host and singleplayer mode, and `ModifiersChanged` only
+    /// reaches it when the net service is a client — which, inside a postfix on
+    /// `InitializeMultiplayerAsClient`, it is by construction.
     /// </summary>
     [HarmonyPatch(typeof(NCustomRunScreen), nameof(NCustomRunScreen.InitializeMultiplayerAsClient))]
     [HarmonyPostfix]
-    public static void AfterClientJoined(NCustomRunScreen __instance) => Refresh(__instance);
+    public static void AfterClientJoined(NCustomRunScreen __instance)
+    {
+        // Ticks the boxes to match the host. Our own postfix on ModifiersChanged fires from this
+        // and builds the panel; Refresh below is called anyway rather than relying on that, since
+        // both are idempotent and one of them running is not worth reasoning about.
+        __instance.ModifiersChanged();
+
+        Refresh(__instance);
+
+        // What the client believes it agreed to, in its own log. An unticked row and a row nobody
+        // told the client about look identical on screen, so the distinction has to be written
+        // down somewhere — and the modifiers are the match, so a client showing the wrong ones is
+        // two people playing under different rules without either of them being told.
+        List<ModifierModel> ticked = __instance._modifiersList?.GetModifiersTickedOn()
+                                     ?? new List<ModifierModel>();
+        Log.Warn("[SpirePvp] duel lobby: joined with "
+                 + $"{string.Join(", ", ticked.Select(m => m.Id.Entry))}");
+    }
 
     private static void Refresh(NCustomRunScreen __instance)
     {

@@ -53,14 +53,56 @@ public static class DuelHostMenuPatch
             return;
         }
 
-        if (custom.Duplicate() is not NSubmenuButton duel)
+        // **Signals are deliberately not duplicated.** Every connection an `NClickableControl`
+        // relies on is made in `ConnectSignals` as `Callable.From(<instance method>)` — a managed
+        // delegate bound to *that* button. Godot cannot remap a callable it cannot introspect, so
+        // any copied connection would drive the original Custom button from the clone's events.
+        // `UseInstantiation` is kept: it is what makes the clone come from the button's own scene
+        // rather than a bare property copy, which is what keeps the scene-unique names (`%Title`,
+        // `%Description`) resolving against an owner inside the clone.
+        Node.DuplicateFlags flags = Node.DuplicateFlags.Groups
+                                    | Node.DuplicateFlags.Scripts
+                                    | Node.DuplicateFlags.UseInstantiation;
+
+        if (custom.Duplicate((int)flags) is not NSubmenuButton duel)
         {
             Log.Error("[SpirePvp] duel menu: cloning the Custom button did not produce a button");
             return;
         }
 
         duel.Name = "DuelButton";
+
+        // **The hover glow lives in a ShaderMaterial, and a duplicate can share it by reference.**
+        // `NSubmenuButton.ConnectSignals` caches `BgPanel.Material` as `_hsv` and every hover
+        // tween writes its `v` parameter directly, so two buttons holding one material are one
+        // button as far as illumination is concerned: hovering Duel lights Custom, and moving
+        // between them leaves two instances tweening the same parameter against each other, which
+        // is what "the hover is unresponsive" looks like from the outside.
+        //
+        // Done **before** the clone enters the tree, because `_hsv` is resolved in `ConnectSignals`
+        // during `_Ready` — replacing the material afterwards would leave the cached reference
+        // pointing at the shared one and change nothing visible.
+        Control? customBg = custom.GetNodeOrNull<Control>("BgPanel");
+        Control? duelBg = duel.GetNodeOrNull<Control>("BgPanel");
+        bool sharedMaterial = customBg?.Material != null
+                              && ReferenceEquals(customBg.Material, duelBg?.Material);
+        if (sharedMaterial && duelBg != null)
+        {
+            duelBg.Material = (Material)duelBg.Material.Duplicate();
+        }
+
         parent.AddChildSafely(duel);
+
+        // The clone is the one piece of this mod built by copying a vanilla widget rather than
+        // constructing one, so the things that copying can quietly get wrong are worth stating
+        // outright rather than inferring from how the button behaves. All four have a
+        // presentation-only failure mode, which is exactly the kind this project has learned not
+        // to diagnose from screenshots.
+        Log.Warn($"[SpirePvp] duel menu: clone diagnostics — customScene='{custom.SceneFilePath}', "
+                 + $"bgMaterialWasShared={sharedMaterial}, "
+                 + $"titleResolved={duel._title != null}, iconResolved={duel._icon != null}, "
+                 + $"hoverConnections={duel.GetSignalConnectionList(Control.SignalName.MouseEntered).Count}, "
+                 + $"releaseConnections={duel.GetSignalConnectionList(NClickableControl.SignalName.Released).Count}");
 
         // Directly after Custom, so the four read as one list rather than an appendix.
         parent.MoveChildSafely(duel, custom.GetIndex() + 1);
@@ -114,13 +156,22 @@ public static class DuelHostMenuPatch
 
         // SetIconAndLocalization does not touch the icon despite its name — without this the
         // clone keeps Custom's texture.
-        if (ResourceLoader.Exists(IconPath))
+        //
+        // `_icon` is resolved in `ConnectSignals` during `_Ready`, so it is only populated because
+        // the clone is already in the tree by this point. Guarded rather than assumed: the whole
+        // reason the diagnostics above exist is that a clone can arrive with its scene-relative
+        // lookups unresolved, and an NRE thrown out of a menu patch is a worse way to find out.
+        if (!ResourceLoader.Exists(IconPath))
         {
-            duel._icon.Texture = PreloadManager.Cache.GetTexture2D(IconPath);
+            Log.Warn($"[SpirePvp] duel menu: {IconPath} missing, keeping the cloned icon");
+        }
+        else if (duel._icon == null)
+        {
+            Log.Error("[SpirePvp] duel menu: the clone has no Icon node; it keeps Custom's art");
         }
         else
         {
-            Log.Warn($"[SpirePvp] duel menu: {IconPath} missing, keeping the cloned icon");
+            duel._icon.Texture = PreloadManager.Cache.GetTexture2D(IconPath);
         }
 
         Log.Warn("[SpirePvp] duel menu: Duel entry added to the multiplayer host menu");

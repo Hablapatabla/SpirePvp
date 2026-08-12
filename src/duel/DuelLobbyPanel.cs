@@ -2,6 +2,7 @@ using System.Collections.Generic;
 using System.Linq;
 using Godot;
 using MegaCrit.Sts2.Core.Assets;
+using MegaCrit.Sts2.Core.Entities.UI;
 using MegaCrit.Sts2.Core.Helpers;
 using MegaCrit.Sts2.Core.Localization;
 using MegaCrit.Sts2.Core.Nodes.CommonUi;
@@ -91,7 +92,7 @@ public static class DuelLobbyPanel
         container.AddChildSafely(panel);
         container.MoveChildSafely(panel, 0);
 
-        BuildPresetRow(panel, list);
+        BuildPresetRow(panel, list, CanEditModifiers(screen));
 
         List<NRunModifierTickbox> promoted = new List<NRunModifierTickbox>();
 
@@ -165,7 +166,24 @@ public static class DuelLobbyPanel
     /// custom modifier the host had chosen — a preset would quietly wipe the rest of the lobby.
     /// So the current selection is read back, its clocks dropped, and the preset's added.
     /// </summary>
-    private static void BuildPresetRow(Control panel, NCustomRunModifiersList list)
+    /// <summary>
+    /// Whether this screen's modifiers are the local player's to change.
+    ///
+    /// Asked as "may I call SetTickedModifiers", because that is the question the preset chips
+    /// actually have — and it is asked the way vanilla answers it, since `SetTickedModifiers`
+    /// *throws* in any mode but these two. A client that clicked a preset would have taken an
+    /// `InvalidOperationException` out of a lobby widget.
+    ///
+    /// Not "is this a client", which would be the correlate rather than the condition: a lobby
+    /// loaded from a multiplayer save is `Load` mode, is not a client, and cannot change
+    /// modifiers either.
+    /// </summary>
+    private static bool CanEditModifiers(NCustomRunScreen screen)
+    {
+        return screen._uiMode is MultiplayerUiMode.Singleplayer or MultiplayerUiMode.Host;
+    }
+
+    private static void BuildPresetRow(Control panel, NCustomRunModifiersList list, bool canEdit)
     {
         Heading(panel, "SPIREPVP_LOBBY.preset");
 
@@ -190,6 +208,17 @@ public static class DuelLobbyPanel
 
             chips.Add(chip);
             _presetChips.Add((chip, race.GetType(), duel.GetType()));
+
+            if (!canEdit)
+            {
+                // Greyed and inert, exactly as vanilla leaves its own tickboxes for a client
+                // (`NCustomRunModifiersList.Initialize` disables them; `NRunModifierTickbox`
+                // greys itself in OnDisable). The chips still *display*, because showing the
+                // client which time control the host chose is the entire point of the row —
+                // IsTicked only swaps the tick images and works fine while disabled.
+                chip.Disable();
+                continue;
+            }
 
             chip.Connect(NTickbox.SignalName.Toggled, Callable.From<NTickbox>(box =>
             {
@@ -459,18 +488,29 @@ public static class DuelLobbyPanel
         // first several hundred errors of the playtest, which is a real cost when the log is the
         // primary diagnostic tool for this project.
         //
-        // Borrowed from the tickboxes we are sitting among rather than loaded separately, so the
-        // headings inherit whatever the screen is themed with instead of pinning a font of their
-        // own.
-        // Added before the font is resolved, because an override can only be copied from the
-        // theme once the node is in the tree to inherit one.
-        parent.AddChildSafely(label);
-
-        Font? font = label.GetThemeFont("font");
+        // **The override has to be in place before the node enters the tree**, and getting that
+        // ordering wrong is why this was only *mostly* fixed: `MegaLabel._Ready` is where the
+        // assertion lives, `_Ready` runs inside `AddChild`, so setting the override on the line
+        // after still left one throw per heading — down from hundreds, which looked enough like
+        // success to pass for it. Four errors per lobby, every lobby.
+        //
+        // So the font is read from the **parent**, which is already in the tree and already
+        // themed, rather than from the label, which cannot inherit a theme it has not joined yet.
+        // Same value either way; only the timing differs. Borrowed from the widgets we are
+        // sitting among rather than loaded separately, so the headings match the screen instead
+        // of pinning a font of their own.
+        Font? font = parent.GetThemeFont(ThemeConstants.Label.Font);
         if (font != null)
         {
-            label.AddThemeFontOverride("font", font);
+            label.AddThemeFontOverride(ThemeConstants.Label.Font, font);
         }
+        else
+        {
+            Log.Warn("[SpirePvp] duel lobby: no theme font on the modifier list; "
+                     + "headings will throw once each in MegaLabel._Ready");
+        }
+
+        parent.AddChildSafely(label);
 
         label.SetFontSize(HeadingFontSize);
 

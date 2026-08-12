@@ -6,9 +6,18 @@
 # Does not build: host.sh already did, and two concurrent builds fight over the same
 # output files.
 #
-#   --setup        First-run mode: launch WITHOUT --fastmp, so the game creates this profile
-#                  and sits at the main menu. Needed once, because --clientId is a different
-#                  save profile from the host's.
+# Launches at the TITLE SCREEN by default — no --fastmp. See host.sh for the full reasoning;
+# the client's half of it is that --fastmp=join re-fires every time the main menu is rebuilt,
+# so ending a match sends it straight back into a join attempt against a host that has gone,
+# which times out and raises vanilla's "internal error" popup. Joining by hand also removes the
+# ordering trap the shortcut created: an automatic join that lands before the host has reached
+# its lobby fails as a bare "[ENetClient] Connection timed out!", which the host log can
+# neither confirm nor deny.
+#
+#   --join         Join automatically on launch, as this used to. Only useful when the host is
+#                  already sitting in a lobby.
+#   --setup        Accepted and ignored — it used to mean "launch without --fastmp", which is
+#                  now the default.
 #   --client-id N  Net id and save profile for this instance. Default 1001.
 #   --fullscreen   Leave the display setting alone instead of forcing a tiled window.
 #   --width N      Window width in points; height follows at 16:9. Default: half the screen.
@@ -22,10 +31,11 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 # shellcheck source=sts2.sh
 . "$SCRIPT_DIR/sts2.sh"
 
-setup=0; client_id=1001; fullscreen=0; width=0; size=""; pos=""
+join=0; client_id=1001; fullscreen=0; width=0; size=""; pos=""
 while [ $# -gt 0 ]; do
     case "$1" in
-        --setup)      setup=1 ;;
+        --join)       join=1 ;;
+        --setup)      ;;  # now the default; see the header
         --client-id)  client_id="${2:-}"; shift ;;
         --fullscreen) fullscreen=1 ;;
         --width)      width="${2:-}"; shift ;;
@@ -46,7 +56,7 @@ mkdir -p "$(dirname "$log")"
 sts2_rotate_log "$log"
 
 args=(--force-steam=off "--clientId=$client_id" --log-file "$log")
-[ "$setup" -eq 1 ] || args+=(--fastmp=join)
+[ "$join" -eq 0 ] || args+=(--fastmp=join)
 
 echo "Launching CLIENT (log: $log)"
 exec "$(sts2_exe)" "${args[@]}"

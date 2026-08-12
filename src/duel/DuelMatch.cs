@@ -136,6 +136,9 @@ public static class DuelMatch
     {
         DuelSession.Reset();
         DuelClockService.Reset();
+        DuelArena.Reset();
+        RaceCoordinator.Reset();
+        DuelDisconnect.Reset();
         DuelFlag.Disarm();
         DuelEntry.Disarm();
         DuelRendezvous.Disarm();

@@ -188,9 +188,23 @@ public class DuelConsoleCmd : AbstractConsoleCmd
         return new CmdResult(success: true, "Opponent's deck open — press START DUEL when ready.");
     }
 
-    /// <summary>Skips the entry screen and drops straight into the arena. Debug shortcut.</summary>
+    /// <summary>
+    /// Skips the entry screen and drops straight into the arena. Debug shortcut.
+    ///
+    /// **Typing it twice used to brick the run**, which is a debug command doing far more damage
+    /// than a debug command should: the second entry built a second `CombatRoom` while the first
+    /// was still starting, and the combat froze with a stack trace naming the music controller.
+    /// `DuelArena.Enter` refuses the second entry now — the guard is there rather than here
+    /// because the rendezvous reaches the same call without anyone typing — and this reports it
+    /// as the no-op it is.
+    /// </summary>
     private static CmdResult StartDuelRoomImmediately()
     {
+        if (DuelArena.HasEntered)
+        {
+            return new CmdResult(success: true, "Already in the duel arena — nothing to do.");
+        }
+
         return DuelArena.Enter()
             ? new CmdResult(success: true, "Entering the duel arena…")
             : new CmdResult(success: false, "Not in a run — start a multiplayer run first.");

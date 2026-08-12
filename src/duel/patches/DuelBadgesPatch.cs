@@ -2,6 +2,7 @@ using HarmonyLib;
 using MegaCrit.Sts2.Core.Commands;
 using MegaCrit.Sts2.Core.Helpers;
 using MegaCrit.Sts2.Core.Logging;
+using MegaCrit.Sts2.Core.Nodes.GodotExtensions;
 using MegaCrit.Sts2.Core.Nodes.Screens.GameOverScreen;
 using SpirePvp.Net;
 
@@ -59,8 +60,28 @@ public static class DuelBadgesPatch
             // Vanilla's cadence: a beat before the first badge, then one at a time.
             await Cmd.Wait(0.25f);
 
+            // **Leaving the screen mid-animation frees everything underneath this method.**
+            // Each await here is a point where the player may have already clicked through to the
+            // menu, and the continuation then walks a disposed container: measured as
+            // `ObjectDisposedException: 'Godot.HBoxContainer'` out of `GetChildren`, caught by the
+            // handler below and reported as "duel badges failed" — which reads like the badge
+            // logic being broken rather than the screen simply being gone.
+            //
+            // Vanilla's own `AnimateScoreBar` throws the same exception on the same click, so
+            // this is the shape of the screen rather than a mistake of ours; ours is merely the
+            // half we can stop logging.
+            if (!screen.IsValid() || !screen._badgeContainer.IsValid())
+            {
+                return;
+            }
+
             foreach (NBadge badge in screen._badgeContainer.GetChildren().OfType<NBadge>())
             {
+                if (!badge.IsValid())
+                {
+                    return;
+                }
+
                 await badge.AnimateIn();
             }
         }

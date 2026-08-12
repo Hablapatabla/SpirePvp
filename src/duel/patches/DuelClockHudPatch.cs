@@ -26,6 +26,12 @@ public static class DuelClockHudPatch
     {
         DuelClockService.Tick();
 
+        // Piggybacked on the clock's tick rather than given a timer of its own: this is the
+        // one hook already guaranteed to run throughout a match, and the watchdog measures
+        // wall-clock silence, so an irregular cadence only delays detection rather than
+        // distorting it.
+        DuelDisconnect.Tick();
+
         string? text = DuelClockService.FormatForHud();
         if (text != null)
         {

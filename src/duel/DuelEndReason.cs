@@ -36,4 +36,18 @@ public static class DuelEndReason
 
     /// <summary>Both players agreed to a draw.</summary>
     public const int AgreedDraw = 4;
+
+    /// <summary>
+    /// The opponent's connection went away and did not come back — a loss for whoever dropped.
+    ///
+    /// **Appended rather than inserted**, like every code here: these are positional on the wire
+    /// and renumbering one silently changes what an older build hears.
+    ///
+    /// Distinct from <see cref="Resign"/> on purpose even though both end "they stopped playing".
+    /// A resignation is a decision and the connection deliberately stays up; a disconnect is an
+    /// accident, arrives through an entirely different route, and is the one ending the loser may
+    /// never see — so the wording, and any future reconnect window, has to be able to tell them
+    /// apart.
+    /// </summary>
+    public const int Disconnect = 5;
 }

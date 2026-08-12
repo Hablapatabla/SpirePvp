@@ -88,7 +88,7 @@ The live session writes to `logs/godot.log`; it only rotates to a timestamped fi
 this machine). Same workflow, same per-instance logs:
 
 ```
-./scripts/host.sh --custom      # tab 1: builds, re-exports the .pck if assets changed, launches left
+./scripts/host.sh               # tab 1: builds, re-exports the .pck if assets changed, launches left
 ./scripts/client.sh             # tab 2: launches right
 ./scripts/check-log.sh --errors # after the run
 ./scripts/stop.sh               # kill both
@@ -121,10 +121,13 @@ the size to AppKit, so a settings file saying `852` yields a 426-point window on
 (3456/1728 = 2 here); override with `STS2_SCALE` if it ever guesses wrong. The default tiling
 is half the screen each — 852×479 points, written as 1704×958 pixels.
 
-`--custom` on the host boots into a **Custom** multiplayer lobby rather than the standard one.
-That matters: Custom is the only lobby exposing the modifier list, so it is the only way to
-configure a match (turn model + the two clocks). `--setup` launches with no `--fastmp` at all,
-which is what you need once per profile to accept the mod-loading warning.
+Both launchers stop at the **title screen**: they pass no `--fastmp`, because that flag re-fires
+every time the main menu is rebuilt and so throws you back into a lobby (host) or a doomed join
+(client) the moment a match ends. Configure a match through the **Duel** entry on the
+multiplayer host menu. Opt back into the shortcuts with `--custom` (plain Custom lobby),
+`--fast` (standard host) and `--join` (client). `--setup` is now a no-op, since launching
+without `--fastmp` is what it asked for and is the default; it is still the mode you want the
+first time a profile runs, to accept the mod warning.
 
 Profiles `1` (host) and `1001` (client) are separate save directories under
 `~/Library/Application Support/SlayTheSpire2/default/`, selected by `--clientId`.

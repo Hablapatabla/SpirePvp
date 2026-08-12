@@ -59,6 +59,17 @@ public static class DuelEntry
     /// <summary>Opens the opponent's deck as the duel's entry screen.</summary>
     public static bool Open()
     {
+        // **Reopening would silently un-confirm you.** The screen is a two-sided ready gate, and
+        // a second Open resets `_localReady` and `_opponentReady` and stacks another card-select
+        // screen on top — so a player who had already pressed START DUEL, or whose opponent had,
+        // would be back to waiting with no sign of why. `duel start` typed twice is the obvious
+        // way in; `DuelRendezvous` opening it as an arrival message lands is the one nobody types.
+        if (IsChoosing)
+        {
+            Log.Warn("[SpirePvp] duel entry screen already open — ignoring a second open");
+            return true;
+        }
+
         // Openable from two places now, and they differ in what exists. The arena rendezvous
         // opens this from the *map*, where there is no combat at all; the legacy `duel start`
         // path opens it mid-combat. So resolve the opponent from the combat when there is one

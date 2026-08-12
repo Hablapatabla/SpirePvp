@@ -29,6 +29,44 @@ public static class DuelArena
     /// combat setup evaluates the win condition against zero enemies, and without the veto
     /// from DuelWinConditionPatch already in place the duel would end the instant it began.
     /// </summary>
+    /// <summary>
+    /// Whether the arena has already been entered this run.
+    ///
+    /// **Entering twice breaks the run**, and it does so a long way from the cause: the second
+    /// call builds a second `CombatRoom` and enters it while the first is still starting, so the
+    /// turn loop dies mid-setup — measured as `NRunMusicController.UpdateTrack` throwing a
+    /// `NullReferenceException` inside `StartCombatInternal`, then
+    /// `Combat #1 turn loop died while its combat is in progress; the combat is stuck until the
+    /// room is restarted`. Nothing in that trace mentions the arena, and the run simply stops
+    /// responding.
+    ///
+    /// **The guard belongs here rather than in the console command**, because `duel now` is only
+    /// the route that found it. `DuelRendezvous` enters the arena off `DuelStartMessage`, and a
+    /// message arriving twice — or a player clicking through as one lands — is the same call
+    /// again with nobody typing anything. Guard on the condition, not on each route in.
+    ///
+    /// Reset in <see cref="DuelMatch.OnRunEnded"/>, without which the *second* match in one
+    /// process could never enter the arena at all: mod state is static, the run it belongs to is
+    /// not.
+    /// </summary>
+    private static bool _entered;
+
+    /// <summary>
+    /// Whether this run has already entered the arena.
+    ///
+    /// Exposed so callers can tell the two reasons <see cref="Enter"/> returns false apart. They
+    /// are not interchangeable: "no run in progress" and "already duelling" are opposite states,
+    /// and a command that reports the first when the second is true sends the reader off looking
+    /// for a run that is right in front of them.
+    /// </summary>
+    public static bool HasEntered => _entered;
+
+    /// <summary>Forgets the arena, so the next match in this process can enter its own.</summary>
+    public static void Reset()
+    {
+        _entered = false;
+    }
+
     public static bool Enter()
     {
         RunManager? runManager = RunManager.Instance;
@@ -38,6 +76,14 @@ public static class DuelArena
             Log.Warn("[SpirePvp] cannot enter duel arena — no run in progress");
             return false;
         }
+
+        if (_entered)
+        {
+            Log.Warn("[SpirePvp] already in the duel arena — ignoring a second entry");
+            return false;
+        }
+
+        _entered = true;
 
         // Before the room is constructed. See the note on MoveRunToArenaCoord: the room takes its
         // Id from NextRoomId in its constructor, and moving to the coord is what resets that

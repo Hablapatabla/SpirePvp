@@ -1,4 +1,4 @@
-# Handoff — state of the mod as of 2026-08-11 (Windows → Mac)
+# Handoff — state of the mod as of 2026-08-12
 
 Written for someone (human or agent) picking this up cold, on any OS. Everything below was
 built and playtested against **Slay the Spire 2 v0.110.1**, on two local clients connected
@@ -22,6 +22,7 @@ flags, console commands and gotchas below are OS-neutral unless marked.
 | **M5** race phase | **working, playtested 2026-08-05.** Two clients race the same seeded map independently — own combats, own rewards, advancing at their own pace — with mirrored RNG and a run-long clock |
 | **M6** full loop | **done, playtested through 2026-08-11.** Lobby modifiers → race → arena node → rendezvous → deck review → duel → result screen, with checksums live, split race/duel clocks and Neow intact. Plus resignation and agreed draws. Result-screen stats and badges reach the screen and compare correctly. The 2026-08-11 sweep closed the race phase's remaining rough edges — rest site, treasure chest, shop, map portraits, the loser's result screen and opponent summons. Remaining: rematch |
 | **M7** | **done, playtested 2026-08-11.** A **Duel** entry beside Standard/Daily/Custom opens a lobby retitled "Duel": Blitz/Rapid/No-clock presets, then the three real decisions as headed rows of chips, then the other custom-run modifiers behind a collapsed caret. Re-dresses `NCustomRunScreen` rather than replacing it |
+| **Disconnects** | **done, playtested 2026-08-12.** A dropped opponent no longer evaporates a match: whoever remains is shown "Opponent disconnected — the match is yours in 5…" and wins. Four routes, all tested — an announced quit, heartbeat silence, our own link dying, and a deliberate leave. Rejoining is a separate milestone and deliberately not built |
 | **Shipping** | **done.** `git clone && dotnet build` is a complete install — the `.pck` is committed, so no Godot is needed. README has a step-by-step for a non-technical Windows player. Debug builds stamp the git commit into the mod version, so the engine's mod-match gate enforces "same build" rather than us asking. Coexistence verified with a Workshop mod (RegentFX): patches clean on both clients and VFX rendering in a duel. **The `.pck` is committed, so no Godot is needed to build — only to re-export after changing something under `SpirePvp/`, and the exported pack must then be committed too** |
 
 A duel is fully playable end to end today: enter the arena, fight with real cards and
@@ -78,7 +79,7 @@ abandons the rest, so one typo disables an arbitrary subset while the mod still 
 still logs "loaded". `SpirePvpInit` therefore applies each patch class independently and logs
 a count. **On every launch, confirm the log says `N patch classes applied cleanly`** — if it
 says `PATCH FAILED`, some of the mod is not running and in-game results mean nothing.
-**58 as of this handoff.** The count is per *class*, not per patch: a class holding
+**60 as of this handoff.** The count is per *class*, not per patch: a class holding
 several patch methods still counts once, so grouping patches by concern does not move it.
 
 **Harmony resolves `[HarmonyPatch(typeof(X))]` against methods declared on `X` only.** Naming
@@ -103,6 +104,28 @@ disconnected service for 21 seconds — 46 error lines on the host, a matching "
 handlers are registered" on the client. `DuelClockService.Tick` now stops on any run that is no
 longer `IsInProgress`, and the host's broadcast additionally checks `NetService.IsConnected`.
 Guard on the *condition*, not on each new route out; there is always another route.
+
+**One line of that survives on purpose, and it is not the same bug.** Measured on an agreed draw
+2026-08-12: **exactly one** `Received message of type SpirePvp.Net.ClockSyncMessage, but no
+message handlers are registered` on the client, none on the host — down from 46. It is a packet
+already *in flight* when the result was declared: `DuelResult.Declare` stops the clocks before
+anything else, so no sync is sent after the match ends, but a sync sent a fraction of a second
+earlier still lands after the receiver has torn its run down. No sender-side guard can close that
+window, because at send time the message was correct.
+
+The receive-side fix — keeping the `ClockSyncMessage` handler armed past run teardown, since the
+connection deliberately outlives the run — was considered and **rejected**: handler arming and
+release is the single thing that has bitten this project most (five times), and trading a
+documented one-line residue for a change in that lifecycle is a bad bet. If this ever grows past
+one line per match, that is a real regression and worth reopening; one line is the expected cost.
+
+**ENet does not report a dropped peer, so "the opponent left" is not an event you can wait
+for.** `ENetHost.Update` answers the transport's own `Disconnect` event with a bare `continue`.
+Only an application-level `Disconnection` packet — a polite quit through the menus — is reported;
+a killed process or a dead link is silent forever. The Steam transport does report drops, so this
+bites exactly where all the testing happens. Anything that must notice an absent peer has to
+measure it: `ConnectionStats.LastReceivedTime` is the signal vanilla itself uses, and
+`DuelDisconnect` acts on 30 seconds of silence.
 
 **Test on the same path, not divergent ones.** The two runs share a seed and therefore a map,
 and `RunLocationTargetedMessageBuffer` gates on **location, not identity** — so two players
@@ -270,9 +293,24 @@ macOS (tab 1 = host, tab 2 = client). **The binary is `Slay the Spire 2`, with s
 
 **macOS: use `scripts/*.sh`** (there is no pwsh on the MacBook) — same workflow as the
 PowerShell set, plus windowed side-by-side tiling, which is not optional there: a fullscreen
-window gets its own Space, so you cannot see both clients at once. `./scripts/host.sh --custom`
-then `./scripts/client.sh`, and `./scripts/check-log.sh --errors` afterwards. Details and the
+window gets its own Space, so you cannot see both clients at once. `./scripts/host.sh` then
+`./scripts/client.sh`, and `./scripts/check-log.sh --errors` afterwards. Details and the
 points-vs-backing-pixels trap in `docs/MAC_SETUP.md`.
+
+**Both launchers open the title screen and stop there, deliberately (changed 2026-08-12).**
+They used to pass `--fastmp`, and that flag does two things where only one was wanted: it
+auto-clicks into a lobby, and it *keeps doing so*. Returning to the main menu after a run
+rebuilds it, which re-runs the auto-navigation — so the host is shoved back into a lobby the
+instant a match ends, and the client re-attempts a join against a host that has gone, times out,
+and raises vanilla's own malformed popup (`Invalid net error passed to NErrorPopup:
+ConnectionFailureReason None`). Both were reported as the mod mishandling the end of a match;
+both were the flag, and the args line on line 66 of each log is what settled it.
+
+M7 also removed the reason to shortcut in: a match is configured through the **Duel** entry on
+the multiplayer host menu, so the route is title screen → Multiplayer → Host → Duel. Opt back in
+with `--custom`/`-Custom` (plain Custom lobby), `--fast`/`-Fast` (standard host) or
+`--join`/`-Join` on the client. `--setup`/`-Setup` still parse and now do nothing, since what
+they asked for is the default.
 
 **Windows: use the scripts in `scripts/`** — they wrap the same flags and also handle the
 build, the windowing and the mod-consent gate (below). Tab 1 then tab 2:
@@ -286,7 +324,7 @@ execution policies, and 5.1 commonly defaults to `Restricted`, which refuses the
 Either switch shells, or `Set-ExecutionPolicy -Scope CurrentUser RemoteSigned` for 5.1.
 `host.ps1` builds first and aborts the launch if the build fails; `client.ps1` never builds,
 because two concurrent builds fight over the same output files. Flags: `-NoBuild`, `-Custom`
-(the lobby that exposes the modifier list — needed to configure a match), `-Setup`,
+(the plain Custom lobby), `-Fast` (standard host), `-Setup` (now a no-op),
 `-Fullscreen`, `-Width <px>`, `-ClientId <n>`. Verify the run with `.\scripts\check-log.ps1`.
 
 Both launchers **rotate the log** rather than truncating it, keeping the last five runs as
@@ -396,6 +434,22 @@ pack's directory. It looked exactly like malformed JSON in the repo, which is wh
 investigation started; the JSON was fine. **A fresh clone or a `git pull` makes this likely
 rather than rare**, because it refreshes the mtimes that trigger the re-export.
 
+**`dotnet build` copies the committed pack over a freshly exported one.** The csproj copies
+`SpirePvp.pck` from the repo into the mods folder on every build — which is what makes
+`git clone && dotnet build` a complete install, and which also means a build run *after* an
+export silently reverts the mods folder to the committed pack. Hit 2026-08-12, and the fresh
+export was gone before it was noticed. Two things keep it survivable, both worth knowing:
+
+- `host.ps1`/`host.sh` build *first* and re-export *after*, and MSBuild's `Copy` preserves the
+  source's timestamp — so the copied pack keeps the committed one's old mtime, the "is anything
+  under `SpirePvp/` newer" test still fires, and the launchers self-correct.
+- Nothing else does. A bare `dotnet build` followed by a manual launch will run the committed
+  pack whatever you exported a moment ago.
+
+**So after changing anything under `SpirePvp/`, copy the exported pack back into the repo and
+commit it** — otherwise the working tree is right, the game is right until the next build, and
+the thing anyone else clones is neither.
+
 The temp name must end in `.pck` — Godot rejects any other extension outright and exports
 *nothing*, which then silently keeps the stale pack (that mistake cost a round trip too) — and
 must not be `SpirePvp.pck`, since `ModManager` loads exactly
@@ -486,21 +540,34 @@ Keep that split if you extend this.
 
 ## Immediate next step
 
-### Work `docs/PLAYTEST_LIST.md` — six open items, all reproducible solo
+### Start here: three things built but never played
 
-**That playtest happened**, against someone who did not build it, over Steam. It produced fifteen
-items; nine are fixed and six remain, and every one of the six reproduces with two local clients.
-No second person is needed to continue.
+Everything the 2026-08-11 two-player session raised is closed, and disconnect handling is done
+and playtested on every route. What is left from 2026-08-12 is small and needs a screen rather
+than a fix:
 
-Read `docs/PLAYTEST_LIST.md` first — it carries the diagnosis for each open item, not just the
-symptom, and records the two questions that need Lucas's decision rather than a fix (how much of
-the run should be identical, and how disconnects should end a match).
+1. **The result-screen wording**, shortened so it fits on one line. The box under the banner is
+   459px at font 24 — about 38 characters — and several lines ran to 45–58, so they wrapped and
+   looked wrong. Every phrase is now ≤38 characters. Any ending shows it; a resignation is
+   quickest. (The font was *measured* and was never the problem: `font=24 … was font=24`.)
+2. **The badge-teardown guard.** Click off the result screen while the badges are still
+   animating — the log must not say `duel badges failed`.
+3. **The console idempotence guards**, deliberately unplayed at Lucas's request: `duel now`
+   twice should answer "Already in the duel arena", `duel start` twice should not reopen the
+   entry screen, `race on` twice should decline the second.
 
-**The single most useful change to how you test: take the same path.** The two runs share a seed
-and therefore a map, and `RunLocationTargetedMessageBuffer` gates on *location, not identity* —
-so two players on the same coord deliver every message to each other. Same-path play is both the
-most natural way to play and the worst case, and testing divergent paths is why a hundred local
-runs missed the whole family of bugs that first real session found immediately.
+### Then pick a milestone
+
+| Work | Size | Notes |
+|---|---|---|
+| **Rematch** | milestone | The biggest remaining hole in the loop. Scoped under Open Issues below: the run is torn down by result-screen time, so it needs a handshake, a route into a lobby that skips the menu, and teardown ordering that keeps the transport alive across a run boundary |
+| **Per-round damage stats** | medium | The last unfinished piece of DESIGN §6. The result screen has space where the match's own numbers belong, and nothing accumulates damage across the duel |
+| **True rejoin** | milestone | Scoped in `docs/PLAYTEST_LIST.md`. Vanilla's rejoin is half-built and the missing half is the UI; the run-state rule is already decided |
+| **Random as a character choice** | small feature | Deferred with a full scope in `docs/PLAYTEST_LIST.md` |
+| **M8 turn-based** | milestone | On hold until blitz is polished (DESIGN §7) |
+
+**One decision is still Lucas's**, in `docs/PLAYTEST_LIST.md`: whether the two runs should offer
+identical *rolls* or identical *offers*, given that character filtering makes those differ.
 
 ### M7 — the dedicated Duel host menu (done; kept for the reasoning)
 

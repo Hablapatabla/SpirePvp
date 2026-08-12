@@ -33,6 +33,12 @@ committed, so no Godot needed), README has a step-by-step for a non-technical Wi
 and the mod version carries the git commit so the engine's own mod-match gate enforces
 "both on the same build". Verified coexisting with a Workshop mod (RegentFX).
 
+**Disconnects are handled (2026-08-12):** a dropped opponent no longer leaves a match with no
+result — whoever remains gets a five-second notice and the win. Note the finding underneath it,
+because it bites anything that waits on a peer: **ENet never reports a hard drop**
+(`ENetHost.Update` answers the transport's own `Disconnect` event with a bare `continue`), so
+absence has to be *measured* via `ConnectionStats.LastReceivedTime` rather than waited for.
+
 **Remaining:** rematch (deliberately deferred — milestone-sized, not a button; see HANDOFF),
 per-round damage stats on the result screen, and M8's turn-based turn model.
 
@@ -45,8 +51,9 @@ side comparison before suspecting the mechanic. DESIGN §7 has the symptom → c
 - `dotnet build` must stay green; it auto-installs the mod into the local game.
 - **Never use `Harmony.PatchAll`.** It throws on the first bad target and silently abandons the
   rest. `SpirePvpInit` patches per class and logs a count — confirm `N patch classes applied
-  cleanly` in the log on every launch, or in-game results are meaningless. **56 as of
-  2026-08-11.** Note the count is per *class*, not per patch: a class holding several patch
+  cleanly` in the log on every launch, or in-game results are meaningless. **60 as of
+  2026-08-12**, confirmed against a live log (this line said 56 while HANDOFF said 58 — when they
+  disagree, HANDOFF wins, and the log settles it). Note the count is per *class*, not per patch: a class holding several patch
   methods still counts once, so grouping patches by concern does not move it.
 - **The engine assumes the party is standing together, and in a race it is not.** This is the
   single most productive thing to suspect when a race-phase room misbehaves — it has now

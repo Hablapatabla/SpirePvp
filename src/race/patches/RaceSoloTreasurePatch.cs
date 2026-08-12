@@ -5,6 +5,7 @@ using MegaCrit.Sts2.Core.Entities.Players;
 using MegaCrit.Sts2.Core.Hooks;
 using MegaCrit.Sts2.Core.Logging;
 using MegaCrit.Sts2.Core.Multiplayer.Game;
+using MegaCrit.Sts2.Core.Nodes;
 using MegaCrit.Sts2.Core.Nodes.Screens.TreasureRoomRelic;
 using SpirePvp.Duel;
 
@@ -133,6 +134,75 @@ public static class RaceSoloTreasurePatch
     public static bool NoHandsInASoloChest()
     {
         return !DuelSession.IsRaceActive;
+    }
+
+    /// <summary>
+    /// (3a) No hand reaching in to take the relic either.
+    ///
+    /// Suppressing `AnimateIn` is not enough, because the grab is a **second, independent way for
+    /// a hand to appear**. `_Process` normally parks a hidden hand off-screen — it lerps toward
+    /// `_desiredPosition` by `_handAnimateInProgress`, which stays 0 when `AnimateIn` never ran —
+    /// but `GrabRelic` sets `_state = GrabbingRelic`, and `_Process` skips its positioning
+    /// entirely in that state. The hand is then free to tween wherever the grab sends it, so it
+    /// flew in from off-screen, took the relic and left, in a room where no hand had been shown
+    /// and no hand existed as far as the player was concerned.
+    ///
+    /// **`__result` is not optional here.** `GrabRelic` is `async Task` and the caller does
+    /// `tasksToWait.Add(TaskHelper.RunSafely(hand.GrabRelic(holder)))` — a prefix returning false
+    /// without assigning would hand it `null` to await, and the resulting NRE would surface in
+    /// `NTreasureRoomRelicCollection` with no frame for this method at all. That has cost this
+    /// project two multi-session hunts already.
+    ///
+    /// Safe to skip outright: the grab is presentation. What actually awards the relic is the
+    /// loop *after* `await Task.WhenAll(tasksToWait)`, which disables the holder and grants the
+    /// model regardless. The only difference is that the relic is no longer carried off by a hand
+    /// nobody can see.
+    /// </summary>
+    [HarmonyPatch(typeof(NHandImage), nameof(NHandImage.GrabRelic))]
+    [HarmonyPrefix]
+    public static bool NoGrabbingHandInASoloChest(ref Task __result)
+    {
+        if (!DuelSession.IsRaceActive)
+        {
+            return true;
+        }
+
+        __result = Task.CompletedTask;
+        return false;
+    }
+
+    /// <summary>
+    /// (3b) Give the mouse cursor back, because suppressing the hands took it away.
+    ///
+    /// **The chest room hides the real cursor on purpose: in co-op the hand *is* your cursor.**
+    /// `NHandImageCollection.UpdateHandVisibility` animates each hand and then ends with
+    ///
+    ///     CursorManager.SetCursorShown(screenType != NetScreenType.SharedRelicPicking);
+    ///
+    /// — the only place in the entire game, along with its restore in `_ExitTree`, that touches
+    /// cursor visibility at all. So the hand and the cursor are a matched pair, and (3) above
+    /// removed one half of it: the hands never appear, the cursor is still hidden for them, and
+    /// the room is left with no pointer at all. Clicking kept working throughout, which is what
+    /// made it read as a rendering glitch rather than a cursor being deliberately switched off.
+    ///
+    /// Vanilla never meets this because it never has a `Players.Count > 1` run where the hands do
+    /// not show — the same premise the whole race phase keeps breaking, and here it costs a
+    /// pointer rather than a hang.
+    ///
+    /// A postfix so it runs after that assignment, and unconditional within a race: there is no
+    /// state where a racer should lose the cursor in this room, since there is never a hand
+    /// standing in for it.
+    /// </summary>
+    [HarmonyPatch(typeof(NHandImageCollection), nameof(NHandImageCollection.UpdateHandVisibility))]
+    [HarmonyPostfix]
+    public static void KeepTheCursorInASoloChest()
+    {
+        if (!DuelSession.IsRaceActive)
+        {
+            return;
+        }
+
+        NGame.Instance?.CursorManager?.SetCursorShown(true);
     }
 
     /// <summary>
