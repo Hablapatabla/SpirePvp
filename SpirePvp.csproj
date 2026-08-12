@@ -61,9 +61,53 @@
         <Publicize Include="sts2" IncludeVirtualMembers="false" IncludeCompilerGeneratedMembers="false"/>
     </ItemGroup>
 
-    <Target Name="CopyToModsFolder" AfterTargets="PostBuildEvent">
+    <!--
+      Stamps the build's git commit into the mod version.
+
+      The engine refuses a connection when the two players' gameplay-affecting mods differ, and
+      it compares `id + "-" + version` (ModManager.GetGameplayRelevantModNameList). With a static
+      version every build reported "SpirePvp-0.1.0", so two *different commits* passed that gate
+      — and the only thing left between them was the ModelDb hash, which is unchanged by most of
+      our commits. Two mismatched builds could therefore connect and then disagree, because net
+      message ids are positional. The README already promised "you must both be on the same
+      commit"; this is what makes the engine enforce it rather than us asking nicely.
+
+      Marked -dirty when the tree has uncommitted changes, since a shared commit hash says
+      nothing about code only one side has.
+
+      Written to obj/ rather than over the tracked file, so building never dirties the tree it
+      is reporting on. Falls back to the plain manifest when git is unavailable — the mod still
+      works, it just loses the guarantee.
+    -->
+    <Target Name="StampModVersion" BeforeTargets="CopyToModsFolder">
+        <Exec Command="git -C &quot;$(MSBuildProjectDirectory)&quot; rev-parse --short HEAD"
+              ConsoleToMSBuild="true" ContinueOnError="true" StandardOutputImportance="low">
+            <Output TaskParameter="ConsoleOutput" PropertyName="GitCommit"/>
+            <Output TaskParameter="ExitCode" PropertyName="GitExitCode"/>
+        </Exec>
+        <Exec Command="git -C &quot;$(MSBuildProjectDirectory)&quot; status --porcelain"
+              ConsoleToMSBuild="true" ContinueOnError="true" StandardOutputImportance="low">
+            <Output TaskParameter="ConsoleOutput" PropertyName="GitDirty"/>
+        </Exec>
+
+        <PropertyGroup Condition="'$(GitExitCode)' == '0' and '$(GitCommit)' != ''">
+            <ModVersionSuffix>+$(GitCommit.Trim())</ModVersionSuffix>
+            <ModVersionSuffix Condition="'$(GitDirty)' != ''">$(ModVersionSuffix)-dirty</ModVersionSuffix>
+            <StampedManifest>$(IntermediateOutputPath)SpirePvp.json</StampedManifest>
+            <ManifestText>$([System.IO.File]::ReadAllText('$(MSBuildProjectDirectory)/SpirePvp.json'))</ManifestText>
+            <ManifestText>$([System.Text.RegularExpressions.Regex]::Replace($(ManifestText), '("version"\s*:\s*"[^"]+)"', '$1$(ModVersionSuffix)"'))</ManifestText>
+        </PropertyGroup>
+
+        <WriteLinesToFile File="$(StampedManifest)" Lines="$(ManifestText)" Overwrite="true"
+                          WriteOnlyWhenDifferent="true" Condition="'$(StampedManifest)' != ''"/>
+    </Target>
+
+    <Target Name="CopyToModsFolder" AfterTargets="PostBuildEvent" DependsOnTargets="StampModVersion">
         <Copy SourceFiles="$(TargetPath)" DestinationFolder="$(ModsPath)SpirePvp/"/>
-        <Copy SourceFiles="$(MSBuildProjectDirectory)/SpirePvp.json" DestinationFolder="$(ModsPath)SpirePvp/"/>
+        <Copy SourceFiles="$(MSBuildProjectDirectory)/SpirePvp.json" DestinationFolder="$(ModsPath)SpirePvp/"
+              Condition="'$(StampedManifest)' == ''"/>
+        <Copy SourceFiles="$(StampedManifest)" DestinationFolder="$(ModsPath)SpirePvp/"
+              Condition="'$(StampedManifest)' != ''"/>
         <Copy SourceFiles="$(TargetDir)$(TargetName).pdb" DestinationFolder="$(ModsPath)SpirePvp/" Condition="Exists('$(TargetDir)$(TargetName).pdb')"/>
 
         <!--
