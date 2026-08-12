@@ -1,3 +1,4 @@
+using Godot;
 using HarmonyLib;
 using MegaCrit.Sts2.Core.Logging;
 using MegaCrit.Sts2.Core.Nodes.Screens.GameOverScreen;
@@ -92,16 +93,80 @@ public static class DuelResultLinesPatch
                          "local numbers only.");
             }
 
+            AddQuoteGap(screen);
+
             foreach (NScoreLine line in screen._scoreLines)
             {
                 await line.AnimateIn();
             }
+
+            DumpLayout(screen);
         }
         catch (Exception e)
         {
             // The result screen matters more than its statistics.
             Log.Error($"[SpirePvp] result screen lines failed: {e}");
         }
+    }
+
+    /// <summary>
+    /// Space between the quirky line under the banner and the first score row.
+    ///
+    /// **Reserving the badge row was not enough, and the log said so before the screenshot did:**
+    /// `container min height 0` at the moment the badges were parked. Godot sizes containers on the
+    /// *next* layout pass, so adding children reserves nothing on the frame you add them — the
+    /// column still settles later, just earlier than before. What that fix bought was consistency;
+    /// what it did not buy was room, because the settled spacing is the tight one all along.
+    ///
+    /// So this adds the room outright, as a sized spacer in front of the grid rather than by
+    /// nudging anyone's position — a position would be undone by the next layout pass, which is
+    /// the same mistake one level down.
+    /// </summary>
+    private const float QuoteGapHeight = 28f;
+
+    private const string QuoteGapName = "SpirePvpQuoteGap";
+
+    /// <summary>Pushes the score grid down, once, by inserting a spacer above it.</summary>
+    private static void AddQuoteGap(NGameOverScreen screen)
+    {
+        if (screen._scoreLineContainer?.GetParent() is not Node parent
+            || parent.GetNodeOrNull<Control>(QuoteGapName) != null)
+        {
+            return;
+        }
+
+        Control gap = new Control
+        {
+            Name = QuoteGapName,
+            CustomMinimumSize = new Vector2(0f, QuoteGapHeight),
+            MouseFilter = Control.MouseFilterEnum.Ignore
+        };
+
+        parent.AddChild(gap);
+        parent.MoveChild(gap, screen._scoreLineContainer.GetIndex());
+    }
+
+    /// <summary>
+    /// Everything between the banner and the badges, with its parent chain.
+    ///
+    /// The spacing above is a number chosen once and then corrected from measurements, not from
+    /// screenshots — this project has twice "fixed" a placement by eye and had to revert one of
+    /// them. Logged after the lines have animated, so these are the values the player is looking at.
+    /// </summary>
+    private static void DumpLayout(NGameOverScreen screen)
+    {
+        Control? grid = screen._scoreLineContainer;
+        Control? badges = screen._badgeContainer;
+        Control? quote = screen._deathQuote;
+
+        Log.Warn($"[SpirePvp] result layout — parent={grid?.GetParent()?.Name} "
+                 + $"({grid?.GetParent()?.GetType().Name})");
+        Log.Warn($"[SpirePvp] result layout — quote  pos={quote?.Position} size={quote?.Size} "
+                 + $"global={quote?.GlobalPosition} parent={quote?.GetParent()?.Name}");
+        Log.Warn($"[SpirePvp] result layout — grid   pos={grid?.Position} size={grid?.Size} "
+                 + $"global={grid?.GlobalPosition} idx={grid?.GetIndex()}");
+        Log.Warn($"[SpirePvp] result layout — badges pos={badges?.Position} size={badges?.Size} "
+                 + $"global={badges?.GlobalPosition} children={badges?.GetChildCount()}");
     }
 
     /// <summary>
