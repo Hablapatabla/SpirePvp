@@ -124,10 +124,37 @@ public static class DuelLobbyPanel
                  $"{Groups.Length} groups, {tickboxes.Count - promoted.Count} left below");
     }
 
+    /// <summary>
+    /// How large a section heading is drawn.
+    ///
+    /// A heading that does not obviously outrank the tickboxes under it is not a heading — it
+    /// reads as another list entry, which is the problem this panel exists to fix.
+    /// </summary>
+    private const int HeadingFontSize = 44;
+
+    /// <summary>Space above each heading, so the groups read as blocks rather than a run-on list.</summary>
+    private const int HeadingTopMargin = 28;
+
     private static Control Heading(string locKey)
     {
-        MegaLabel label = new MegaLabel { Name = "SpirePvpHeading" };
-        label.SetTextAutoSize(Loc(locKey));
+        // **Do not use SetTextAutoSize here.** It shrinks the text to fit the control's rect,
+        // and a fresh label in a VBoxContainer has no rect worth speaking of — which is exactly
+        // how these came out microscopic. Autosize is for fitting a known box; this wants a
+        // fixed size and a box that grows to hold it.
+        MegaLabel label = new MegaLabel
+        {
+            Name = "SpirePvpHeading",
+            AutoSizeEnabled = false,
+            Text = Loc(locKey)
+        };
+
+        label.SetFontSize(HeadingFontSize);
+
+        // VBoxContainer spaces every child equally, so the gap that separates one group from the
+        // next has to come from the heading itself.
+        label.AddThemeConstantOverride("margin_top", HeadingTopMargin);
+        label.CustomMinimumSize = new Vector2(0, HeadingFontSize + HeadingTopMargin);
+
         return label;
     }
 
