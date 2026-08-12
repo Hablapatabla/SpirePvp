@@ -53,7 +53,7 @@ namespace SpirePvp.Duel.Patches;
 public static class DuelDisconnectPatch
 {
     /// <summary>
-    /// Why the last client dropped, captured on its way past.
+    /// Captures why the last client dropped, on its way past.
     ///
     /// **The reason is known here and thrown away one line later.**
     /// `RunLobby.OnDisconnectedFromClientAsHost` is handed a `NetErrorInfo`, logs it, and then
@@ -62,18 +62,15 @@ public static class DuelDisconnectPatch
     /// players ended a match on a VICTORY banner (see <see cref="DuelEndReason.Desync"/>): the
     /// host read its own ejection of the client as the client walking away.
     ///
-    /// Stashed rather than plumbed because the event signature is vanilla's and the gap is one
-    /// call wide. Cleared as it is read, so a later disconnect with no reason cannot inherit this
-    /// one — the stale-value trap this project keeps meeting in its own static state.
+    /// A prefix because the event fires inside the method, so a postfix would run after the thing
+    /// that needs the answer. The value is held on <see cref="DuelDisconnect"/> rather than here,
+    /// because it is run-scoped state and that is where run-scoped state gets released.
     /// </summary>
-    private static NetError? _lastClientDropReason;
-
-    /// <summary>Runs before the event above, which is the only reason a prefix is required.</summary>
     [HarmonyPatch(typeof(RunLobby), nameof(RunLobby.OnDisconnectedFromClientAsHost))]
     [HarmonyPrefix]
     public static void BeforeDisconnectedFromClientAsHost(NetErrorInfo info)
     {
-        _lastClientDropReason = info.GetReason();
+        DuelDisconnect.NoteClientDropReason(info.GetReason());
     }
 
     /// <summary>The peer went away while we are still playing. We win — unless the sim came apart.</summary>
@@ -81,8 +78,7 @@ public static class DuelDisconnectPatch
     [HarmonyPostfix]
     public static void AfterRemotePlayerDisconnected(RunManager __instance, ulong playerId)
     {
-        NetError? reason = _lastClientDropReason;
-        _lastClientDropReason = null;
+        NetError? reason = DuelDisconnect.TakeClientDropReason();
 
         if (!DuelDisconnect.ShouldDecide(__instance))
         {

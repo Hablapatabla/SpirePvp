@@ -86,11 +86,46 @@ public static class DuelDisconnect
     /// </summary>
     private static ulong? _connectionLostAtMs;
 
+    /// <summary>
+    /// Why the last client dropped, stashed by `DuelDisconnectPatch` on its way past.
+    ///
+    /// **`RunLobby` knows the reason and the event it raises does not carry it.**
+    /// `OnDisconnectedFromClientAsHost` is handed a `NetErrorInfo`, logs it, and then raises
+    /// `RemotePlayerDisconnected` with nothing but the player id — so the host's own route cannot
+    /// tell a quit from a divergence kick it issued itself.
+    ///
+    /// It lives here rather than in the patch because of what it is: static state belonging to a
+    /// run, which has to be released with one. The patch is where it is *set*; this is where
+    /// everything else that outlives a match already gets cleared.
+    /// </summary>
+    private static NetError? _lastClientDropReason;
+
+    /// <summary>Records the reason. Called from the prefix that runs before the event fires.</summary>
+    public static void NoteClientDropReason(NetError reason) => _lastClientDropReason = reason;
+
+    /// <summary>
+    /// Reads the reason and forgets it, so a later disconnect cannot inherit this one.
+    ///
+    /// **Consuming is not sufficient on its own**, which is why `Reset` clears it too:
+    /// `RunLobby` raises `RemotePlayerDisconnected` only `if (num >= 0)` — only when the player
+    /// was still in its list — and it logs `Is in connected players: False` for the case where it
+    /// is not. On that path the reason is stashed and never read, and without the teardown clear
+    /// it would survive into the next match and decide *its* first disconnect: a polite quit
+    /// reading a stale `StateDivergence` and being scored a void draw instead of a win.
+    /// </summary>
+    public static NetError? TakeClientDropReason()
+    {
+        NetError? reason = _lastClientDropReason;
+        _lastClientDropReason = null;
+        return reason;
+    }
+
     /// <summary>Released with the run, like every other piece of static match state.</summary>
     public static void Reset()
     {
         _declared = false;
         _connectionLostAtMs = null;
+        _lastClientDropReason = null;
         ClearWait("the run ended");
     }
 
