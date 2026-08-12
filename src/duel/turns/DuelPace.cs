@@ -1,3 +1,4 @@
+using Godot;
 using MegaCrit.Sts2.Core.Commands;
 using MegaCrit.Sts2.Core.GameActions;
 using MegaCrit.Sts2.Core.Helpers;
@@ -53,7 +54,12 @@ public static class DuelPace
 
     private const float FastSeconds = 0.6f;
 
+    /// <summary>How long to wait for a flushed batch to start executing, in frames (~2s at 60fps).</summary>
+    private const int StartFrames = 120;
+
     private static bool _armed;
+
+    private static bool _watching;
 
     /// <summary>
     /// Armed at run start with every other handler, and against the run's own executor — a new run
@@ -90,10 +96,73 @@ public static class DuelPace
         }
 
         _armed = false;
+        _watching = false;
     }
 
     /// <summary>Whether the round is currently being paced, for the clocks to read.</summary>
     public static bool IsResolving => RunManager.Instance?.ActionExecutor.IsRunning == true;
+
+    /// <summary>
+    /// Watches a just-flushed batch until it has finished resolving, then reopens planning.
+    ///
+    /// Called from the flush on both sides, which is the only moment both of them agree a batch
+    /// exists. Two things make this harder than awaiting the queue:
+    ///
+    /// - **`FinishedExecutingActions` answers "finished" when nothing is running**, which at flush
+    ///   time is exactly the state a client is in — the host's actions are still crossing the wire.
+    ///   Awaiting it straight away would reopen planning into the batch it was meant to wait for.
+    ///   So this waits for the drain to *start* first.
+    /// - **A batch can never start at all.** The executor skips a cancelled action before firing
+    ///   `BeforeActionExecuted`, so a batch whose every play was cancelled — a card whose target
+    ///   died, a hand discarded by the play before it — executes nothing. Hanging on that would
+    ///   leave the hand live, the button dark and no way to commit: a soft lock with no error. The
+    ///   wait for the start is therefore bounded, and giving up reopens planning rather than
+    ///   waiting forever.
+    ///
+    /// Frames rather than seconds, because `Cmd.Wait` returns instantly at `FastModeType.Instant`
+    /// and this loop would spin through its whole budget in one frame.
+    /// </summary>
+    public static void WatchBatch()
+    {
+        if (_watching)
+        {
+            return;
+        }
+
+        _watching = true;
+        TaskHelper.RunSafely(WatchBatchAsync());
+    }
+
+    private static async Task WatchBatchAsync()
+    {
+        try
+        {
+            ActionExecutor? executor = RunManager.Instance?.ActionExecutor;
+            if (executor == null)
+            {
+                return;
+            }
+
+            for (int frame = 0; frame < StartFrames && !executor.IsRunning; frame++)
+            {
+                await Engine.GetMainLoop().ToSignal(Engine.GetMainLoop(), SceneTree.SignalName.ProcessFrame);
+            }
+
+            await executor.FinishedExecutingActions();
+        }
+        catch (Exception e)
+        {
+            // Reopen anyway: a planning phase that never comes back is a dead game, and whatever
+            // went wrong has already been logged by the executor.
+            Log.Error($"[SpirePvp] pace: batch watch failed — reopening planning anyway ({e.Message})");
+        }
+        finally
+        {
+            _watching = false;
+        }
+
+        (DuelTurnModel.Current as LockInTurnModel)?.OnBatchResolved();
+    }
 
     private static void OnActionExecuted(GameAction action)
     {

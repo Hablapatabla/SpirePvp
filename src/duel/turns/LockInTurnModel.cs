@@ -13,8 +13,25 @@ using SpirePvp.Net;
 namespace SpirePvp.Duel.Turns;
 
 /// <summary>
-/// Simultaneous turn-based: both players plan privately, lock in, and the round resolves as one
+/// Simultaneous turn-based: both players plan privately, lock in, and the batch resolves as one
 /// interleaved stream (DESIGN §3.1b, model B).
+///
+/// **A turn holds as many plan→resolve batches as the players want, and that is what makes draw
+/// cards work.** Locking in used to end the turn, so you planned once from your opening hand: a
+/// card that drew gave you cards *after* planning was over, and the hand was discarded before you
+/// could use them — you paid energy for cards you could never plan with. Reported as "draw cards
+/// feel very weird and bad", and it is inherent to one-batch-per-turn rather than a bug in it.
+///
+/// So the end turn button commits a *batch*, and **an empty batch is what ends the turn**. Plan two
+/// cards, commit, watch them resolve, and you are still in the same turn with the energy and the
+/// hand you have left — including whatever you just drew. Press with nothing planned and you are
+/// finished; the turn rolls when *both* players are. The button's label carries the whole rule,
+/// reading `Lock In` while you hold cards and `End Turn` while you hold none.
+///
+/// Chosen over the alternatives (DESIGN §3.1b) because nothing is special-cased: no card is split
+/// between a plan-time effect and a resolved one, nothing resolves twice, and no card needs a tag
+/// saying whether it may resolve early — which is where the other two options put their desync
+/// risk. "Two planning passes" is simply what this degenerates to when a turn uses two batches.
 ///
 /// **What changes is only *when* actions are submitted.** Execution is untouched: plays already go
 /// through the shared queue one at a time, host-ordered, and they still do. Blitz submits as you
@@ -68,9 +85,13 @@ public sealed class LockInTurnModel : IDuelTurnModel
     /// The two end-turn actions, held apart from the plays and enqueued after them.
     ///
     /// **They cannot go through early and they cannot be dropped.** Letting them through means the
-    /// turn rolls over before the round's cards resolve; dropping them means nobody is ever ready
-    /// and the round never ends. So the round is one ordered thing — every play, interleaved, then
-    /// both players ending their turn.
+    /// turn rolls over before the batch's cards resolve; dropping them means nobody is ever ready
+    /// and the turn never ends. So the closing batch is one ordered thing — every play,
+    /// interleaved, then both players ending their turn.
+    ///
+    /// Only a *closing* press fills these. A press that commits a batch mid-turn is a lock-in and
+    /// nothing more, so its `EndPlayerTurnAction` is dropped: an end turn that reached the queue
+    /// would end the turn, which is the one thing a mid-turn batch must not do.
     /// </summary>
     private GameAction? _localEnd;
 
@@ -79,6 +100,26 @@ public sealed class LockInTurnModel : IDuelTurnModel
     private bool _localLockedIn;
     private bool _remoteLockedIn;
     private bool _flushing;
+
+    /// <summary>
+    /// Declared finished for the whole turn, rather than for this batch — sticky until the turn
+    /// rolls.
+    ///
+    /// **Sticky is what stops a ping-pong.** A player out of energy would otherwise have to press
+    /// again for every batch the other one takes; instead they say "done" once and stay ready, so
+    /// each later batch flushes the moment the still-playing player commits it. It is also what
+    /// keeps the flush condition honest: `done` counts as ready, or the first batch after someone
+    /// finished would wait forever on a player who has nothing left to commit.
+    /// </summary>
+    private bool _localDone;
+
+    private bool _remoteDone;
+
+    /// <summary>
+    /// Set for the flush that ends the turn, so the batch watcher does not reopen planning into a
+    /// turn that is rolling over. Vanilla's own turn start does that, and does it properly.
+    /// </summary>
+    private bool _turnRolling;
 
     /// <summary>How many plays we are holding, for the HUD and the logs.</summary>
     public int PendingCount => _local.Count;
@@ -144,16 +185,26 @@ public sealed class LockInTurnModel : IDuelTurnModel
         return false;
     }
 
-    public bool LockedIn => _localLockedIn;
+    /// <summary>
+    /// Whether we have committed and are waiting — for this batch, or for the whole turn.
+    ///
+    /// The three things that read it want the same answer in both cases: the hand goes dead, the
+    /// clock stops, and the icon appears. A player who has declared themselves finished is waiting
+    /// in exactly the sense those care about.
+    /// </summary>
+    public bool LockedIn => _localLockedIn || _localDone;
+
+    /// <summary>Declared finished for the turn, which the button label reads to stop offering a lock-in.</summary>
+    public bool Done => _localDone;
 
     /// <summary>
-    /// Whether the opponent has locked in, for the icon over the end turn button.
+    /// Whether the opponent has committed, for the icon over the end turn button.
     ///
     /// Set from their end turn on the host and from their message on a client — the same split
     /// <see cref="HoldRemote"/> and <see cref="RemoteLockedIn"/> document, and the reason this is a
     /// property rather than each of them setting a display flag of its own.
     /// </summary>
-    public bool OpponentLockedIn => _remoteLockedIn;
+    public bool OpponentLockedIn => _remoteLockedIn || _remoteDone;
 
     /// <summary>
     /// Whose first card resolves first. Fixed slot order for now: the lower net id starts, which
@@ -201,10 +252,18 @@ public sealed class LockInTurnModel : IDuelTurnModel
 
         if (action is EndPlayerTurnAction)
         {
-            // **Recorded before locking in, because locking in can flush the round immediately.**
+            // **The button commits a batch; an empty batch is what ends the turn.** Pressing with
+            // cards planned resolves those cards and leaves you in the same turn, with the energy
+            // and the hand you have left — which is the whole point, because cards drawn by a play
+            // then arrive in time to be planned. Pressing with nothing planned says you are
+            // finished. The label says which one the press will do, so the rule is readable off the
+            // button rather than learned.
+            bool closing = _local.Count == 0;
+
+            // **Recorded before locking in, because locking in can flush the batch immediately.**
             // If the opponent is already waiting, `LockIn` runs the flush inside itself — and a
             // flush that happens before this assignment appends only *their* end turn, so we are
-            // never marked ready and the round hangs with every card already spent. Measured:
+            // never marked ready and the turn hangs with every card already spent. Measured:
             // `resolving round — 3 then 3` and then, thirty lines later,
             // `holding EndPlayerTurnAction for player 1` — the host's own end turn arriving after
             // the round it belonged to had gone.
@@ -212,12 +271,22 @@ public sealed class LockInTurnModel : IDuelTurnModel
             // The host holds its own so the flush can put it after the plays; a client lets it go
             // to the host, which holds it there for the same reason.
             bool isHost = RunManager.Instance?.NetService.Type == NetGameType.Host;
-            if (isHost)
+            if (closing)
             {
-                _localEnd = action;
+                _localDone = true;
+                if (isHost)
+                {
+                    _localEnd = action;
+                }
             }
 
             LockIn();
+
+            // The host swallows either way: a closing press is held for the flush, a batch press
+            // has done its work by triggering the lock-in. A client must let both reach the host,
+            // which is the only signal the host gets that a batch was committed — and the host
+            // reads *closing* off the arrival finding an empty buffer, so the two sides agree
+            // without a message saying so.
             return isHost;
         }
 
@@ -230,6 +299,11 @@ public sealed class LockInTurnModel : IDuelTurnModel
 
         _local.Add(action);
         LockInPlanView.ShowPlanned(action);
+
+        // The button now commits a batch rather than the turn, and says so from the first card
+        // planned. Vanilla puts its own text back at the next planning window, so this only ever
+        // has to change it in one direction.
+        LockInPlanView.ShowLockInLabel();
         Log.Info($"[SpirePvp] lock-in: holding {action} ({_local.Count} planned, "
                  + $"{ReservedEnergy} energy reserved)");
         return true;
@@ -298,6 +372,15 @@ public sealed class LockInTurnModel : IDuelTurnModel
         }
 
         _remoteLockedIn = true;
+
+        // **A count of zero is the host declaring themselves finished for the turn.** The host
+        // reads the same fact off an empty buffer when the client's end turn arrives; a client has
+        // no buffer of the host's to read, so it reads the count that was already on the wire.
+        // Both sides therefore agree on when the turn ends without a field that says so.
+        if (playCount == 0)
+        {
+            _remoteDone = true;
+        }
         LockInPlanView.RefreshLockInIcons();
         TryFlush();
     }
@@ -326,12 +409,24 @@ public sealed class LockInTurnModel : IDuelTurnModel
         {
             // **Their end turn *is* their lock-in, and using it as the signal removes a race.**
             // `DuelLockInMessage` is sent from `LockIn`, which runs before the end-turn request
-            // leaves — so the message can reach the host first and flush a round whose end turn is
-            // still in flight, leaving nobody marked ready and the round hung. The end turn is the
+            // leaves — so the message can reach the host first and flush a batch whose end turn is
+            // still in flight, leaving nobody marked ready and the turn hung. The end turn is the
             // last thing a player sends, so treating its arrival as the lock-in cannot be early.
+            //
+            // **And an empty buffer at this moment is how the host knows they are closing**, with
+            // no flag on the wire. Their plays travel before their end turn on an ordered
+            // transport, so what is held here is exactly the batch they committed: nothing held
+            // means nothing planned means they are finished for the turn. Same rule the local side
+            // applies to itself, read off the same fact.
             _remoteEnd = action;
             _remoteLockedIn = true;
-            Log.Warn("[SpirePvp] lock-in: opponent's end turn arrived — they are locked in");
+            if (_remote.Count == 0)
+            {
+                _remoteDone = true;
+            }
+
+            Log.Warn("[SpirePvp] lock-in: opponent's end turn arrived — they are "
+                     + (_remoteDone ? "finished for the turn" : $"locked in with {_remote.Count} play(s)"));
             LockInPlanView.RefreshLockInIcons();
             TryFlush();
             return;
@@ -357,18 +452,30 @@ public sealed class LockInTurnModel : IDuelTurnModel
     {
         RunManager? run = RunManager.Instance;
         IRunState? state = run?.State;
-        if (run == null || state == null || _flushing || !_localLockedIn || !_remoteLockedIn)
+
+        // **Done counts as ready for every later batch of the turn.** Without that, the first batch
+        // after one player finished would wait forever on someone who has nothing left to commit —
+        // and the turn would hang with the other player still holding energy.
+        bool localReady = _localLockedIn || _localDone;
+        bool remoteReady = _remoteLockedIn || _remoteDone;
+        if (run == null || state == null || _flushing || !localReady || !remoteReady)
         {
             return;
         }
 
         _flushing = true;
 
+        // The turn ends when *both* have declared themselves finished, and not before. Every other
+        // flush resolves a batch and hands the turn back to whoever is still playing.
+        bool endsTurn = _localDone && _remoteDone;
+        _turnRolling = endsTurn;
+
         if (run.NetService.Type != NetGameType.Host)
         {
-            Log.Warn($"[SpirePvp] lock-in: round closed — {_local.Count} play(s) handed over, "
-                     + "waiting on the host's ordering");
-            BeginNextRound();
+            Log.Warn($"[SpirePvp] lock-in: batch closed — {_local.Count} play(s) handed over, "
+                     + $"waiting on the host's ordering{(endsTurn ? "; turn ends" : "")}");
+            BeginNextBatch(endsTurn);
+            DuelPace.WatchBatch();
             return;
         }
 
@@ -389,8 +496,9 @@ public sealed class LockInTurnModel : IDuelTurnModel
         ulong firstOwner = localStarts ? me : opponent;
         ulong secondOwner = localStarts ? opponent : me;
 
-        Log.Warn($"[SpirePvp] lock-in: resolving round — {first.Count} then {second.Count}, "
-                 + $"{(localStarts ? "we" : "they")} start the alternation");
+        Log.Warn($"[SpirePvp] lock-in: resolving batch — {first.Count} then {second.Count}, "
+                 + $"{(localStarts ? "we" : "they")} start the alternation"
+                 + (endsTurn ? "; turn ends after it" : ""));
 
         // A1, B1, A2, B2 … and whichever list is longer simply runs on at the end.
         for (int i = 0; i < Math.Max(first.Count, second.Count); i++)
@@ -406,32 +514,85 @@ public sealed class LockInTurnModel : IDuelTurnModel
             }
         }
 
-        // Both end turns last, so the round rolls over only once every play in it has resolved.
-        // Without these the players are never marked ready and the round hangs with the cards
-        // already spent — which is the failure that looks most like "the mod ate my turn".
-        if (_localEnd != null)
+        // Both end turns last, and **only on the batch that ends the turn**, so the turn rolls over
+        // once every play in it has resolved. Without them the players are never marked ready and
+        // the turn hangs with the cards already spent — the failure that looks most like "the mod
+        // ate my turn". With them on every batch, the turn would end after the first one, which is
+        // the model this replaced.
+        if (endsTurn)
         {
-            run.ActionQueueSynchronizer.EnqueueAction(_localEnd, me);
+            if (_localEnd != null)
+            {
+                run.ActionQueueSynchronizer.EnqueueAction(_localEnd, me);
+            }
+
+            if (_remoteEnd != null)
+            {
+                run.ActionQueueSynchronizer.EnqueueAction(_remoteEnd, opponent);
+            }
         }
 
-        if (_remoteEnd != null)
-        {
-            run.ActionQueueSynchronizer.EnqueueAction(_remoteEnd, opponent);
-        }
+        Log.Warn($"[SpirePvp] lock-in: batch enqueued{(endsTurn ? ", both end turns appended" : "")}");
+        BeginNextBatch(endsTurn);
 
-        Log.Warn("[SpirePvp] lock-in: round enqueued, both end turns appended");
-        BeginNextRound();
+        // Planning stays shut until these have actually resolved, which is a different moment from
+        // "they have been enqueued" — and on a client a very different one, since the batch has yet
+        // to arrive.
+        DuelPace.WatchBatch();
     }
 
-    /// <summary>Clears the round so the next planning phase starts empty.</summary>
-    public void BeginNextRound()
+    /// <summary>
+    /// Clears the batch so the next planning window starts empty.
+    ///
+    /// **What survives a batch is what belongs to the turn**: whether each player has declared
+    /// themselves finished, and the end-turn actions that go with that declaration. Clearing those
+    /// per batch would let a finished player be waited on again, and would throw away the very
+    /// action the closing flush needs.
+    /// </summary>
+    public void BeginNextBatch(bool endsTurn)
     {
         _local.Clear();
         _remote.Clear();
-        _localEnd = null;
-        _remoteEnd = null;
         _localLockedIn = false;
         _remoteLockedIn = false;
         _flushing = false;
+
+        if (endsTurn)
+        {
+            _localEnd = null;
+            _remoteEnd = null;
+            _localDone = false;
+            _remoteDone = false;
+        }
+    }
+
+    /// <summary>
+    /// The batch has finished resolving, so planning reopens — unless the turn is rolling over, in
+    /// which case vanilla's own turn start does it and does it properly.
+    ///
+    /// Driven by <see cref="DuelPace"/>, which watches the action queue drain. Reopening at *flush*
+    /// time instead would have handed both players a free planning window during the resolution
+    /// they are supposed to be reading — and, now that the clocks stop while a batch resolves, a
+    /// free *thinking* window too, which is the kind of hole a competitive mode gets played through.
+    /// </summary>
+    public void OnBatchResolved()
+    {
+        if (_turnRolling)
+        {
+            _turnRolling = false;
+            return;
+        }
+
+        Log.Info($"[SpirePvp] lock-in: batch resolved, planning reopens"
+                 + (_localDone ? " (we are finished for the turn)" : ""));
+        LockInPlanView.ReopenPlanning(!_localDone);
+
+        // Reopening puts vanilla's own "End Turn" back on the button, which would be a lie if plays
+        // were queued while the batch resolved — the window between committing and the batch
+        // arriving is small, but it is real on a client.
+        if (_local.Count > 0)
+        {
+            LockInPlanView.ShowLockInLabel();
+        }
     }
 }

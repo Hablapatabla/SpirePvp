@@ -576,6 +576,27 @@ mechanic. Note `HittableEnemies` is **not** patchable — it has no acting-playe
   **Both of the pieces this milestone left open are now built (2026-08-12, unplayed).** Energy is
   reserved while planning (`DuelPlanEnergyPatch`), and a held play is drawn in vanilla's own play
   queue with a ready-icon over the end turn button for who has locked in (`LockInPlanView`).
+  Resolution is paced so a round can be read (`DuelPace`), and the duel clock stops while it plays
+  out.
+
+  **The draw-card problem is answered by batches, decided 2026-08-12 after playing it.** Planning a
+  whole turn from the opening hand makes draw cards near-dead: the cards arrive after planning is
+  over and are discarded before the next one. §9 listed four options; the one built is none of them
+  exactly, and it contains the leading one. **Locking in commits a *batch* rather than the turn, and
+  an empty batch is what ends the turn.** A turn therefore holds as many plan→resolve exchanges as
+  the players want, so a card drawn in batch 1 is in hand for batch 2 of the same turn.
+
+  Its virtue is that nothing is special-cased: no card is split between a plan-time effect and a
+  resolved one, nothing resolves twice, and no card needs a per-card tag saying whether it may
+  resolve early — which is where "resolve draws at plan time" and "tag cards as free vs queued" both
+  put their desync risk. "Two planning passes" is what this degenerates to when a turn uses two
+  batches, so the fixed count never had to be chosen.
+
+  Consequences worth knowing before changing it: a player who is finished stays ready for the rest
+  of the turn (or every later batch would wait on someone with nothing left to commit); the end
+  turns are enqueued only on the closing batch; and planning must not reopen until the batch has
+  *resolved*, not when it was enqueued, or the paced resolution becomes a free planning window with
+  the clocks stopped.
 
   **The rule that came out of building them, and it generalises past this milestone: `CanPlay` is
   not a UI predicate.** `PlayCardAction.ExecuteAction` re-checks it, `CardSelectCmd` filters a

@@ -754,14 +754,38 @@ Four options, none free:
 | **Two planning passes** — plan, resolve draws only, plan again, then resolve | Coherent and closest to how the cards were designed; doubles the round's ceremony |
 | Ban draw cards from turn-based runs | Cheap (`RaceNoCoopCardsPatch` already filters at generation) but a real content cut |
 
-**Leaning: two passes** (Lucas, 2026-08-12), with a fallback idea worth keeping — **tag cards as
-"must be queued" versus "can be played freely"**, so a draw resolves immediately while an attack
-waits. That is a per-card property and therefore the most work, but it is the only option that
-makes every card behave sensibly rather than choosing which ones to sacrifice.
+**ANSWERED AND BUILT 2026-08-12 (unplayed): a turn holds as many batches as you want.** Chosen by
+Lucas from a pitch, and it is none of the four exactly — it contains the one he was leaning toward.
+**Locking in commits a *batch* rather than the turn, and an empty batch is what ends the turn.**
+Plan two cards, commit, watch them resolve, and you are still in the same turn with the energy and
+the hand you have left, including what you just drew. Press with nothing planned and you are
+finished; the turn rolls when *both* players are. The button's label carries the rule — `Lock In`
+while you hold cards, `End Turn` while you hold none — because there is nowhere else in that UI to
+explain it.
 
-**Not started deliberately.** It is a change to the round loop, and it was raised at a point where
-it could not be playtested; shipping an untested round loop on top of a working one is how this
-milestone's four ordering bugs happened in the first place.
+Its virtue over the other three is that **nothing is special-cased**: no card is split between a
+plan-time effect and a resolved one, nothing resolves twice, and no card needs a tag saying whether
+it may resolve early, which is where the desync risk sat in both of the "make draws work" options.
+"Two planning passes" is what this degenerates to when a turn uses two batches, so the fixed count
+never had to be picked.
+
+Three things hold it together, and any change to the loop has to keep all three:
+
+1. **Being finished is sticky for the turn.** Otherwise a player out of energy would be waited on
+   again for every batch the other one takes, and the turn would hang. `done` counts as ready.
+2. **The end turns are enqueued only on the closing batch.** On every batch, the turn would end
+   after the first one — which is the model this replaced.
+3. **Planning reopens when the batch has *resolved*, not when it was enqueued.** `DuelPace.WatchBatch`
+   waits for the action queue to drain. Reopening at flush time would hand both players a planning
+   window during the resolution they are meant to be reading — and, since the clocks now stop while
+   a batch resolves, a free *thinking* window, which is the kind of hole a competitive mode gets
+   played through.
+
+That watcher has one trap already handled and worth not re-discovering: the executor skips a
+**cancelled** action before firing `BeforeActionExecuted`, so a batch whose every play was cancelled
+executes nothing at all. Hanging on that would leave the hand live, the button dark and no way to
+commit — a soft lock with no error — so the wait for the batch to *start* is bounded and giving up
+reopens planning.
 
 ### Playtest notes from the two-player session, 2026-08-12
 

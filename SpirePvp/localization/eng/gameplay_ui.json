@@ -9,5 +9,7 @@
   "SPIREPVP_DRAW_SENT.body": "Waiting for your opponent to answer.",
   "SPIREPVP_DRAW_DECLINED.header": "DRAW DECLINED",
   "SPIREPVP_DRAW_DECLINED.body": "Your opponent wants to play on.",
-  "SPIREPVP_DRAW.ok": "OK"
+  "SPIREPVP_DRAW.ok": "OK",
+  "SPIREPVP_LOCK_IN_BUTTON": "Lock In",
+  "SPIREPVP_DONE_BUTTON": "Waiting"
 }

@@ -1,5 +1,7 @@
+using MegaCrit.Sts2.Core.Combat;
 using MegaCrit.Sts2.Core.Entities.Multiplayer;
 using MegaCrit.Sts2.Core.GameActions;
+using MegaCrit.Sts2.Core.Localization;
 using MegaCrit.Sts2.Core.Models;
 using MegaCrit.Sts2.Core.Nodes.Cards;
 using MegaCrit.Sts2.Core.Nodes.Combat;
@@ -66,4 +68,49 @@ internal static class LockInPlanView
     /// </summary>
     public static void RefreshLockInIcons() =>
         NCombatRoom.Instance?.Ui.EndTurnButton?._playerIconContainer?.RefreshPlayerVotes();
+
+    /// <summary>
+    /// Tells the button it is about to commit a batch rather than end the turn.
+    ///
+    /// The label is the only place the two-press rule is written down, which is deliberate: a
+    /// button that reads *Lock In* while you hold cards and *End Turn* while you hold none teaches
+    /// the rule at the moment it applies, and there is nowhere else in this UI to explain it.
+    /// </summary>
+    public static void ShowLockInLabel() =>
+        SetLabel(new LocString("gameplay_ui", "SPIREPVP_LOCK_IN_BUTTON").GetFormattedText());
+
+    /// <summary>
+    /// Hands the turn back to the player after a batch has finished resolving.
+    ///
+    /// **`OnTurnStarted` is the reset, borrowed rather than reproduced.** A new planning window and
+    /// a new turn want exactly the same thing from this button — the label back to vanilla's, the
+    /// vote icons repainted, the button enabled if the player can still act — and vanilla already
+    /// has that as one call, including the guard that does nothing outside the player's turn. That
+    /// guard matters here: the watcher that drives this also fires as a turn rolls over, and this
+    /// must not light the button up during the enemy turn.
+    ///
+    /// A player who has declared themselves finished gets the icons repainted and nothing else:
+    /// the button stays dark until the turn rolls, which is what being finished means.
+    /// </summary>
+    public static void ReopenPlanning(bool acceptsMorePlays)
+    {
+        NEndTurnButton? button = NCombatRoom.Instance?.Ui.EndTurnButton;
+        CombatState? state = CombatManager.Instance.DebugOnlyGetState();
+        if (button == null || state == null)
+        {
+            return;
+        }
+
+        if (acceptsMorePlays)
+        {
+            button.OnTurnStarted(state);
+        }
+        else
+        {
+            RefreshLockInIcons();
+        }
+    }
+
+    private static void SetLabel(string text) =>
+        NCombatRoom.Instance?.Ui.EndTurnButton?._label?.SetTextAutoSize(text);
 }

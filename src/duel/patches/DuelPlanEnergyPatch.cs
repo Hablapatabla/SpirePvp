@@ -95,13 +95,19 @@ public static class DuelPlanEnergyPatch
             return;
         }
 
-        if (model.LockedIn)
+        if (model.LockedIn || DuelPace.IsResolving)
         {
             // Locked in means locked in. Without this the hand stays live while you wait for the
-            // opponent, and anything played then bypasses the round entirely: on the host it goes
+            // opponent, and anything played then bypasses the batch entirely: on the host it goes
             // straight to the queue and resolves alone, on a client it lands in the host's buffer
-            // after the round it belongs to. `BlockedByCardLogic` rather than a resource reason,
-            // because the cards are affordable — it is the round that is closed.
+            // after the batch it belongs to. `BlockedByCardLogic` rather than a resource reason,
+            // because the cards are affordable — it is the batch that is closed.
+            //
+            // **A resolving batch is closed too, and that is not just tidiness.** The clocks stop
+            // while a batch plays out, so a hand left live there would be free thinking time — plan
+            // everything during the animation and your clock never moves. Planning reopens when the
+            // queue drains (`LockInTurnModel.OnBatchResolved`), which is also when the clock
+            // restarts, so the two can never disagree about whether you are on the move.
             reason |= UnplayableReason.BlockedByCardLogic;
             __result = false;
             return;
