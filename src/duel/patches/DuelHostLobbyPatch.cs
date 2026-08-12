@@ -48,9 +48,9 @@ public static class DuelHostLobbyPatch
         DuelHostFlow.Requested = false;
 
         // Emits ModifiersChanged, which syncs the lobby through vanilla's own handler.
-        __instance._modifiersList.SetTickedModifiers(DuelHostFlow.BlitzPreset);
+        __instance._modifiersList.SetTickedModifiers(DuelHostFlow.DefaultPreset);
 
-        Log.Warn("[SpirePvp] duel lobby: opened from the Duel entry, blitz preset applied " +
-                 "(real-time, race 10 min, duel 2 min)");
+        Log.Warn("[SpirePvp] duel lobby: opened from the Duel entry, default preset applied " +
+                 "(real-time, no clocks)");
     }
 }

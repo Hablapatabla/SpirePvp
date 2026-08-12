@@ -36,8 +36,14 @@ public static class DuelHostFlow
     public static bool Requested { get; set; }
 
     /// <summary>
-    /// The default time control, and the one chess convention the design already committed to:
-    /// **blitz is a 10 minute race followed by a 2 minute duel** (DESIGN §5b).
+    /// What a freshly opened Duel lobby starts on: real-time, and **no clocks**.
+    ///
+    /// Untimed rather than the blitz preset DESIGN §5b names, because a default is what someone
+    /// plays before they have an opinion, and a clock is the one setting that can end a match
+    /// against a player's will. Someone meeting the mode for the first time should get the race
+    /// and the duel, not a deadline they did not know they had agreed to — and the presets are
+    /// right there for anyone who wants one. Blitz remains the recommended time control; it is
+    /// simply no longer imposed.
     ///
     /// Real-time rather than turn-based because turn-based is M8 and currently plays as blitz
     /// anyway — offering it as the default would be offering something that does not exist yet.
@@ -57,11 +63,11 @@ public static class DuelHostFlow
     /// It is also the instance kind anything downstream wants, since `ToSerializable` asserts
     /// mutability.
     /// </summary>
-    public static IReadOnlyList<ModifierModel> BlitzPreset => new List<ModifierModel>
+    public static IReadOnlyList<ModifierModel> DefaultPreset => new List<ModifierModel>
     {
         ModelDb.Modifier<DuelBlitz>().ToMutable(),
-        ModelDb.Modifier<RaceClockTen>().ToMutable(),
-        ModelDb.Modifier<DuelClockTwo>().ToMutable()
+        ModelDb.Modifier<RaceClockNone>().ToMutable(),
+        ModelDb.Modifier<DuelClockNone>().ToMutable()
     };
 
     /// <summary>

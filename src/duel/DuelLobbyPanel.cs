@@ -65,6 +65,9 @@ public static class DuelLobbyPanel
 
         if (container.GetNodeOrNull(PanelName) != null)
         {
+            // Already built — but the clocks may have changed since, by preset or by hand, so
+            // the preset row still needs re-syncing. This runs on every ModifiersChanged.
+            SyncPresetRow(list);
             return;
         }
 
@@ -143,6 +146,8 @@ public static class DuelLobbyPanel
         // of those modifiers remains legal — some are interesting in a race.
         BuildCollapsible(panel, "SPIREPVP_LOBBY.advanced", tickboxes.Except(promoted).ToList());
 
+        SyncPresetRow(list);
+
         Log.Warn($"[SpirePvp] duel lobby: promoted {promoted.Count} duel modifier(s) into " +
                  $"{Groups.Length} groups, {tickboxes.Count - promoted.Count} left below");
     }
@@ -171,6 +176,8 @@ public static class DuelLobbyPanel
         };
         panel.AddChildSafely(row);
 
+        _presetChips.Clear();
+
         List<NRunModifierTickbox> chips = new List<NRunModifierTickbox>();
 
         foreach ((string locKey, ModifierModel race, ModifierModel duel) in DuelHostFlow.Presets)
@@ -182,6 +189,7 @@ public static class DuelLobbyPanel
             }
 
             chips.Add(chip);
+            _presetChips.Add((chip, race.GetType(), duel.GetType()));
 
             chip.Connect(NTickbox.SignalName.Toggled, Callable.From<NTickbox>(box =>
             {
@@ -213,6 +221,35 @@ public static class DuelLobbyPanel
                 ticked.Add(duel);
                 list.SetTickedModifiers(ticked);
             }));
+        }
+    }
+
+    /// <summary>The preset chips and the clock pair each one stands for.</summary>
+    private static readonly List<(NRunModifierTickbox Chip, System.Type Race, System.Type Duel)>
+        _presetChips = new();
+
+    /// <summary>
+    /// Lights the preset that matches the clocks actually selected, and no other.
+    ///
+    /// The clocks are the truth and the preset row is a view of them — which keeps the two from
+    /// ever disagreeing, and answers the case a preset row otherwise handles badly: setting the
+    /// clocks by hand to a pair that happens to *be* Rapid lights Rapid, and setting them to a
+    /// pair that is nothing in particular lights nothing. There is no separate "current preset"
+    /// to keep in step, because there is no such state.
+    ///
+    /// Safe to call whenever the modifiers change: NTickbox.IsTicked only swaps the tick images
+    /// and does not raise Toggled, so this cannot re-enter the handler that applies a preset.
+    /// </summary>
+    private static void SyncPresetRow(NCustomRunModifiersList list)
+    {
+        List<ModifierModel> ticked = list.GetModifiersTickedOn().ToList();
+        System.Type? race = ticked.FirstOrDefault(m => m is RaceClockModifier)?.GetType();
+        System.Type? duel = ticked.FirstOrDefault(m => m is DuelClockModifier)?.GetType();
+
+        foreach ((NRunModifierTickbox chip, System.Type presetRace, System.Type presetDuel)
+                 in _presetChips)
+        {
+            chip.IsTicked = race == presetRace && duel == presetDuel;
         }
     }
 
