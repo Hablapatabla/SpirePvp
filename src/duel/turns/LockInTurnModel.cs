@@ -1,4 +1,5 @@
 using MegaCrit.Sts2.Core.Context;
+using MegaCrit.Sts2.Core.Entities.Cards;
 using MegaCrit.Sts2.Core.Entities.Multiplayer;
 using MegaCrit.Sts2.Core.Entities.Players;
 using MegaCrit.Sts2.Core.GameActions;
@@ -75,6 +76,35 @@ public sealed class LockInTurnModel : IDuelTurnModel
 
     /// <summary>How many plays we are holding, for the HUD and the logs.</summary>
     public int PendingCount => _local.Count;
+
+    /// <summary>
+    /// Energy already promised to buffered plays.
+    ///
+    /// **Energy is spent when a play executes, not when it is submitted** — invisible in blitz,
+    /// where the two are a frame apart, and the whole round apart once plays are buffered. Without
+    /// this a player plans ten Strikes on three energy and watches seven fizzle at resolution,
+    /// which reads as the mod eating cards rather than as their own overspend.
+    ///
+    /// Summed on demand from the buffer rather than accumulated, so an undo or a cleared round
+    /// cannot leave a stale reservation behind — the failure mode would be a hand that refuses to
+    /// play anything, with no way to tell why.
+    /// </summary>
+    public int ReservedEnergy
+    {
+        get
+        {
+            int total = 0;
+            foreach (GameAction action in _local)
+            {
+                if (action is PlayCardAction play && play._card != null)
+                {
+                    total += Math.Max(0, play._card.EnergyCost.GetWithModifiers(CostModifiers.All));
+                }
+            }
+
+            return total;
+        }
+    }
 
     public bool LockedIn => _localLockedIn;
 
