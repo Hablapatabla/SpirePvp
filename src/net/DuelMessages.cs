@@ -395,15 +395,25 @@ public record struct DuelArrivedMessage : INetMessage
     /// </summary>
     public List<SerializableCard> deck;
 
+    // **A field on the struct is not a field on the wire.** These are hand-written serializers, so
+    // adding `hp`/`maxHp` above and populating them at the send site left them out of the packet
+    // entirely: the receiver read the struct's default and every arrival announced `hp=0/0`, which
+    // the guard in `DuelRendezvous.ApplyOpponentHp` correctly refused. Nothing failed to compile,
+    // nothing threw, and the only symptom was a first-checksum divergence. When adding a field to
+    // any message in this file, add it here in the same order on both sides.
     public void Serialize(PacketWriter writer)
     {
         writer.WriteString(modVersion);
+        writer.WriteInt(hp);
+        writer.WriteInt(maxHp);
         writer.WriteList<SerializableCard>(deck ?? new List<SerializableCard>());
     }
 
     public void Deserialize(PacketReader reader)
     {
         modVersion = reader.ReadString();
+        hp = reader.ReadInt();
+        maxHp = reader.ReadInt();
         deck = reader.ReadList<SerializableCard>();
     }
 }

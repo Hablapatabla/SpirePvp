@@ -748,32 +748,61 @@ doesn't show the clock" report — it was vanilla's `NRunTimer`, and the mod's c
 been switched on in any run); **dying in the race now ends the match**; the arena heal fires **on
 arrival, before the deck review**, at the right time; and the campfire cue plays.
 
-**THE ONE OPEN THREAD, and it voids matches: the arena heal's send does not take.**
+**THE ONE OPEN THREAD IS CLOSED — cause found 2026-08-13 afternoon, fixed, UNPLAYED. Playtest this
+first; what to watch is at the end of this section.**
 
-Twice now, `State divergence detected! … Context: After player turn start` on **checksum ID 0** —
-the duel's first, before a card is played. Both times: each client healed its **own** duelist (host
-`56 -> 70`, client `52 -> 66`) and **neither logged applying the opponent's value**, so both machines
-went into the duel holding a stale opponent.
+**The `hp`/`maxHp` fields were never on the wire.** `DuelMessages.cs` hand-writes every
+`Serialize`/`Deserialize` pair, and the commit that added the two fields to `DuelArrivedMessage` —
+declaring them, documenting them at length, and populating them at the send site — never added them
+to either method. So the sender filled in a real number, the packet carried `modVersion` and `deck`
+and nothing else, and the receiver read the struct's default. Both sides announced `hp=0/0` and
+`ApplyOpponentHp`'s zero guard correctly refused it.
 
-The arrival handler definitely ran on both — each logged `opponent N arrived with M cards`, which
-prints *after* the HP call — so `DuelRendezvous.ApplyOpponentHp` took an early return and said
-nothing. **It now logs both early returns, with the player count**, so a single line in the next log
-names which of three it is:
+**The diagnostic worked exactly as intended and named the answer on the first run.** The three
+candidates were (1) the fields not crossing, (2) a null `RunManager.Instance.State`, (3) the sender
+missing from `State.Players`; the 11:40 logs said (1) on both machines, in one line each:
 
-1. the `hp`/`maxHp` fields added to `DuelArrivedMessage` are not crossing the wire,
-2. `RunManager.Instance.State` is null on receipt, or
-3. the sender is not found among `State.Players`.
+```
+arena: opponent 1001 sent hp=0/0, which is unusable — their heal is NOT applied locally.
+```
+
+Worth noting *why* the earlier reasoning had ruled the send out. `ArriveLocal` calls
+`DuelArenaRest.HealLocalDuelist(state)` and then reads `LocalContext.GetMe(state)?.Creature` two
+lines later — the heal logged `healed 1 56 -> 70 / 70 on arrival`, so the same lookup had just
+succeeded and `mine` could not have been null. That was correct, and it is why the failure had to be
+below the send site rather than at it. The wire format was the one layer nobody had looked at,
+because a field that compiles and a field that transmits look identical in the caller.
+
+**The general rule, and it is new: a field on the struct is not a field on the wire.** These
+serializers are hand-written, so adding a field is a two-place change and the compiler checks
+neither half against the other. Nothing throws, nothing fails to build, and the only symptom is a
+first-checksum divergence in a match that has already started. `DuelMessages.cs` now says so at the
+site. **All 11 mod messages were swept for the same omission — `DuelArrivedMessage` was the only
+one**, and the sweep is worth repeating whenever a message gains a field.
 
 **The rule this cost two runs to learn, and it is not written anywhere else:** the pre-combat state
 sync does **not** carry your own state to the peer — it fixes *your* copy of *them*. So any local
 self-mutation before it is invisible on the opponent's machine forever, and the duel's first checksum
 is what catches it. This is why the heal has to be *sent*, exactly as the decklist is.
 
-**A safety net is in place so matches are playable meanwhile:** `DuelArenaRest.ReconcileAfterSync`
-runs after `WaitForSync`, over both duelists, on both machines — the placement that provably agrees.
-It is **idempotent** (it assigns the target a rest reaches rather than adding 30% again, and skips a
-duelist this machine already healed on arrival), so it settles the two sides without double-healing.
-If the send is fixed it becomes a no-op rather than a second mechanism to remove.
+**The safety net stays.** `DuelArenaRest.ReconcileAfterSync` runs after `WaitForSync`, over both
+duelists, on both machines — the placement that provably agrees. It is **idempotent** (it assigns the
+target a rest reaches rather than adding 30% again, and skips a duelist this machine already healed
+on arrival), so with the send fixed it should now be a **no-op**, which is the point of having built
+it that way. It kept the 11:40 match playable — `reconciled 1001 to 80 / 80 after the sync` on the
+host, `reconciled 1 to 70 / 70` on the client — while the send was broken.
+
+**The playtest, and it is short.** One match to the arena, either turn model, `duel now` from
+**exactly one** player. In each log, at arena arrival:
+
+- `arena: opponent N arrived at H/M after their rest` — the success line, which has **never once
+  appeared**. Its absence is the bug; `sent hp=0/0` means the fix did not take.
+- The host's `healed`/`arrived at` pair should agree with the client's, crossed over: whatever the
+  host healed itself to is what the client reports receiving, and vice versa.
+- `arena rest: reconciled …` should now be **absent** — the safety net finding nothing to do is the
+  confirmation that the two machines already agreed.
+- Then play one card and check for `State divergence detected!`. Checksum ID 0 is the one that
+  caught this; getting past it is the result.
 
 **Still unplayed and queued behind that:** the timeline ordering in `DuelPlayScheduler` (`PlayAt`
 plus the cooldown moved into the scheduler), the alternating tie-break, the 0.55s dwell — and the
