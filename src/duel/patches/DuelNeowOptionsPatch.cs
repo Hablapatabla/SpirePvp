@@ -121,7 +121,10 @@ public static class DuelNeowOptionsPatch
             List<string> names = new List<string>();
             foreach (EventOption option in __result)
             {
-                names.Add(option.GetType().Name);
+                // `GetType().Name` was the first attempt and returned "EventOption" three times —
+                // every blessing is that one class carrying data. `TextKey` is the per-option
+                // identifier and is what distinguishes them.
+                names.Add(option.TextKey);
             }
 
             DuelTelemetry.NoteNeowOptions(

@@ -53,6 +53,10 @@ public static class DuelClockHudPatch
     [HarmonyPatch("RefreshVisibility")]
     public static void AfterRefreshVisibility(NRunTimer __instance)
     {
+        // Sampled *before* our own override below, deliberately — the question is what vanilla
+        // decided, since ours only ever forces it on. Reported per phase rather than once per run:
+        // the first `RefreshVisibility` of a run fires long before the duel, and a one-shot probe
+        // answered for a moment nobody asked about.
         DuelTelemetry.NoteClockHud(
             __instance.Visible,
             SaveManager.Instance.PrefsSave.ShowRunTimer,

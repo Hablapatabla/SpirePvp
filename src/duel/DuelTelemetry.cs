@@ -27,6 +27,7 @@ public static class DuelTelemetry
     public static void Reset()
     {
         _deathReported = false;
+        _clockReportedPhase = -1;
         _emptyAoeSeen.Clear();
     }
 
@@ -99,7 +100,7 @@ public static class DuelTelemetry
                  + $"running action: {key}. That effect hit nothing.");
     }
 
-    private static bool _clockReported;
+    private static int _clockReportedPhase = -1;
 
     /// <summary>
     /// **"Client not showing the clock, host showing it."** Both logs said the match was untimed
@@ -114,13 +115,17 @@ public static class DuelTelemetry
     /// </summary>
     public static void NoteClockHud(bool visibleAfter, bool prefShowsTimer, bool mapVisible)
     {
-        if (_clockReported)
+        // **Once per phase, not once per run.** The first attempt reported once and fired on the
+        // title-to-map transition, long before a duel existed — `ourClockEnabled=True` with
+        // `visible=False` told us nothing, because the moment sampled was not the moment asked
+        // about. Keyed on the phase so the race and the duel each get a line.
+        if (_clockReportedPhase == (int)DuelSession.Phase)
         {
             return;
         }
 
-        _clockReported = true;
-        Log.Warn($"[SpirePvp] telemetry: run timer — visible={visibleAfter}, pref={prefShowsTimer}, "
+        _clockReportedPhase = (int)DuelSession.Phase;
+        Log.Warn($"[SpirePvp] telemetry: run timer [phase {DuelSession.Phase}] — visible={visibleAfter}, pref={prefShowsTimer}, "
                  + $"mapVisible={mapVisible}, ourClockEnabled={DuelClockService.Enabled}, "
                  + $"ourClockLocal={DuelClockService.Local != null}. "
                  + "Compare this line against the other client's.");

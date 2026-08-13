@@ -252,6 +252,13 @@ public static class DuelArena
             await runManager.ExitCurrentRooms();
             RaceCoordinator.EndRace();
 
+            // **A rest on the way in, before the sync rather than after it.** Both duelists arrive
+            // from the Act 1 boss at 20-30 HP, where whoever attacks first wins on turn one and the
+            // duel never happens. Each client heals only its own duelist and the sync below carries
+            // it — healing both here would read an opponent whose state is stale by construction
+            // during a race. See DuelArenaRest.
+            await DuelArenaRest.HealLocalDuelist(runManager.State);
+
             // Bracketed by logs on purpose: a sync that never completes is a silent wait on the
             // map, which looks nothing like a sync problem from the outside.
             Log.Warn("[SpirePvp] duel: waiting for pre-combat state sync");
