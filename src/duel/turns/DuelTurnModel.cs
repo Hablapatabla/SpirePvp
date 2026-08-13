@@ -104,9 +104,21 @@ public static class DuelTurnModel
         DuelPlayScheduler.OnTurnStarted();
         LogPowers(state);
 
-        if (Current is IPlanningTurnModel model)
+        // **Only in the duel.** This is armed for the whole run, and `CombatManager.TurnStarted`
+        // fires for every combat in the *race* too — so an ordinary Act 1 fight was drawing "You
+        // move first" over a creature, and since the arrow hangs off that creature's node it then
+        // rode along to the map screen. Reported 2026-08-12 with a screenshot of it sitting on the
+        // map mid-race. Initiative is a duel rule and means nothing before the arena.
+        //
+        // The clear is unconditional for the same reason: an arrow raised by any path at all has a
+        // turn boundary to be taken down at, rather than living until the run ends.
+        if (DuelSession.IsDuelActive && Current is IPlanningTurnModel model)
         {
             LockInPlanView.ShowInitiative(model.CurrentLeader);
+        }
+        else
+        {
+            LockInPlanView.ClearInitiative();
         }
     }
 
