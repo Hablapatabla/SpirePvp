@@ -61,6 +61,9 @@ internal static class DuelIncoming
 
     private static MegaLabel? _label;
 
+    /// <summary>Rate-limits the stale-pack warning: it would otherwise fire on every pool change.</summary>
+    private static bool _captionKeyMissingLogged;
+
     /// <summary>
     /// Armed at run start with every other handler, never on first use.
     ///
@@ -85,6 +88,7 @@ internal static class DuelIncoming
         RunManager.Instance?.NetService?.UnregisterMessageHandler<DuelPendingPlaysMessage>(OnPendingPlays);
         Clear();
         _armed = false;
+        _captionKeyMissingLogged = false;
     }
 
     /// <summary>
@@ -151,8 +155,42 @@ internal static class DuelIncoming
             _label = BuildLabel(room, state);
         }
 
-        _label?.SetTextAutoSize(
-            new LocString("gameplay_ui", "SPIREPVP_INCOMING").GetFormattedText().Replace("{0}", text));
+        _label?.SetTextAutoSize(Caption(text));
+    }
+
+    /// <summary>
+    /// The caption, and **it must not be able to throw** — which it was, measured 2026-08-13 on the
+    /// first run of this feature.
+    ///
+    /// `LocManager` raises `LocException` for a key it cannot find, and this is called from a net
+    /// message handler: the exception propagated into `NetMessageBus`, which logged it and **dropped
+    /// the whole message**, so the caption never updated at all. Nine of them in one match.
+    ///
+    /// The missing key was the ordinary `.pck` staleness — `client.ps1` never re-exports, so the
+    /// client was reading the committed pack while the host had a fresh one — and that will keep
+    /// happening: a loc key is added in the same commit as the code that reads it, and the two ship
+    /// in different files. So the fallback is the fix, not the re-export. A caption is worth losing
+    /// its prefix over; it is not worth losing the message that carries the opponent's plays.
+    /// </summary>
+    private static string Caption(string cards)
+    {
+        try
+        {
+            LocString loc = new LocString("gameplay_ui", "SPIREPVP_INCOMING");
+            loc.Add("Cards", cards);
+            return loc.GetFormattedText();
+        }
+        catch (Exception e)
+        {
+            if (!_captionKeyMissingLogged)
+            {
+                _captionKeyMissingLogged = true;
+                Log.Warn("[SpirePvp] incoming: SPIREPVP_INCOMING is missing from gameplay_ui — the "
+                         + $"pack is stale, showing bare card names ({e.GetType().Name})");
+            }
+
+            return cards;
+        }
     }
 
     /// <summary>
