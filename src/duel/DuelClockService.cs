@@ -385,6 +385,27 @@ public static class DuelClockService
             return;
         }
 
+        // **A card selection is thinking time, and a chess clock charges thinking time.** Lucas,
+        // 2026-08-13: "the time spent picking your choice should count towards your timer and your
+        // opponent's should freeze." Without this the pair of rules disagreed — `DuelChoiceStallPatch`
+        // now holds the whole batch while someone is choosing, and `IsDoneDeciding` counts
+        // *resolution* as committed for both, so a choice would have frozen both clocks and made
+        // deliberation free for the one player still making a decision.
+        //
+        // Read from the same state the stall reads, deliberately: two answers to "who is deciding"
+        // is the shape of half the bugs in this file.
+        ulong chooser = Patches.DuelChoiceStallPatch.PlayerGatheringChoice();
+        if (chooser != 0)
+        {
+            foreach (Player player in state.Players)
+            {
+                DuelClock clock = LocalContext.IsMe(player) ? _local : _opponent;
+                ApplyReadyState(clock, player.NetId != chooser);
+            }
+
+            return;
+        }
+
         foreach (Player player in state.Players)
         {
             DuelClock clock = LocalContext.IsMe(player) ? _local : _opponent;
