@@ -67,12 +67,25 @@ public static class DuelPlayScheduler
     private static readonly Dictionary<ulong, int> _nextIndex = new Dictionary<ulong, int>();
     private static bool _pumping;
 
+    /// <summary>
+    /// Ties already broken this turn. See <see cref="Release"/> — the leader takes the first, the
+    /// other player the second, and so on.
+    /// </summary>
+    private static int _tiesThisTurn;
+
     /// <summary>Drops everything, so the next duel starts even.</summary>
     public static void Reset()
     {
         _pending.Clear();
         _nextIndex.Clear();
+        _tiesThisTurn = 0;
     }
+
+    /// <summary>
+    /// A new turn starts the tie alternation over, so initiative's first strike is the leader's in
+    /// every turn rather than in every other one.
+    /// </summary>
+    public static void OnTurnStarted() => _tiesThisTurn = 0;
 
     /// <summary>
     /// Takes a play — the host's own, or one that arrived from the client — into the pool.
@@ -147,18 +160,84 @@ public static class DuelPlayScheduler
         // straddle a turn boundary.
         ulong leader = (DuelTurnModel.Current as IPlanningTurnModel)?.CurrentLeader ?? 0;
 
-        Pending best = _pending[0];
+        // Lowest per-player index first: your first beats their second, and neither of you can be
+        // buried by the other's backlog.
+        int lowest = int.MaxValue;
         foreach (Pending candidate in _pending)
         {
-            if (candidate.Index < best.Index
-                || (candidate.Index == best.Index && candidate.Owner == leader && best.Owner != leader))
+            if (candidate.Index < lowest)
             {
-                best = candidate;
+                lowest = candidate.Index;
             }
+        }
+
+        Pending best = _pending[0];
+        int tied = 0;
+        foreach (Pending candidate in _pending)
+        {
+            if (candidate.Index == lowest)
+            {
+                tied++;
+            }
+        }
+
+        string reason;
+        if (tied <= 1 || leader == 0)
+        {
+            foreach (Pending candidate in _pending)
+            {
+                if (candidate.Index == lowest)
+                {
+                    best = candidate;
+                    break;
+                }
+            }
+
+            reason = "lowest index";
+        }
+        else
+        {
+            // **The tie alternates within the turn, and that is the whole of M9's advantage.**
+            // Measured 2026-08-12: almost every contested play is #0 against #0, because each
+            // player's own cooldown spaces their plays out so they reach the pool one at a time. A
+            // tie-break that always went to the initiative holder therefore did not mean "you strike
+            // first this turn" — it meant "you win every trade this turn", compounding across the
+            // turn's exchanges and then inverting wholesale on the next one. That is far more than
+            // reaching the arena first was meant to buy.
+            //
+            // So the leader takes the turn's *first* tie, the other player its second, and so on.
+            // Initiative then means exactly what the arrow over the duelist claims. Deterministic
+            // and host-side, so it cannot desync; a seeded coin flip would be equally safe and was
+            // rejected for a different reason — "why did my card lose" has to have an answer a
+            // player can plan around.
+            bool leaderTakesIt = _tiesThisTurn % 2 == 0;
+            _tiesThisTurn++;
+
+            Pending? pick = null;
+            foreach (Pending candidate in _pending)
+            {
+                if (candidate.Index != lowest)
+                {
+                    continue;
+                }
+
+                bool isLeader = candidate.Owner == leader;
+                if (isLeader == leaderTakesIt)
+                {
+                    pick = candidate;
+                    break;
+                }
+
+                pick ??= candidate;
+            }
+
+            best = pick ?? best;
+            reason = $"tie {_tiesThisTurn} this turn → {(leaderTakesIt ? "initiative" : "alternated")}";
         }
 
         _pending.Remove(best);
         run.ActionQueueSynchronizer.EnqueueAction(best.Action, best.Owner);
-        Log.Info($"[SpirePvp] queue: releasing {best.Owner}'s play #{best.Index} ({_pending.Count} still waiting)");
+        Log.Info($"[SpirePvp] queue: releasing {best.Owner}'s play #{best.Index} "
+                 + $"[{reason}] ({_pending.Count} still waiting)");
     }
 }

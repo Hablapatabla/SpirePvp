@@ -1205,14 +1205,29 @@ run before it, where the host's bypassed plays kept the pool backed up long enou
 reach `#1` and `#2`. So the tie-break — initiative — is what orders most contested plays, and "your
 first beats their second" is the exception rather than the rule.
 
-**That may be the right outcome by the wrong mechanism**, which is the part to decide rather than
-patch. A player's backlog waits in their *own* cooldown queue and not in the pool, so the flooding
-the index rule was written against cannot really happen; the index only separates plays that landed
-inside one drain. Two candidates if it needs to change: **reset per turn** rather than per drain,
-which makes the index mean "how much of this turn's stream you have already used" and needs no
-constant, or **leave it and say so**, cutting the index rule back to what it actually does. Do not
-tune the reset window into a third arbitrary number — that was the first attempt's mistake in a new
-costume.
+**DECIDED AND BUILT 2026-08-12 (unplayed): the tie alternates within the turn.** Because ties are
+the common case, a tie-break that always went to the initiative holder did not mean "you strike
+first this turn" — it meant **"you win every trade this turn"**, compounding across the turn's
+exchanges (your Strike before their Block, repeatedly) and then inverting wholesale on the next
+turn. Far more than reaching the arena first was meant to buy, and nobody decided it; it fell out of
+the tie-break.
+
+So the leader takes the turn's **first** tie, the other player its second, and so on, reset at each
+turn start. Initiative now means exactly what the arrow over the duelist claims. Deterministic and
+host-side, so it cannot desync. A seeded coin flip would have been equally safe and was rejected for
+a different reason: *"why did my card lose"* has to have an answer a player can plan around.
+
+The release line now names why it won — `[lowest index]` or `[tie N this turn → initiative
+/ alternated]` — so the next playtest can be read rather than felt.
+
+**Deliberately not done at the same time: resetting the index per turn** rather than per drain. It
+sounds like the natural partner — your 2nd play of the turn beating their 3rd — but each player's
+0.4s cooldown already spaces their plays out, so real bursts are rare and it would change few
+orderings, while adding the odd case where the board goes still, both players click, and one loses
+because they played earlier in the turn. One change at a time. **The evidence that would reopen it
+is a booking whose index is not `#0`**; if those start appearing now that the dwell is 0.55s, the
+index is doing more work than this assumed. Do not tune the reset window into a third arbitrary
+number — that was the first attempt's mistake in a new costume.
 
 Three things about it worth not re-deriving:
 

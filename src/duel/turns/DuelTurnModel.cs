@@ -96,6 +96,12 @@ public static class DuelTurnModel
         }
 
         (Current as TickTurnModel)?.OnTurnStarted();
+
+        // The tie alternation is per turn, so initiative's first strike is the leader's in every
+        // turn rather than in every other one. Host-only in effect — a client's scheduler never
+        // releases anything — but reset on both, because a counter that only one side keeps is a
+        // counter that is wrong the moment the roles are reversed by a rematch.
+        DuelPlayScheduler.OnTurnStarted();
         LogPowers(state);
 
         if (Current is IPlanningTurnModel model)
