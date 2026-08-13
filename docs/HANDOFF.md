@@ -784,7 +784,33 @@ Keep that split if you extend this.
 
 ## Immediate next step
 
-### START HERE — state as of 2026-08-13 midday, after a morning of two-client playtests
+### START HERE — 2026-08-13 afternoon. Both turn models are playtested; the AoE fix is not.
+
+**Playtested and good today:** the arena heal on the wire, real-time paced (pacing, position
+ordering, cross-player beat, contest window — *"felt great"*), and turn-based end to end (*"working
+great"*), which closes the lock-in gate inversion. Details are in the sections below.
+
+**The next playtest, and it is the risky one.** Two commits were cherry-picked from
+`overnight/2026-08-13` onto master this afternoon, both **UNPLAYED**:
+
+1. **The AoE actor** (`DuelAoeActor`, `DuelAoeTargetingPatch`, `DuelHookListenerScopePatch`) — "all
+   enemies" effects have hit nothing in a duel since M2. It patches `CombatState.HittableEnemies`,
+   a getter this document called unpatchable since M1, deliberately and with an argument. **Watch
+   for a checksum divergence rather than a wrong number on screen** — a desync voids the match as a
+   draw, so it announces itself. What to try: any AoE card (Cleave, Thunderclap, Shockwave) or Bag
+   of Marbles, which is the relic the whole thing was reported from. Thunderclap is the best single
+   test, because its damage and its Vulnerable travel by two different routes that must agree.
+2. **The opponent's relics in the deck review** — small, and visible on the entry screen.
+
+**Patch count is now 71 classes / 109 methods** — this has never been seen in a log, so confirm that
+exact line on the next launch before trusting anything else in the run.
+
+**Still on the branch, not taken:** `32e59a5` (audit of the combat teardown the duel skips, which is
+the "killing blow hangs in mid-air" fix) and `3c43656` (the `NCard` double-free root cause). Both
+unplayed, both deliberately left until the two above have been in a game — stacking four unplayed
+changes makes a failure impossible to attribute.
+
+### The morning's state, kept for the reasoning — 2026-08-13 midday
 
 **Confirmed working in play today** (so do not re-test these): the initiative arrow no longer leaks
 onto the map; the race timer shows on both clients with clocks on (which also retires the old "client
