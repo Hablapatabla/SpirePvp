@@ -63,6 +63,15 @@ which works because `CleanUp` has *not* fired while that screen is up.
   the scheduler and is the whole of "the client is waiting behind the host".
 - Initiative (M9) is live in both: first to the arena leads, alternating each turn.
 
+**The AoE family is fixed (2026-08-13, unplayed).** "All enemies" effects hit nothing in a duel
+because `CombatState.HittableEnemies` reads an empty enemy side. This document used to say that
+getter was unpatchable; what is actually true is that it has no attacker to reason from, so the
+*actor* has to come from the simulation rather than from the machine. `DuelAoeActor` supplies one —
+the model currently being handed a hook, else the running action's owner — and unresolved reads fall
+back to vanilla's empty list. **Note the trap it turns on: at hook time the running action is not
+just absent, it is often the *other* duelist's**, so resolving the actor from
+`CurrentlyRunningAction` alone would have applied your poison to your own side. See HANDOFF.
+
 **Remaining:** M8.5 slice 3 — the opponent's unsubmitted queue on the wire, which is what makes the
 paced mode readable rather than merely slower. See HANDOFF for the playtest order and three
 unconfirmed observations.
@@ -76,7 +85,7 @@ side comparison before suspecting the mechanic. DESIGN §7 has the symptom → c
 - `dotnet build` must stay green; it auto-installs the mod into the local game.
 - **Never use `Harmony.PatchAll`.** It throws on the first bad target and silently abandons the
   rest. `SpirePvpInit` patches per class and logs a count — confirm `N patch classes applied
-  cleanly` in the log on every launch, or in-game results are meaningless. **70 as of 2026-08-13** (108 methods). Note the count is per *class*, not per patch: a class holding several patch
+  cleanly` in the log on every launch, or in-game results are meaningless. **71 as of 2026-08-13** (109 methods) — `DuelModifierMinimumPatch` added one, and the AoE fix removed `DuelAoeProbePatch` and added `DuelAoeTargetingPatch` and `DuelHookListenerScopePatch`. Note the count is per *class*, not per patch: a class holding
   methods still counts once, so grouping patches by concern does not move it.
 - **The engine assumes the party is standing together, and in a race it is not.** This is the
   single most productive thing to suspect when a race-phase room misbehaves — it has now

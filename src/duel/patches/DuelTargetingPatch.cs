@@ -22,12 +22,16 @@ namespace SpirePvp.Duel.Patches;
 /// Damage/block/powers all operate on Creature and never inspect sides, so the rest of the
 /// card mechanics layer comes along untouched — that is the whole trick of §3.1.
 ///
-/// STILL OPEN — AOE and random targeting. Those read CombatState.HittableEnemies
-/// (`Enemies.Where(IsHittable)`), a property with no acting-player context, so it cannot be
-/// retargeted from the getter alone: it has no way to know whose opponent to return. M1
-/// acceptance only needs single-target Strikes; M2 should retarget at the call sites that
-/// do know the actor (card and power effects hold Owner) rather than patching the getter
-/// globally.
+/// AOE and random targeting were open here from M1 until 2026-08-13 (unplayed). This note used to
+/// read "STILL OPEN … it cannot be retargeted from the getter alone: it has no way to know whose
+/// opponent to return", and that was true of the getter *by itself* — but the missing context does
+/// not have to come from the property. `DuelAoeActor` supplies an actor the simulation defines
+/// (the model being handed a hook, else the running action's owner), which is identical on both
+/// clients, and `DuelAoeTargetingPatch` answers the getter from it. The plan sketched here — patch
+/// the call sites that hold `Owner` — was reconsidered and rejected: there are 70 of them, a third
+/// iterate the list themselves rather than passing it to a command, and a fix that covered only the
+/// ones reachable through `PowerCmd`/`CreatureCmd` would have looked complete while leaving Stomp,
+/// Outbreak and Misery silently dead.
 /// </summary>
 [HarmonyPatch(typeof(CardModel), nameof(CardModel.IsValidTarget))]
 public static class DuelTargetingPatch

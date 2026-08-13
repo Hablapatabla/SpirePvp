@@ -71,18 +71,24 @@ public static class DuelTelemetry
     }
 
     /// <summary>
-    /// **The Bag of Marbles family.** `CombatState.HittableEnemies` is `Enemies.Where(IsHittable)`,
-    /// and a duel has an empty enemy side — so every "all enemies" effect in the game resolves
-    /// against nothing. 70 models read that property; `DuelTargetingPatch` has carried "STILL OPEN —
-    /// AOE and random targeting" since M2.
+    /// **The residue of the AoE fix, and the only part of it a log can report.**
     ///
-    /// Rather than guess which of the 70 actually turn up in play, this names them as they happen:
-    /// one line per distinct culprit per run, keyed by the action the sim is running. The key is
-    /// also the evidence — a report with no running action (Bag of Marbles is applied from
-    /// `BeforeSideTurnStart`, outside any action) is exactly the case that makes the obvious fix,
-    /// resolving the actor from `CurrentlyRunningAction`, insufficient on its own.
+    /// This used to be `NoteEmptyAoe`, a pure probe: it reported *every* empty `HittableEnemies`
+    /// read during a duel, because at the time every one of them was a bug and the point was to
+    /// learn which effects turned up in play. It never reported anything — the probe shipped on
+    /// 2026-08-12 and the single duel played on that build used no AoE effect at all, so the fix
+    /// that followed was built from the decompile instead.
+    ///
+    /// Now `DuelAoeTargetingPatch` answers those reads with the asking duelist's opponents, and an
+    /// empty result means something narrower: **the mod could not name an actor for this read**, so
+    /// it left vanilla's answer alone and the effect hit nothing. That is the gap to bring back,
+    /// with the running action as the key — the same key as before, so old and new logs compare.
+    ///
+    /// Still one line per distinct key per run. A probe that floods the log makes the log useless
+    /// for the bug it was added to catch, and this one now sits on a property the UI reads every
+    /// frame.
     /// </summary>
-    public static void NoteEmptyAoe()
+    public static void NoteUnresolvedAoe()
     {
         if (!DuelSession.IsDuelActive)
         {
@@ -96,8 +102,9 @@ public static class DuelTelemetry
             return;
         }
 
-        Log.Warn($"[SpirePvp] telemetry: HittableEnemies came back EMPTY during a duel — "
-                 + $"running action: {key}. That effect hit nothing.");
+        Log.Warn($"[SpirePvp] telemetry: an \"all enemies\" read found NO ACTOR during a duel — "
+                 + $"running action: {key}. Vanilla's empty list stands, so that effect hit "
+                 + "nothing. This names a case DuelAoeActor does not cover.");
     }
 
     private static int _clockReportedPhase = -1;

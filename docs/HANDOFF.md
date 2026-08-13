@@ -79,8 +79,10 @@ abandons the rest, so one typo disables an arbitrary subset while the mod still 
 still logs "loaded". `SpirePvpInit` therefore applies each patch class independently and logs
 a count. **On every launch, confirm the log says `N patch classes applied cleanly`** — if it
 says `PATCH FAILED`, some of the mod is not running and in-game results mean nothing.
-**70 as of this handoff** (108 methods); 69/107 was confirmed against a live log 2026-08-12 and
-`DuelModifierMinimumPatch` added one of each on 2026-08-13, unconfirmed in a log. The count is per *class*, not per patch: a class holding
+**71 as of this handoff** (109 methods). 69/107 was confirmed against a live log on 2026-08-12.
+Since then `DuelModifierMinimumPatch` added one of each, and the AoE fix retired `DuelAoeProbePatch`
+and added `DuelAoeTargetingPatch` and `DuelHookListenerScopePatch` — so **71/109 is arithmetic and
+has not been seen in a log yet**. The count is per *class*, not per patch: a class holding
 several patch methods still counts once, so grouping patches by concern does not move it.
 
 **Harmony resolves `[HarmonyPatch(typeof(X))]` against methods declared on `X` only.** Naming
@@ -1137,9 +1139,10 @@ heading is built and *not yet played*, so treat "it works" as a claim, not a fac
 - Initiative (M9) is live in both: whoever reached the arena first leads, alternating each turn,
   shown as an arrow over that duelist with "You move first" / "They move first" above it.
 
-**Patch count: 70 classes / 108 methods.** Verified against a live log before the last two commits,
-which add no patches (`DuelTurnModel.ShouldDefer`'s guard, and the scheduler rewrite/rename).
-**Those two have never been run in game at all** — they compile and nothing more.
+**Patch count: 71 classes / 109 methods.** 69/107 was verified against a live log before the last
+two 2026-08-12 commits, which add no patches (`DuelTurnModel.ShouldDefer`'s guard, and the scheduler
+rewrite/rename). `DuelModifierMinimumPatch` and the AoE fix take it to 71/109 on paper. **None of
+those have been run in game at all.**
 
 ### A rest site before the duel — approved 2026-08-12, designed, NOT built
 
@@ -1200,9 +1203,103 @@ it is an event subscriber, so the count stays 69.
 for the other. Rare (separate combats, and it needs the same second), and the same crossing case
 `DuelDrawPrompt` already handles for offers — but it is not handled here.
 
+### The AoE family is fixed (2026-08-13, UNPLAYED) — and the getter is patchable after all
+
+**Symptom, open since M2:** Bag of Marbles applies no Vulnerable in a duel, and the same for every
+other "all enemies" effect. **Cause:** `CombatState.HittableEnemies` is `Enemies.Where(IsHittable)`
+and a duel has an empty enemy side, so all of them resolve against nothing.
+
+**This document has said since M1 that the getter "is not patchable", and that claim was right
+about the getter and wrong as a conclusion.** What it actually established is that the property has
+no attacker to reason from, so *an answer invented at the getter is a local guess inside sim code,
+i.e. a desync*. That argument constrains where the actor comes from; it does not forbid answering.
+`DuelAoeActor` supplies an actor that the **simulation itself defines**, so both clients resolve the
+same one, and `DuelAoeTargetingPatch` answers the getter with `GetOpponentsOf(actor)`.
+
+Two tiers, and **the second one is the finding worth keeping**:
+
+- **Tier A — the model being handed a hook.** `DuelHookListenerScopePatch` wraps
+  `CombatState.IterateHookListeners` so that whichever relic/power/card is currently being
+  dispatched is ambient for exactly that stretch. `IterateHookListeners` builds a `List` and returns
+  it, so this is an ordinary iterator wrapper and not a patch on a compiler-generated state machine
+  — and it is the **single funnel**: all 74 dispatch loops in `Hook.cs` enumerate it, directly or
+  through `Hook.IterateCombatHookListeners`. One patch, every hook, including hooks a game update
+  adds.
+- **Tier B — the running action's owner**, for card/potion/orb effects, which run inside their own
+  action (`Thunderclap.OnPlay` inside its `PlayCardAction`, whose `OwnerId` is the player who played
+  it).
+- **Neither resolves → vanilla's empty list stands**, reported once per distinct case. An
+  unresolved read behaves exactly as the mod does today, which is the whole reason this is
+  defensible without a playtest.
+
+**The queue expected tier B to be merely *insufficient* at hook time (`CurrentlyRunningAction` is
+null in `BeforeSideTurnStart`). Reading the decompile makes the hole bigger, and that is the part to
+remember: at hook time the running action is frequently *wrong* rather than absent.**
+`CorrosiveWavePower.AfterCardDrawn`, `PanachePower.AfterCardPlayed`, `LostWisp.AfterCardPlayed` and
+a dozen more fire while the **other** duelist's action is executing. A fix built on tier B alone
+would have applied your poison to your own side — silently, only when the opponent moved, and never
+in a solo test. Tier A therefore takes precedence whenever a hook is running, which is also correct
+for a card a relic *auto-plays*: Whispering Earring picks and plays a card during its owner's hook,
+and the owner is the actor either way.
+
+**Three things it deliberately does not do**, each of which was the tempting version:
+
+- **It does not build its own target set.** It answers through `GetOpponentsOf`, which
+  `DuelOpponentsPatch` already retargets and which every attack already travels through. Thunderclap
+  is the worked example — it damages through `TargetingAllOpponents` and applies Vulnerable through
+  `HittableEnemies` — so a second, slightly different set here would have it damage the duelist and
+  Vulnerable the duelist *and their pets*. It also means the open question "should the opponent's
+  pet be attackable?" stays open in one place instead of being answered twice by accident.
+- **It does not patch the call sites.** The note in `DuelTargetingPatch` proposed exactly that
+  ("retarget at the call sites that do know the actor"), and it does not survive contact with the
+  decompile: there are **70 read sites**, and while `PowerCmd.Apply` and `CreatureCmd.Damage` are
+  handed both the list and the source — which covers Bag of Marbles, Thunderclap, Noxious Fumes,
+  Letter Opener — a third of the sites iterate the list themselves (`Stomp`, `Outbreak`, `Misery`,
+  `Shockwave`, `Piercing Wail`, `TwistedFunnel`) or take one element from it (`Shiv`,
+  `WhisperingEarring`, and every `Rng.CombatTargets.NextItem` random pick). A command-layer fix
+  would have looked complete and left those dead.
+- **It does not give each duelist their own `CombatState`.** This is the idea that looks best on
+  paper — `Creature.CombatState` and `AbstractModel.CombatState` *are* per-owner getters, so a
+  per-owner proxy would answer all 70 sites with no ambient at all — and it is a trap.
+  `CardModel.CardScope` does `((ICardScope)CombatState)`, so the proxy must implement every
+  interface `CombatState` does or throw an `InvalidCastException` in the card layer; `CreaturesChanged`
+  subscriptions taken on a fresh proxy would never fire; and `Creature.CombatState` is read by
+  hundreds of engine call sites that a duel has no business touching. Rejected on those three, not
+  on taste.
+
+**What was already working, and had been mis-scoped as broken.** The "70 models" number counts read
+sites, not broken effects. Cards that *damage* all enemies — Dagger Spray, Cleave, Sweeping Beam —
+deal that damage through `AttackCommand.TargetingAllOpponents` → `GetOpponentsOf`, which
+`DuelOpponentsPatch` has covered since M2. On those cards only the **rider** was missing: Dagger
+Spray's impact VFX, Thunderclap's Vulnerable. Fully broken were the effects that read the property
+directly — Bag of Marbles, Noxious Fumes, The Bomb, Inferno, Letter Opener, Charon's Ashes, and the
+random-target picks behind Beat Down, Bouncing Flask, Tingsha and Parrying Shield.
+
+**The evidence base is the decompile, because there is no other.** The queue said to grep Lucas's
+logs for `telemetry: HittableEnemies came back EMPTY` and build for what appears. **Nothing appears
+— not one line, in any log on this machine.** `logs/*.log` are all from builds that predate the
+probe, and of the five `%APPDATA%\SlayTheSpire2\logs\godot.log` files exactly one carries it
+(`69 patch classes applied cleanly`, a Steam duel against a second player, `duel over — WON`); that
+duel's whole card list is Squeeze / Neurosurge / Putrefy / Photon Cut and contains no AoE effect at
+all. So the probe worked and had nothing to say. Worth knowing for next time: **a silent probe is
+evidence about the sample, not about the bug.**
+
+**Known imprecision, written down rather than smoothed over.** A hook body that `await`s leaves tier
+A's ambient set across the await, so anything that runs in that window — a card asking whether it
+should glow gold, a targeting visual — sees the hook's actor instead of its own. Those readers are
+presentation and change no state, and a *sim* read cannot land in that window because the executor
+runs one action at a time with hooks awaited inline. If a duel ever shows an AoE card highlighting
+the wrong creature for a moment, this is why, and it is cosmetic.
+
+**What to play first.** Any duel with an "all enemies" effect on either side. Bag of Marbles is the
+cleanest single test because it is the original report and it fires at turn start with no card
+involved. Then a Thunderclap or a Haze, which exercise tier B. The line to watch for is the *absence*
+of `telemetry: an "all enemies" read found NO ACTOR` — one of those names a case this does not
+cover, and the running action it prints is the lead.
+
 ### Telemetry added 2026-08-12, and what each line answers
 
-`DuelTelemetry` and `DuelAoeProbePatch` **log and change nothing** — added at Lucas's request so the
+`DuelTelemetry` **logs and changes nothing** — added at Lucas's request so the
 next session answers four open reports instead of describing them. Rate-limited on purpose; a probe
 that floods the log makes the log useless for the bug it was added to catch. All four lines are
 `[SpirePvp] telemetry:`.
@@ -1210,7 +1307,7 @@ that floods the log makes the log useless for the bug it was added to catch. All
 | Line | The report it settles |
 |---|---|
 | `local duelist is DEAD — phase=… resultArmed=…` | *"I died to the boss and it didn't end the run."* `DuelResult.Arm()` runs from `DuelArena`, i.e. **on arena entry**, so nothing watches a death for the whole race — `resultArmed=False` next to a dead duelist is that, confirmed. |
-| `HittableEnemies came back EMPTY — running action: …` | The Bag of Marbles family: names each culprit as it happens, once per distinct action. **A report reading `<no running action>` is the important one** — those are hook-time effects like Bag of Marbles' own `BeforeSideTurnStart`, and they are why "resolve the actor from `CurrentlyRunningAction`" cannot be the whole fix. |
+| ~~`HittableEnemies came back EMPTY`~~ → `an "all enemies" read found NO ACTOR` | Was the Bag of Marbles probe (`DuelAoeProbePatch`, now retired). **It never printed a single line**, in any log on any machine — see the AoE section below. It now reports the *residue* of the fix instead: a read the mod could not attribute to a duelist, where vanilla's empty list still stands. |
 | `run timer — visible=… pref=… mapVisible=…` | *"Client doesn't show the clock, host does."* Both sides logged `raceClock=0 min`, so the widget is vanilla's `NRunTimer`, not ours, and `show_run_timer` is `false` in **both** dev profiles. The answer is the diff between the two clients' lines. |
 | `Neow offered <id> (<character>): A / B / C` | *"We were both Necro and got different Neow bonuses."* By **name**, never index — the indices match by construction and mean different things on the two clients, which is the trap that killed the opponent-vote icon. |
 
@@ -1816,7 +1913,8 @@ guessing at it.
 **Everything from the 2026-08-12 session is built and playtested.** The loop, the desync fixes, the
 result screen, rematch — all confirmed in play on both clients, with the only errors in either log
 being vanilla's `Error deleting path …current_run_mp.save.backup`, which is noise and predates this
-work. Patch count is **70 classes / 108 methods**; confirm that line on every launch.
+work. Patch count was **69 classes / 107 methods** at the time of that note (71/109 now); confirm
+that line on every launch.
 
 Closed and confirmed this session, so nothing below needs re-testing:
 
@@ -2071,8 +2169,12 @@ Smaller known gaps, none blocking:
   only tweens; it does not free), so start by finding the first free, not by assuming this one.
   Worth fixing before it is left alone: a pooled node handed out twice would land in a *later*
   combat, and Rematch keeps the process alive across runs.
-- `HellraiserPower`'s infinite-combo cap misfires in a duel (`HittableEnemies.All(...)` on an
-  empty list is vacuously true), capping auto-plays at 9 per turn. Arguably desirable.
+- ~~`HellraiserPower`'s infinite-combo cap misfires in a duel (`HittableEnemies.All(...)` on an
+  empty list is vacuously true), capping auto-plays at 9 per turn.~~ **Should be gone as a
+  side-effect of the 2026-08-13 AoE fix, unplayed:** the list is no longer empty, so
+  `All(c => c.HpDisplay.IsInfinite())` is false against a real duelist and the cap stops firing.
+  Noted rather than celebrated — it was called "arguably desirable", so if Hellraiser now runs long
+  in a duel, this is the change that did it.
 - Other `AfterSideTurnStart` powers may have the same round-late skew poison had. Audit when
   one shows up; only poison is fixed.
 - The duel entry screen's confirm feedback is a colour tint standing in for the intended
