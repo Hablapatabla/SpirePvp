@@ -12,7 +12,9 @@ using MegaCrit.Sts2.Core.Entities.Multiplayer;
 using MegaCrit.Sts2.Core.GameActions;
 using MegaCrit.Sts2.Core.Localization;
 using MegaCrit.Sts2.Core.Models;
+using MegaCrit.Sts2.Core.Nodes;
 using MegaCrit.Sts2.Core.Nodes.Cards;
+using MegaCrit.Sts2.Core.Nodes.Potions;
 using MegaCrit.Sts2.Core.Nodes.Combat;
 
 namespace SpirePvp.Duel.Turns;
@@ -44,12 +46,19 @@ internal static class LockInPlanView
     /// **The card is resolved from `NetCombatCard`**, for the same reason the reservation is:
     /// `PlayCardAction._card` is assigned in `ExecuteAction` and a held play has not executed.
     ///
-    /// Potions are held too (`UsePotionAction` is `CombatPlayPhaseOnly` in combat) and have no
-    /// presentation here — the queue is a card strip. A planned potion still looks like nothing
-    /// happened; it is a smaller version of the same gap and wants its own answer.
+    /// **Potions are held too** (`UsePotionAction` is `CombatPlayPhaseOnly` in combat) and the queue
+    /// is a card strip with nowhere to put one, so they take the belt instead — see
+    /// <see cref="ShowPlannedPotion"/>. That gap was open until 2026-08-13 and a planned potion read
+    /// as a dead click.
     /// </summary>
     public static void ShowPlanned(GameAction action)
     {
+        if (action is UsePotionAction potion)
+        {
+            ShowPlannedPotion(potion);
+            return;
+        }
+
         if (action is not PlayCardAction play)
         {
             return;
@@ -65,6 +74,73 @@ internal static class LockInPlanView
         // A null holder is not a failure: vanilla's own path passes whatever GetCardHolder finds
         // and builds a node when there is none.
         queue.OnLocalCardPlayed(play, NPlayerHand.Instance?.GetCardHolder(card), card);
+    }
+
+    /// <summary>
+    /// Greys a planned potion in the belt, using vanilla's own "used, not yet resolved" state.
+    ///
+    /// **A planned potion looked like a dead click**, which is the same gap the play queue closes for
+    /// cards and was left open because the queue is a *card strip* with nowhere to put a potion.
+    /// The belt is the right surface, and vanilla already has the exact state: `UsePotionAction` is
+    /// `CombatPlayPhaseOnly` in combat, so it is buffered exactly like a card play, and the holder is
+    /// greyed by `NPotionPopup` subscribing to `potion.BeforeUse` — which fires when the action
+    /// **executes**. In a planning model that is a whole round later, so the potion sat there looking
+    /// untouched and, worse, still clickable.
+    ///
+    /// `DisableUntilPotionRemoved` is what that subscription calls. It does two things and both are
+    /// wanted: it sets `_disabledUntilPotionRemoved`, so the potion cannot be planned a second time,
+    /// and it greys the holder after a beat. Borrowed rather than reinvented, for the same reason
+    /// the card queue and the rest cue are.
+    ///
+    /// Restoring is <see cref="RestorePlannedPotions"/>'s job — a resolved potion leaves the belt on
+    /// its own, but a cancelled batch would otherwise leave the holder grey for the rest of the duel.
+    /// </summary>
+    private static void ShowPlannedPotion(UsePotionAction action)
+    {
+        NPotionHolder? holder = HolderFor(action.PotionIndex);
+        holder?.DisableUntilPotionRemoved();
+    }
+
+    /// <summary>
+    /// Returns any still-held potion to its normal state, for the batch that never resolved.
+    ///
+    /// Called at a turn boundary, where the in-flight lists are cleared anyway. A potion that was
+    /// actually drunk has already left the belt — `RemoveUsedPotion` empties its holder — so anything
+    /// still holding a potion here is one that was planned and then cancelled, or planned in a batch
+    /// that never flushed.
+    /// </summary>
+    public static void RestorePlannedPotions()
+    {
+        List<NPotionHolder>? holders = NRun.Instance?.GlobalUi?.TopBar?.PotionContainer?._holders;
+        if (holders == null)
+        {
+            return;
+        }
+
+        foreach (NPotionHolder holder in holders)
+        {
+            if (GodotObject.IsInstanceValid(holder) && holder.Potion != null)
+            {
+                holder.CancelPotionUseOrDiscard();
+            }
+        }
+    }
+
+    /// <summary>
+    /// The belt slot for a potion index. `UsePotionAction.PotionIndex` indexes `Player.PotionSlots`,
+    /// and the container builds one holder per slot in the same order — bounds-checked rather than
+    /// assumed, since this runs on a click and a wrong guess would throw into the player's face.
+    /// </summary>
+    private static NPotionHolder? HolderFor(uint index)
+    {
+        List<NPotionHolder>? holders = NRun.Instance?.GlobalUi?.TopBar?.PotionContainer?._holders;
+        if (holders == null || index >= holders.Count)
+        {
+            return null;
+        }
+
+        NPotionHolder holder = holders[(int)index];
+        return GodotObject.IsInstanceValid(holder) ? holder : null;
     }
 
     /// <summary>

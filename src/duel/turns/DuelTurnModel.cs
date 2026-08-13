@@ -102,6 +102,11 @@ public static class DuelTurnModel
         // releases anything — but reset on both, because a counter that only one side keeps is a
         // counter that is wrong the moment the roles are reversed by a rematch.
         DuelPlayScheduler.OnTurnStarted();
+
+        // A potion planned into a batch that never resolved would stay greyed for the rest of
+        // the duel: the belt's own restore only runs when a potion is actually drunk. Both
+        // models clear their in-flight lists at a turn boundary, so this belongs with them.
+        LockInPlanView.RestorePlannedPotions();
         LogPowers(state);
 
         // **Only in the duel.** This is armed for the whole run, and `CombatManager.TurnStarted`
