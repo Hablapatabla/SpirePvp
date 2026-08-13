@@ -717,11 +717,15 @@ which add no patches (`DuelTurnModel.ShouldDefer`'s guard, and the scheduler rew
 
 **Playtest order, because the pieces stack:**
 
-1. **Real-time.** One player plays three cards; the other then plays their *first*. That first card
-   should take the next slot rather than waiting behind the other three — the whole point of
-   `DuelPlayScheduler`. Watch for `queue: <id>'s play #N pending` and `queue: releasing <id>'s play
-   #N` in the log; the numbers are per-player positions, so `1001`'s `#0` beating `1`'s `#1` is the
-   thing working.
+1. **Real-time.** Played once on 2026-08-12 and it found a real bug — the scheduler works when it is
+   asked, and the host's clicks were skipping it (see *"never defer an action the sim raised"*
+   below). Fixed and **not yet replayed.** One player plays three cards; the other then plays their
+   *first*. That first card should take the next slot rather than waiting behind the other three —
+   the whole point of `DuelPlayScheduler`. Watch for `queue: <id>'s play #N pending` and `queue:
+   releasing <id>'s play #N` in the log; the numbers are per-player positions, so `1001`'s `#0`
+   beating `1`'s `#1` is the thing working. **The check that would have caught the bug: every
+   `Enqueueing action PlayCardAction … from owner <id>` must have a `queue: releasing <id>'s play
+   #N` next to it.** One without the other is a play that skipped the scheduler.
 2. **Turn-based**, which has not been played since the batch model, the auto-close, the arrow and
    the purple highlight all landed together.
 
@@ -1086,20 +1090,61 @@ arrival order, for the play most likely to decide an exchange. And **the executo
 this model** (`BeatSeconds => 0`): the tick *is* the rhythm, and a global beat on top paces the
 stream twice while halving each player's cadence, which is the thing slice 2 exists to stop.
 
-**A turn model must never defer an action the sim raised** (fixed 2026-08-12). Found in a live log,
-one line under the card that caused it:
+**A turn model must never defer an action the sim raised.** The rule is right. **The predicate
+written for it on 2026-08-12 was wrong, the evidence for it was a log-ordering artifact, and it cost
+the client a card of tempo per exchange until it was replaced on 2026-08-12 (unplayed).**
+
+The guard was `ActionExecutor.CurrentlyRunningAction != null` — *is something executing* — which is
+true when the sim raises an action **and** when a player clicks a card while another card resolves.
+In a paced real-time duel the second is not an edge case: with a beat after every play, someone
+else's card is resolving most of the time. So the local player's clicks skipped `DuelPlayScheduler`
+entirely and went into the queue in arrival order. Measured on the host, with the client's plays #1
+and #2 sitting in the pool throughout:
 
 ```
+Executing action: PlayCardAction CARD.DEFEND_SILENT (47148665)   ← client's card resolving
+Enqueueing action PlayCardAction CARD.NEUTRALIZE from owner 1    ← host click, never booked
+Enqueueing action PlayCardAction CARD.STRIKE_SILENT from owner 1 ← host click, never booked
+queue: releasing 1001's play #1 …                                ← client, two host cards later
+```
+
+**A client's plays cannot take that route** — they arrive over the wire at
+`DuelLockInPatch.BeforeHandleRequestEnqueue`, which books every one — so the guard was a standing
+advantage for whoever hosted, and it defeated the 0.4s cooldown at the same time, since a bypassed
+play resolves back-to-back with the one before it. Six host plays that session, two of them
+bypassed; eight client plays, none. Reported as "first turn felt like client was waiting behind
+host", and that is exactly what it was.
+
+**The evidence that motivated the original guard never happened.** The deferred-log line prints
+*after* `ShouldDefer` returns, and the paced model's instant first play releases synchronously
+inside that call — so a card that was held, released and executed prints "holding …" *below* its own
+`Executing action`. The FALLING_STAR pair read as a card rescheduling itself:
+
+```
+Executing action: PlayCardAction CARD.FALLING_STAR (9423456)
 Player 1 playing card FALLING_STAR (targeting PlayerId 1001)
-turn model: holding PlayCardAction card: CARD.FALLING_STAR … until lock-in
+turn model: holding PlayCardAction card: CARD.FALLING_STAR (9423456) … until lock-in
 ```
 
-A card that enqueues a play while resolving is not a player deciding to play a card, and holding it
-puts an effect the engine has already committed to into a queue that releases it later *as if it
-had been clicked*. `DuelTurnModel.ShouldDefer` now bails when
-`ActionExecutor.CurrentlyRunningAction` is non-null — the same condition `DuelPlanEnergyPatch` uses
-to stay out of the sim's way, and the same principle: if an action is executing, what is being
-enqueued belongs to it rather than to the person holding the mouse. Applies to both models.
+— **same card id on all three lines**, and the sibling log from the same session has that id held 17
+lines *before* it executed, through the queued path where the ordering comes out right. One play,
+logged out of order. **Check the id before concluding anything from that line's position**; a real
+re-enqueue would carry a different one. The line now reads `turn model: deferred …` and carries the
+warning in `DuelTurnModelPatch`.
+
+**Ask provenance, not timing**, and the decompile closes the question rather than leaving it to
+judgement: every `CombatPlayPhaseOnly` action is built in exactly two kinds of place — a
+`Net*Action.ToGameAction` (the peer's, which never reaches this patch) and an input node — except
+`GenericHookGameAction`, built only by `ActionQueueSynchronizer` itself, and `ConsoleCmdGameAction`.
+`CardModel.EnqueueManualPlay` is the engine's own name for the click path and is reached from
+`NCardPlay` alone. So `DuelTurnModel.IsPlayerInitiated` is an **allow-list** of the five click-raised
+types, which also keeps a dev command out of the play queue (`holding ConsoleCmdGameAction … potion
+POISON_POTION` was real) and defaults anything a future game version adds to vanilla behaviour.
+
+**`DuelPlanEnergyPatch` still asks `CurrentlyRunningAction` and is right to** — it needs to know
+whether *the caller* is sim code, which is a question about the stack, not about the action. Same
+expression, different question; the "grep for the wrong predicate" rule points here, and this is the
+one place it should not be applied.
 
 **Powers do tick down; the report that they do not is not supported by the log.** Asked twice, and
 the per-turn power dump settles it: `VULNERABLE_POWER:2` at one turn start, `1` at the next, absent

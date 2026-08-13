@@ -56,8 +56,11 @@ which works because `CleanUp` has *not* fired while that screen is up.
   makes draw cards work.
 - Both defer plays, so both implement `IPlanningTurnModel` and share the energy reservation, the
   play-queue presentation and the queued-card highlight. **A turn model must never defer an action
-  the *sim* raised** — a card that enqueues a play while resolving is not a player clicking, and
-  holding it schedules the same effect to fire twice.
+  the *sim* raised** — but ask that by the action's *provenance*
+  (`DuelTurnModel.IsPlayerInitiated`, an allow-list the decompile makes exact), never by whether
+  something is executing. "Is the executor busy" is also true when a player clicks during someone
+  else's card, which in a paced duel is most of the time: it sent the host's clicks straight past
+  the scheduler and is the whole of "the client is waiting behind the host".
 - Initiative (M9) is live in both: first to the arena leads, alternating each turn.
 
 **Remaining:** M8.5 slice 3 — the opponent's unsubmitted queue on the wire, which is what makes the

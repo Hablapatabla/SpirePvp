@@ -24,6 +24,22 @@ namespace SpirePvp.Duel.Patches;
 [HarmonyPatch(typeof(ActionQueueSynchronizer), nameof(ActionQueueSynchronizer.RequestEnqueue))]
 public static class DuelTurnModelPatch
 {
+    /// <summary>
+    /// **This line prints after the model has already acted, and that has misled one fix.**
+    /// `ShouldDefer` does the deferring — and for the paced model's instant first play the whole
+    /// release runs synchronously inside it, so the card can be booked, released, and be mid-
+    /// execution by the time we get here. The log then reads:
+    ///
+    ///     Executing action: PlayCardAction CARD.FALLING_STAR (9423456)
+    ///     Player 1 playing card FALLING_STAR (targeting PlayerId 1001)
+    ///     turn model: deferred PlayCardAction CARD.FALLING_STAR (9423456)
+    ///
+    /// which looks exactly like a resolving card enqueueing a fresh play and having it held — and
+    /// was read that way on 2026-08-12, producing a guard that cost the client a card of tempo per
+    /// exchange (see `DuelTurnModel.ShouldDefer`). **Check the card id before concluding anything
+    /// from this line's position**: the same id above and below is one play logged out of order,
+    /// while a genuine re-enqueue would carry a different one.
+    /// </summary>
     public static bool Prefix(GameAction action)
     {
         if (!DuelTurnModel.ShouldDefer(action))
@@ -31,7 +47,7 @@ public static class DuelTurnModelPatch
             return true;
         }
 
-        Log.Info($"[SpirePvp] turn model: holding {action} until lock-in");
+        Log.Info($"[SpirePvp] turn model: deferred {action} (kept from vanilla's queue)");
         return false;
     }
 }

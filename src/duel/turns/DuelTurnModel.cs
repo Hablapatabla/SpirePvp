@@ -150,22 +150,50 @@ public static class DuelTurnModel
     /// <summary>
     /// Whether to hold this action back. The one patch that asks, asks here.
     ///
-    /// **Only a player's own click may be deferred — never something the sim raised.** A card that
-    /// enqueues a play as part of resolving is not a player deciding to play a card, and holding it
-    /// puts an effect the engine has already committed to into a queue that releases it later, as
-    /// if it had been clicked. Found 2026-08-12 in a live log, one line under the card that caused
-    /// it:
+    /// **Only a player's own click may be deferred — never something the sim raised.** A hook that
+    /// enqueues while a card resolves is not a player deciding anything, and holding it puts an
+    /// effect the engine has already committed to into a queue that releases it later, as if it had
+    /// been clicked.
     ///
-    ///     Player 1 playing card FALLING_STAR (targeting PlayerId 1001)
-    ///     turn model: holding PlayCardAction card: CARD.FALLING_STAR … until lock-in
+    /// **The rule is right; the first predicate for it was wrong, and it was wrong in this
+    /// project's favourite way.** It asked `ActionExecutor.CurrentlyRunningAction != null` — "is
+    /// something executing" — which is true both when the sim raises an action *and* when a player
+    /// clicks a card while another card is resolving. In a paced real-time duel that second case is
+    /// not an edge: with a beat after every play, someone else's card is resolving most of the time,
+    /// so the guard let the local player's clicks past the scheduler and straight into the queue in
+    /// arrival order. Measured on the host, 2026-08-12, with the client's plays #1 and #2 sitting in
+    /// the pool the whole time:
     ///
-    /// — the card's own effect, captured by the cooldown queue mid-execution and scheduled to go
-    /// off again on its own.
+    ///     Executing action: PlayCardAction CARD.DEFEND_SILENT (47148665)   ← client's card
+    ///     Enqueueing action PlayCardAction CARD.NEUTRALIZE from owner 1    ← host click, no booking
+    ///     Enqueueing action PlayCardAction CARD.STRIKE_SILENT from owner 1 ← host click, no booking
+    ///     queue: releasing 1001's play #1 …                                ← client, two cards later
     ///
-    /// `ActionExecutor.CurrentlyRunningAction` is the condition, and it is the same one
-    /// `DuelPlanEnergyPatch` uses to stay out of the sim's way: if an action is executing, whatever
-    /// is being enqueued belongs to *it*, not to the person holding the mouse. It applies to both
-    /// models, because both defer and neither has any business rescheduling the engine's own work.
+    /// A client's plays cannot take that route — they arrive over the wire at
+    /// `DuelLockInPatch.BeforeHandleRequestEnqueue`, which books every one of them — so the guard
+    /// was a standing advantage for whoever was hosting. That is the whole of "the client is waiting
+    /// behind the host", and it defeated the cooldown at the same time: a bypassed play resolves
+    /// back-to-back with the one before it.
+    ///
+    /// **And the evidence that motivated the original guard was a log-ordering artifact.** The
+    /// deferred-log line prints *after* `ShouldDefer` returns, and the instant first play releases
+    /// synchronously inside that call — so a card that was held, released and executed prints
+    /// "holding …" below its own "Executing action". The FALLING_STAR pair that read as a card
+    /// rescheduling itself is one card with one id doing that, and the sibling log from the same
+    /// session shows the same id held 17 lines *before* it executed. See `DuelTurnModelPatch`.
+    ///
+    /// **So ask provenance, not timing.** The decompile makes that a closed question rather than a
+    /// judgement: every `CombatPlayPhaseOnly` action is constructed in exactly two kinds of place —
+    /// a `Net*Action.ToGameAction` (the peer's, which never reaches this patch) and an input node —
+    /// except `GenericHookGameAction`, which only `ActionQueueSynchronizer` itself builds, and
+    /// `ConsoleCmdGameAction`. Those two are the sim's and the dev console's; the rest are clicks.
+    ///
+    /// An allow-list rather than a deny-list, so anything a future game version adds defaults to
+    /// vanilla behaviour instead of silently entering the duel's queue.
+    ///
+    /// Note `DuelPlanEnergyPatch` still asks `CurrentlyRunningAction`, and is right to: it needs to
+    /// know whether *the caller* is sim code, which is a question about the stack rather than about
+    /// the action. Same expression, different question.
     /// </summary>
     public static bool ShouldDefer(GameAction action)
     {
@@ -174,13 +202,30 @@ public static class DuelTurnModel
             return false;
         }
 
-        if (RunManager.Instance?.ActionExecutor.CurrentlyRunningAction != null)
+        if (!IsPlayerInitiated(action))
         {
             return false;
         }
 
         return Current.ShouldDefer(action);
     }
+
+    /// <summary>
+    /// Whether this action is one a player raised by hand — the only kind a turn model may hold.
+    ///
+    /// The set is every `CombatPlayPhaseOnly` action whose only local construction site is an input
+    /// node: `CardModel.EnqueueManualPlay` (reached from `NCardPlay` alone, and named for what it
+    /// is), `PotionModel`/`NPotionPopup`, and `NEndTurnButton`. The two deliberately absent are
+    /// `GenericHookGameAction`, which the synchronizer raises for the sim, and `ConsoleCmdGameAction`
+    /// — a dev command has no business being paced, and one turned up in the play queue as
+    /// `holding ConsoleCmdGameAction … potion POISON_POTION` before this.
+    /// </summary>
+    private static bool IsPlayerInitiated(GameAction action) =>
+        action is PlayCardAction
+            or UsePotionAction
+            or DiscardPotionGameAction
+            or EndPlayerTurnAction
+            or UndoEndPlayerTurnAction;
 
     private static IDuelTurnModel Build(IRunState? runState)
     {
