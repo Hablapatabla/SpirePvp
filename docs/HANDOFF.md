@@ -79,7 +79,8 @@ abandons the rest, so one typo disables an arbitrary subset while the mod still 
 still logs "loaded". `SpirePvpInit` therefore applies each patch class independently and logs
 a count. **On every launch, confirm the log says `N patch classes applied cleanly`** — if it
 says `PATCH FAILED`, some of the mod is not running and in-game results mean nothing.
-**69 as of this handoff** (107 methods), confirmed against a live log 2026-08-12. The count is per *class*, not per patch: a class holding
+**70 as of this handoff** (108 methods); 69/107 was confirmed against a live log 2026-08-12 and
+`DuelModifierMinimumPatch` added one of each on 2026-08-13, unconfirmed in a log. The count is per *class*, not per patch: a class holding
 several patch methods still counts once, so grouping patches by concern does not move it.
 
 **Harmony resolves `[HarmonyPatch(typeof(X))]` against methods declared on `X` only.** Naming
@@ -1109,7 +1110,7 @@ heading is built and *not yet played*, so treat "it works" as a claim, not a fac
 - Initiative (M9) is live in both: whoever reached the arena first leads, alternating each turn,
   shown as an arrow over that duelist with "You move first" / "They move first" above it.
 
-**Patch count: 69 classes / 107 methods.** Verified against a live log before the last two commits,
+**Patch count: 70 classes / 108 methods.** Verified against a live log before the last two commits,
 which add no patches (`DuelTurnModel.ShouldDefer`'s guard, and the scheduler rewrite/rename).
 **Those two have never been run in game at all** — they compile and nothing more.
 
@@ -1368,12 +1369,19 @@ reopens planning.
 
 ### Two bugs found 2026-08-12, both unfixed
 
-- **The lobby's radio rows can be emptied.** Unticking the last option in a group leaves *no*
-  selection, and there should always be exactly one. Vanilla's `MutuallyExclusiveModifiers` gives
-  the one-at-a-time behaviour but does not enforce a minimum. **This matters more than it looks:**
-  an empty turn-model row means the run carries no `DuelBlitz`/`DuelTurnBased` modifier, so
-  `DuelMatch.IsPvpRun` is false and the run is not a duel at all. Until it is fixed, check that one
-  chip in each of the three rows is ticked before starting.
+- ~~**The lobby's radio rows can be emptied.**~~ **FIXED 2026-08-13 (`DuelModifierMinimumPatch`),
+  unplayed.** Unticking the last option in a group left *no* selection, and an empty turn-model row
+  means the run carries no `DuelBlitz`/`DuelTurnBased` modifier — so `DuelMatch.IsPvpRun` is false,
+  `OnRunCreated` bails, and two people start an ordinary co-op run having just configured a match,
+  with no sign until none of the duel exists. Vanilla is not wrong, it is answering a different
+  question: `UntickMutuallyExclusiveModifiersForTickbox` opens with `if (!tickbox.IsTicked) return;`,
+  so its mechanism is "ticking unticks the siblings" — *at most* one, which is all vanilla needs
+  because its own exclusive modifiers are optional. Ours are decisions, so the minimum is ours to
+  add. Postfixed on that method rather than on `AfterModifiersChanged` so the correction lands
+  **before** `EmitSignal(ModifiersChanged)`, which is what `DuelLobbyPanel` broadcasts to the client
+  — the peer is told the corrected row rather than a momentarily empty one. Vanilla's own group is
+  left strictly alone. Re-ticking cannot recurse: `NTickbox.IsTicked`'s setter assigns the field and
+  flips two images, and does not raise `Toggled`.
 - ~~**The energy counter by the end-turn button is not visible at all** in a duel.~~ **Not
   reproducing — Lucas can see the orb in a duel (2026-08-12).** Left here because the note sent one
   investigation down a blind alley: nothing in the mod touches that widget, and its absence would
@@ -1781,7 +1789,7 @@ guessing at it.
 **Everything from the 2026-08-12 session is built and playtested.** The loop, the desync fixes, the
 result screen, rematch — all confirmed in play on both clients, with the only errors in either log
 being vanilla's `Error deleting path …current_run_mp.save.backup`, which is noise and predates this
-work. Patch count is **69 classes / 107 methods**; confirm that line on every launch.
+work. Patch count is **70 classes / 108 methods**; confirm that line on every launch.
 
 Closed and confirmed this session, so nothing below needs re-testing:
 

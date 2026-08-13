@@ -48,32 +48,50 @@ public static class DuelModifierListPatch
 [HarmonyPatch(typeof(ModelDb), nameof(ModelDb.MutuallyExclusiveModifiers), MethodType.Getter)]
 public static class DuelModifierExclusivityPatch
 {
+    /// <summary>
+    /// The three decisions — one source, because two readers need them.
+    ///
+    /// The getter below turns these into vanilla's exclusivity sets (pick one, and the others
+    /// untick). `DuelModifierMinimumPatch` reads the same groups to enforce the half vanilla does
+    /// not: that a group is never left *empty*.
+    ///
+    /// Built fresh per call rather than held in a static, for the same reason the arrays above are:
+    /// `ModelDb.Modifier&lt;T&gt;()` needs the model database populated, and a static initialiser
+    /// would run at an arbitrary earlier moment.
+    /// </summary>
+    public static List<HashSet<ModifierModel>> DuelGroups() => new List<HashSet<ModifierModel>>
+    {
+        new HashSet<ModifierModel>
+        {
+            ModelDb.Modifier<DuelBlitz>(),
+            ModelDb.Modifier<DuelTurnBased>()
+        },
+        new HashSet<ModifierModel>
+        {
+            ModelDb.Modifier<RaceClockEight>(),
+            ModelDb.Modifier<RaceClockTen>(),
+            ModelDb.Modifier<RaceClockTwelve>(),
+            ModelDb.Modifier<RaceClockFifteen>(),
+            ModelDb.Modifier<RaceClockNone>()
+        },
+        new HashSet<ModifierModel>
+        {
+            ModelDb.Modifier<DuelClockOne>(),
+            ModelDb.Modifier<DuelClockTwo>(),
+            ModelDb.Modifier<DuelClockThree>(),
+            ModelDb.Modifier<DuelClockFive>(),
+            ModelDb.Modifier<DuelClockNone>()
+        }
+    };
+
     public static void Postfix(ref IReadOnlyList<IReadOnlySet<ModifierModel>> __result)
     {
-        List<IReadOnlySet<ModifierModel>> sets = new List<IReadOnlySet<ModifierModel>>(__result)
+        List<IReadOnlySet<ModifierModel>> sets = new List<IReadOnlySet<ModifierModel>>(__result);
+        foreach (HashSet<ModifierModel> group in DuelGroups())
         {
-            new HashSet<ModifierModel>
-            {
-                ModelDb.Modifier<DuelBlitz>(),
-                ModelDb.Modifier<DuelTurnBased>()
-            },
-            new HashSet<ModifierModel>
-            {
-                ModelDb.Modifier<RaceClockEight>(),
-                ModelDb.Modifier<RaceClockTen>(),
-                ModelDb.Modifier<RaceClockTwelve>(),
-                ModelDb.Modifier<RaceClockFifteen>(),
-                ModelDb.Modifier<RaceClockNone>()
-            },
-            new HashSet<ModifierModel>
-            {
-                ModelDb.Modifier<DuelClockOne>(),
-                ModelDb.Modifier<DuelClockTwo>(),
-                ModelDb.Modifier<DuelClockThree>(),
-                ModelDb.Modifier<DuelClockFive>(),
-                ModelDb.Modifier<DuelClockNone>()
-            }
-        };
+            sets.Add(group);
+        }
+
         __result = sets;
     }
 }
