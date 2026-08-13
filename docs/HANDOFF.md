@@ -760,6 +760,36 @@ heading is built and *not yet played*, so treat "it works" as a claim, not a fac
 which add no patches (`DuelTurnModel.ShouldDefer`'s guard, and the scheduler rewrite/rename).
 **Those two have never been run in game at all** — they compile and nothing more.
 
+### A rest site before the duel — approved 2026-08-12, designed, NOT built
+
+Lucas's request, and the shape is settled: **not a new map node — a rest at the arena, before the
+duel starts.** The arena is not a node we generate (it reuses vanilla's `SecondBossMapPoint`), and
+inserting a real node into generated map data means both clients agreeing on a map they did not
+generate together, on top of the six quiet omissions `DuelArena` has already produced mirroring
+`EnterMapPointInternal`. The rest-at-arena version needs no map change at all.
+
+**The find that makes it cheap: `RestSiteRoom` is already a rendezvous.** Its `Exit` awaits
+`RestSiteSynchronizer.AfterAllRestSitesCompleted()`, which blocks until *every* player has finished
+— exactly the both-players gate the duel needs, written by the engine and already synchronised.
+
+**The ordering is the whole problem, and it is not free.** Three constraints that fight:
+
+1. **The rest must happen before arrival is announced.** `DuelArrivedMessage` carries your deck, and
+   the review opens once both arrivals are in — so upgrading after that point re-creates the stale
+   decklist bug fixed on 2026-08-12, and re-creates it *invisibly*.
+2. **But the rest synchroniser waits for a co-located party**, and the players are only guaranteed to
+   share a coord after `DuelArena.MoveRunToArenaCoord`. A rest before that runs the same hazard that
+   already produced "a client that could not leave a rest site" during the race — and here it would
+   hang the match rather than one room.
+3. **So the coord move has to come first**, which means splitting `DuelArena`: coord move → rest →
+   arrival + deck review → combat room. Note `MoveRunToArenaCoord` must still run *before* the
+   `CombatRoom` is constructed (`AddVisitedMapCoord` resets `NextRoomId`), so the split has to keep
+   the room construction on the far side of everything.
+
+**Also undecided, and it is a rules question rather than an implementation one:** whether resting
+costs race-clock time. It should, or the race bank stops meaning anything at the finish line — but
+that is Lucas's call, and it only bites in a timed match, which no run has used yet.
+
 ### Dying in the race now loses the match (2026-08-12, unplayed)
 
 Reported: *"I died to the boss and it didn't end the run, giving the opponent the victory."* The
