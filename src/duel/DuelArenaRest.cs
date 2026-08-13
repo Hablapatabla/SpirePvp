@@ -96,6 +96,7 @@ public static class DuelArenaRest
         int amount = (int)HealRestSiteOption.GetBaseHealAmount(creature);
         creature.CurrentHp = Math.Min(creature.MaxHp, creature.CurrentHp + amount);
 
+        _healed.Add(me.NetId);
         Log.Warn($"[SpirePvp] arena rest: healed {me.NetId} {before} -> "
                  + $"{creature.CurrentHp} / {creature.MaxHp} on arrival");
 
@@ -117,6 +118,51 @@ public static class DuelArenaRest
     /// Parented to the combat room rather than `NRestSiteRoom.Instance`, which is null in an arena;
     /// if there is no room node yet the cue is simply skipped rather than the heal failing.
     /// </summary>
+    /// <summary>
+    /// Brings both duelists to the HP a rest would have left them at, after the pre-combat sync.
+    ///
+    /// **Idempotent by construction**, which is what lets it sit alongside the arrival heal: it does
+    /// not add 30% again, it computes the same target the arrival heal aimed at and assigns it. A
+    /// duelist already healed is already at that number and nothing moves.
+    ///
+    /// It exists because the arrival heal is only *locally* applied plus *sent*, and on 2026-08-13
+    /// the send silently failed — leaving each machine with its own duelist healed and the opponent
+    /// stale, which diverged on the duel's first checksum. Running after the sync, over both
+    /// duelists, on both machines, is the placement that provably agrees.
+    /// </summary>
+    public static void ReconcileAfterSync(IRunState? state)
+    {
+        if (state == null)
+        {
+            return;
+        }
+
+        foreach (Player player in state.Players)
+        {
+            Creature creature = player.Creature;
+            if (creature.IsDead)
+            {
+                continue;
+            }
+
+            int target = Math.Min(creature.MaxHp,
+                                  creature.CurrentHp + (int)HealRestSiteOption.GetBaseHealAmount(creature));
+            if (_healed.Contains(player.NetId))
+            {
+                // Already rested on arrival on this machine: its HP is the target, not the input.
+                continue;
+            }
+
+            creature.CurrentHp = target;
+            Log.Warn($"[SpirePvp] arena rest: reconciled {player.NetId} to {creature.CurrentHp}"
+                     + $" / {creature.MaxHp} after the sync");
+        }
+
+        _healed.Clear();
+    }
+
+    private static readonly HashSet<ulong> _healed = new HashSet<ulong>();
+
     private static void PlayRestCue()
     {
         HealRestSiteOption.PlayRestSiteHealSfx();

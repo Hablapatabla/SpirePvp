@@ -262,6 +262,15 @@ public static class DuelArena
             await runManager.CombatStateSynchronizer.WaitForSync();
             Log.Warn("[SpirePvp] duel: state sync complete");
 
+            // **Authoritative, and back here on purpose.** Healing on arrival and sending the value
+            // is the version that shows the right number on the deck review, and on 2026-08-13 the
+            // send silently did not take, so both machines held a stale opponent and checksum 0
+            // diverged. Until that is understood, the heal is reconciled here — after the sync,
+            // both duelists, on both clients — which is the placement that provably agrees. The
+            // arrival heal still runs and is still shown; this only makes the two machines settle
+            // on the same numbers before a card is played.
+            DuelArenaRest.ReconcileAfterSync(runManager.State);
+
 
             if (runManager.CombatReplayWriter.IsEnabled)
             {

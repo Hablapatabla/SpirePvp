@@ -152,6 +152,12 @@ public static class DuelRendezvous
     {
         if (hp <= 0 || maxHp <= 0)
         {
+            // **Loud, because silent is what cost a run.** 2026-08-13: this returned quietly, the
+            // opponent's HP was never applied, both machines kept a stale copy and the duel's first
+            // checksum diverged — with nothing in either log to say which half had failed.
+            Log.Warn($"[SpirePvp] arena: opponent {senderId} sent hp={hp}/{maxHp}, which is unusable "
+                     + "— their heal is NOT applied locally. Suspect the new DuelArrivedMessage "
+                     + "fields are not crossing the wire.");
             return;
         }
 
@@ -164,9 +170,12 @@ public static class DuelRendezvous
 
             player.Creature.MaxHp = maxHp;
             player.Creature.CurrentHp = hp;
-            Log.Info($"[SpirePvp] arena: opponent {senderId} arrived at {hp}/{maxHp} after their rest");
+            Log.Warn($"[SpirePvp] arena: opponent {senderId} arrived at {hp}/{maxHp} after their rest");
             return;
         }
+
+        Log.Warn($"[SpirePvp] arena: opponent {senderId} not found among "
+                 + $"{RunManager.Instance.State?.Players.Count ?? -1} players — heal not applied.");
     }
 
     private static void OnArrived(DuelArrivedMessage message, ulong senderId)
