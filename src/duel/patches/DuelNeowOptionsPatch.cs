@@ -1,5 +1,6 @@
 using System.Reflection;
 using HarmonyLib;
+using MegaCrit.Sts2.Core.Events;
 using MegaCrit.Sts2.Core.Logging;
 using MegaCrit.Sts2.Core.Models;
 using MegaCrit.Sts2.Core.Models.Events;
@@ -109,8 +110,26 @@ public static class DuelNeowOptionsPatch
         DuelMatch.MaskedModifiers = __state;
     }
 
-    public static void Finalizer(Neow __instance, IReadOnlyList<ModifierModel>? __state)
+    public static void Finalizer(Neow __instance, IReadOnlyList<ModifierModel>? __state,
+                                 IReadOnlyList<EventOption>? __result)
     {
+        // Telemetry only (2026-08-12): "we are both Necro and got different Neow bonuses". Logged by
+        // *name* rather than index — the indices match by construction and mean different things on
+        // the two clients, which is the trap that killed the opponent-vote icon at Neow.
+        if (__result != null)
+        {
+            List<string> names = new List<string>();
+            foreach (EventOption option in __result)
+            {
+                names.Add(option.GetType().Name);
+            }
+
+            DuelTelemetry.NoteNeowOptions(
+                __instance.Owner?.NetId ?? 0UL,
+                __instance.Owner?.Character?.GetType().Name ?? "unknown",
+                names);
+        }
+
         if (__state == null || _modifiersField == null)
         {
             return;

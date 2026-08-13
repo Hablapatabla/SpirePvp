@@ -1,5 +1,7 @@
 using HarmonyLib;
+using MegaCrit.Sts2.Core.Nodes.Screens.Map;
 using MegaCrit.Sts2.Core.Nodes.TopBar;
+using MegaCrit.Sts2.Core.Saves;
 
 namespace SpirePvp.Duel.Patches;
 
@@ -32,6 +34,10 @@ public static class DuelClockHudPatch
         // distorting it.
         DuelDisconnect.Tick();
 
+        // Telemetry only: the one hook guaranteed to run for the whole match, which is exactly what
+        // a "died during the race and nothing happened" report needs watching it.
+        DuelTelemetry.TickDeathProbe();
+
         string? text = DuelClockService.FormatForHud();
         if (text != null)
         {
@@ -47,6 +53,11 @@ public static class DuelClockHudPatch
     [HarmonyPatch("RefreshVisibility")]
     public static void AfterRefreshVisibility(NRunTimer __instance)
     {
+        DuelTelemetry.NoteClockHud(
+            __instance.Visible,
+            SaveManager.Instance.PrefsSave.ShowRunTimer,
+            NMapScreen.Instance?.Visible ?? false);
+
         if (DuelClockService.Enabled && DuelClockService.Local != null)
         {
             __instance.Visible = true;

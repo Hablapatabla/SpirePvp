@@ -35,6 +35,13 @@ public static class DuelResult
 {
     private static bool _subscribed;
 
+    /// <summary>
+    /// Whether anything is watching for the end of a fight. Read by `DuelTelemetry`: this is armed
+    /// from `DuelArena`, i.e. on arena entry, so it is false for the whole race — which is what a
+    /// death during the race has to be diagnosed against.
+    /// </summary>
+    public static bool IsArmed => _subscribed;
+
     /// <summary>Called when a duel begins so we can catch the end of it.</summary>
     public static void Arm()
     {

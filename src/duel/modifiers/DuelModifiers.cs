@@ -82,10 +82,9 @@ public abstract class ClockModifierBase : DuelModifierBase
 /// </summary>
 public abstract class RaceClockModifier : ClockModifierBase;
 
-/// <summary>Short enough to flag on purpose. Kept in the real list so it needs no dev build.</summary>
-public sealed class RaceClockOne : RaceClockModifier
+public sealed class RaceClockEight : RaceClockModifier
 {
-    public override double Minutes => 1;
+    public override double Minutes => 8;
 }
 
 public sealed class RaceClockTen : RaceClockModifier
@@ -98,9 +97,9 @@ public sealed class RaceClockFifteen : RaceClockModifier
     public override double Minutes => 15;
 }
 
-public sealed class RaceClockTwenty : RaceClockModifier
+public sealed class RaceClockTwelve : RaceClockModifier
 {
-    public override double Minutes => 20;
+    public override double Minutes => 12;
 }
 
 /// <summary>Untimed race: take as long as you like getting to the arena.</summary>

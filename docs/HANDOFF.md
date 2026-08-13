@@ -79,7 +79,7 @@ abandons the rest, so one typo disables an arbitrary subset while the mod still 
 still logs "loaded". `SpirePvpInit` therefore applies each patch class independently and logs
 a count. **On every launch, confirm the log says `N patch classes applied cleanly`** — if it
 says `PATCH FAILED`, some of the mod is not running and in-game results mean nothing.
-**68 as of this handoff** (106 methods), confirmed against a live log 2026-08-12. The count is per *class*, not per patch: a class holding
+**69 as of this handoff** (107 methods), confirmed against a live log 2026-08-12. The count is per *class*, not per patch: a class holding
 several patch methods still counts once, so grouping patches by concern does not move it.
 
 **Harmony resolves `[HarmonyPatch(typeof(X))]` against methods declared on `X` only.** Naming
@@ -756,9 +756,30 @@ heading is built and *not yet played*, so treat "it works" as a claim, not a fac
 - Initiative (M9) is live in both: whoever reached the arena first leads, alternating each turn,
   shown as an arrow over that duelist with "You move first" / "They move first" above it.
 
-**Patch count: 68 classes / 106 methods.** Verified against a live log before the last two commits,
+**Patch count: 69 classes / 107 methods.** Verified against a live log before the last two commits,
 which add no patches (`DuelTurnModel.ShouldDefer`'s guard, and the scheduler rewrite/rename).
 **Those two have never been run in game at all** — they compile and nothing more.
+
+### Telemetry added 2026-08-12, and what each line answers
+
+`DuelTelemetry` and `DuelAoeProbePatch` **log and change nothing** — added at Lucas's request so the
+next session answers four open reports instead of describing them. Rate-limited on purpose; a probe
+that floods the log makes the log useless for the bug it was added to catch. All four lines are
+`[SpirePvp] telemetry:`.
+
+| Line | The report it settles |
+|---|---|
+| `local duelist is DEAD — phase=… resultArmed=…` | *"I died to the boss and it didn't end the run."* `DuelResult.Arm()` runs from `DuelArena`, i.e. **on arena entry**, so nothing watches a death for the whole race — `resultArmed=False` next to a dead duelist is that, confirmed. |
+| `HittableEnemies came back EMPTY — running action: …` | The Bag of Marbles family: names each culprit as it happens, once per distinct action. **A report reading `<no running action>` is the important one** — those are hook-time effects like Bag of Marbles' own `BeforeSideTurnStart`, and they are why "resolve the actor from `CurrentlyRunningAction`" cannot be the whole fix. |
+| `run timer — visible=… pref=… mapVisible=…` | *"Client doesn't show the clock, host does."* Both sides logged `raceClock=0 min`, so the widget is vanilla's `NRunTimer`, not ours, and `show_run_timer` is `false` in **both** dev profiles. The answer is the diff between the two clients' lines. |
+| `Neow offered <id> (<character>): A / B / C` | *"We were both Necro and got different Neow bonuses."* By **name**, never index — the indices match by construction and mean different things on the two clients, which is the trap that killed the opponent-vote icon. |
+
+**Race clock tiers are 8 / 10 / 12 / 15 / Off** as of 2026-08-12 (Lucas's call; the duel clock is
+unchanged). Note what went with the 1-minute option: it was the only way to reach a race-clock expiry
+inside one test run, so **flagging on time is now an 8-minute test**. If that becomes annoying,
+bring back a dev-only tier rather than re-tuning the real ones. The rename touches
+`SpirePvp/localization/eng/modifiers.json`, so **the `.pck` was re-exported and committed** — a
+puller who builds without it sees `RACE_CLOCK_EIGHT.title` as a raw key.
 
 **Playtest order, because the pieces stack:**
 
@@ -1348,7 +1369,7 @@ guessing at it.
 **Everything from the 2026-08-12 session is built and playtested.** The loop, the desync fixes, the
 result screen, rematch — all confirmed in play on both clients, with the only errors in either log
 being vanilla's `Error deleting path …current_run_mp.save.backup`, which is noise and predates this
-work. Patch count is **68 classes / 106 methods**; confirm that line on every launch.
+work. Patch count is **69 classes / 107 methods**; confirm that line on every launch.
 
 Closed and confirmed this session, so nothing below needs re-testing:
 

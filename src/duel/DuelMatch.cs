@@ -149,6 +149,7 @@ public static class DuelMatch
         RaceProgress.Disarm();
         RaceProgressHud.Clear();
         DuelLayout.Reset();
+        DuelTelemetry.Reset();
         Turns.DuelTurnModel.Reset();
         Turns.DuelPace.Reset();
         Turns.DuelPlayScheduler.Reset();

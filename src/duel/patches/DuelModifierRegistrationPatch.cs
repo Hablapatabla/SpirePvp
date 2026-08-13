@@ -30,10 +30,10 @@ public static class DuelModifierListPatch
         {
             ModelDb.Modifier<DuelBlitz>(),
             ModelDb.Modifier<DuelTurnBased>(),
-            ModelDb.Modifier<RaceClockOne>(),
+            ModelDb.Modifier<RaceClockEight>(),
             ModelDb.Modifier<RaceClockTen>(),
+            ModelDb.Modifier<RaceClockTwelve>(),
             ModelDb.Modifier<RaceClockFifteen>(),
-            ModelDb.Modifier<RaceClockTwenty>(),
             ModelDb.Modifier<RaceClockNone>(),
             ModelDb.Modifier<DuelClockOne>(),
             ModelDb.Modifier<DuelClockTwo>(),
@@ -59,10 +59,10 @@ public static class DuelModifierExclusivityPatch
             },
             new HashSet<ModifierModel>
             {
-                ModelDb.Modifier<RaceClockOne>(),
+                ModelDb.Modifier<RaceClockEight>(),
                 ModelDb.Modifier<RaceClockTen>(),
+                ModelDb.Modifier<RaceClockTwelve>(),
                 ModelDb.Modifier<RaceClockFifteen>(),
-                ModelDb.Modifier<RaceClockTwenty>(),
                 ModelDb.Modifier<RaceClockNone>()
             },
             new HashSet<ModifierModel>
