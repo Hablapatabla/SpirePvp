@@ -784,6 +784,42 @@ Keep that split if you extend this.
 
 ## Immediate next step
 
+### Playtesting over Steam, with a real second player — what differs from the dev rig
+
+Everything above was found on two local clients over ENet. A Steam session changes four things, and
+the first is silent.
+
+**1. Mod consent and enablement are per profile, and the Steam profile is not a dev profile.**
+Checked 2026-08-13: `%APPDATA%\SlayTheSpire2\steam\<steamid64>\settings.save` had
+`SpirePvp: is_enabled = false` — switched off so an unmodded friend could be played with, which is the
+right thing to do and the wrong state to start a duel in. A disabled mod logs
+`Skipping loading mod SpirePvp` and **loads nothing at all while looking entirely normal**. Turn it
+back on from the Mods screen first, and confirm `71 patch classes applied cleanly (109 methods)` in
+the log before trusting anything in the session.
+
+**2. Both players' mod lists must match, or the join is refused outright.** `JoinFlow` compares
+`PeerVersionInfo.gameplayAffectingMods` and answers a mismatch with `ConnectionFailureReason.
+ModMismatch` — the "Mod mismatch!" popup. That profile also has **RitsuLib, BaseLib, MintySpire2 and
+RegentFX** enabled from the Workshop; whatever is on has to be on for both. The simplest starting
+position is SpirePvp alone on both machines. (Coexistence with RegentFX specifically was verified
+earlier — patches clean and VFX rendering in a duel — so it is a known-good extra if wanted.)
+
+**3. Both must build from the same commit.** Message ids are positional and debug builds stamp the git
+commit into the mod version, so the engine's own gate enforces it rather than anyone having to
+remember. `git pull && dotnet build` on both, from `origin/master`.
+
+**4. The log is somewhere else, and there is only one of it.** The dev scripts write
+`logs/host.log` and `logs/client.log` and rotate five runs; a Steam launch does neither. It writes
+`%APPDATA%\SlayTheSpire2\logs\godot.log` — one shared file per machine, so **each player has half the
+story and both halves are needed** for anything involving a divergence. Collect both right after the
+session; `scripts/check-log.ps1` already reads that path as `SHARED`.
+
+**One thing genuinely gets better, and it has never been exercised.** ENet does not report a dropped
+peer — `ENetHost.Update` answers the transport's own `Disconnect` with a bare `continue` — so every
+disconnect test so far has gone through `DuelDisconnect`'s 30-second silence measurement. **The Steam
+transport does report drops.** So a Steam session is the first time the announced-disconnect path runs
+for real, and it is worth deliberately having someone quit mid-duel to see it.
+
 ### START HERE — 2026-08-13 evening, pushed for playtesting
 
 **Playtested and confirmed today**, in order: the arena heal on the wire; real-time paced (position
