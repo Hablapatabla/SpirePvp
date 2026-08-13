@@ -1,3 +1,4 @@
+using System.Linq;
 using MegaCrit.Sts2.Core.Context;
 using MegaCrit.Sts2.Core.Entities.Cards;
 using MegaCrit.Sts2.Core.Entities.Multiplayer;
@@ -542,6 +543,43 @@ public sealed class LockInTurnModel : IDuelTurnModel
     }
 
     /// <summary>
+    /// Ends the turn on the player's behalf when the batch they just resolved used everything they
+    /// had.
+    ///
+    /// **Reported as "having to click end turn when nothing's playable and couldn't play in the
+    /// first place".** It is the batch model charging the common case for the rare one: energy is a
+    /// *turn* resource but planning is a *batch* activity, so a turn with no draw in it is "plan up
+    /// to your energy, commit, then press a second time with a dead hand to say the obvious". One
+    /// press per turn is vanilla's rhythm and there was no reason to take it away.
+    ///
+    /// **Only after a batch, never at turn start.** Starting a turn with nothing playable already
+    /// costs exactly one press, the same as vanilla, so there is nothing there to remove — and
+    /// closing a turn nobody has looked at yet would be taking something away rather than giving it
+    /// back. The redundant press exists only after a commit, which is the only place this fires.
+    ///
+    /// **A potion stops it.** `HasCardsToPlay` is about cards, and drinking is exactly what a player
+    /// does once the energy is gone, so closing the turn under them would delete the decision. A
+    /// player holding anything drinkable still presses; everyone else stops having to.
+    ///
+    /// Goes through the button rather than around it — `CallReleaseLogic` is public for precisely
+    /// this ("we can call the End Turn button in numerous ways") — so an automatic close is the
+    /// same event as a press: same guard, same `EndPlayerTurnAction`, same signal to the peer. A
+    /// close invented here would be a second closing path, which is the shape of bug this mode has
+    /// already produced twice.
+    /// </summary>
+    private void CloseIfNothingLeftToDo()
+    {
+        Player? me = LocalContext.GetMe(RunManager.Instance?.State?.Players);
+        if (me?.PlayerCombatState == null || me.Potions.Any() || me.PlayerCombatState.HasCardsToPlay())
+        {
+            return;
+        }
+
+        Log.Warn("[SpirePvp] lock-in: nothing left to play — closing the turn for you");
+        LockInPlanView.PressEndTurn();
+    }
+
+    /// <summary>
     /// Clears the batch so the next planning window starts empty.
     ///
     /// **What survives a batch is what belongs to the turn**: whether each player has declared
@@ -593,6 +631,11 @@ public sealed class LockInTurnModel : IDuelTurnModel
         if (_local.Count > 0)
         {
             LockInPlanView.ShowLockInLabel();
+        }
+
+        if (!_localDone)
+        {
+            CloseIfNothingLeftToDo();
         }
     }
 }

@@ -111,6 +111,15 @@ internal static class LockInPlanView
         }
     }
 
+    /// <summary>
+    /// Presses the end turn button, for a turn the player has no way left to act in.
+    ///
+    /// `CallReleaseLogic` is vanilla's own "the button was activated" entry point, kept public for
+    /// the several ways it can be — mouse, controller, long press — and it carries the guard that
+    /// matters here (`CanTurnBeEnded` refuses mid-card-play).
+    /// </summary>
+    public static void PressEndTurn() => NCombatRoom.Instance?.Ui.EndTurnButton?.CallReleaseLogic();
+
     private static void SetLabel(string text) =>
         NCombatRoom.Instance?.Ui.EndTurnButton?._label?.SetTextAutoSize(text);
 }
