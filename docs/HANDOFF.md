@@ -253,23 +253,50 @@ and not in the general partition case `DuelDisconnect.Declare` documents. The ho
 see it at all: `RunLobby.OnDisconnectedFromClientAsHost` has the `NetErrorInfo`, logs it, and then
 raises `RemotePlayerDisconnected` carrying only the player id.
 
-**Play ordering cannot be playtested solo, and it looks like a bug when you try.** Found
-2026-08-12, after three sessions of "it feels like the client is waiting behind the host". It is —
-because one person driving two windows plays the host's cards, alt-tabs, and *then* plays the
-client's. Both logs record it outright: `MuteInBackground: FocusOut` / `FocusIn` alternating all
-duel, and plays landing in bursts per seat (host at `:57 :57 :58`, client at `:59 :00`).
+**The paced model hid its own backlog from the scheduler, so slice 2 could never fire. FOUND AND
+FIXED 2026-08-12, unplayed.** Reported three sessions running as "the client is waiting behind the
+host", and the third report is the one that landed it: *"the host still queued cards up, client had
+to sit there as 2 strikes went thru before its first defend play went through"* — which is the
+identical "got stiffed" case slice 2 was written for and had been recorded as fixed.
 
-The consequence is sharper than "the test is unrealistic". **`DuelPlayScheduler` had a pool depth of
-exactly 1 at every single booking across a whole duel**, and `[lowest index]` on every release — so
-the index rule, the tie-break and initiative's effect on ordering were all **inert for the entire
-session**. A contested ordering needs two plays pending at the same moment, and one mouse cannot
-produce one. Anything you conclude about fairness from a solo session is a conclusion about nothing.
+`TickTurnModel` held a burst in its own list and released one card per 400ms cooldown, so
+`DuelPlayScheduler` only ever saw the trickle. Measured over a whole duel: **22 bookings, every one
+`pending (1 waiting)`, every one `#0`.** Three cards fired in a second were booked as three separate
+`#0`s, seconds apart, each released into an idle executor before the opponent's play arrived — so
+the opponent's first card queued behind all three. **The per-player index rule was structurally
+unable to fire**, because the backlog it exists to compare against was in the other class.
 
-Two things follow. **Judge the dwell (`TickTurnModel.BeatSeconds`) on how a single card reads, never
-on how the two seats interleave** — solo, the second seat always waits behind the first seat's whole
-burst, and a longer dwell makes that worse in a way it would not be in a real match. And **the
-scheduler's own log lines are the check**: `pending (N waiting)` with N ≥ 2, or a release whose
-reason is `[tie …]`, is the evidence that a real ordering happened. Neither has ever appeared.
+Plays now go to the pool as they are clicked, so a burst is `#0, #1, #2` and the opponent's first
+card is a `#0` that beats `#1` and `#2`. The cooldown is **deleted, not moved**: the mode's pacing is
+the one-card-in-flight rule plus `BeatSeconds`, and all the gate really did was order plays by wall
+clock, which is the single thing this slice exists to stop. `_queued` stays as the *in-flight* list,
+because energy reservation and the queued-card highlight need to know what you have committed and
+not yet seen resolve.
+
+Two traps handled while doing it, both worth keeping:
+
+- **`OnActionResolved` cannot match on identity.** A client's play is submitted as a request and
+  comes back as the host's ordered copy, so the object that executes is not the object that was
+  listed — the same mismatch `DuelPlanQueuePatch` handles for the queue view. Matching the card
+  model survives the round trip; identity alone would leak every client-side reservation until the
+  turn rolled, i.e. would re-introduce the dead-hand bug on the client only.
+- **A cancelled play never reports back at all**, since the executor skips it before firing either
+  event. Those stay reserved until `OnTurnStarted` clears the list, which bounds the cost to one
+  turn and errs toward reserving energy you have already spent rather than letting you spend it
+  twice.
+
+**And a methodology note that is true but was very nearly used to explain this away.** One person
+driving two windows plays the host's cards, alt-tabs, then plays the client's — both logs show it
+(`MuteInBackground: FocusOut`/`FocusIn` alternating all duel, plays in per-seat bursts: host `:57
+:57 :58`, client `:59 :00`). So a **simultaneous** contest genuinely cannot be produced solo, and
+the tie-break has still never executed once. But *"I queue three, then play one on the other seat"*
+needs no simultaneity, is reproducible solo, and was a real bug — the rig explained the empty pool
+and explained nothing about the symptom. **When the test rig accounts for your evidence but not for
+what the player is describing, believe the player.**
+
+**The scheduler's own lines are the check**: `pending (N waiting)` with N ≥ 2 is a real contest, and
+a release reading `[tie …]` is the tie-break actually running. Before this fix, neither had ever
+appeared in any log.
 
 **Test on the same path, not divergent ones.** The two runs share a seed and therefore a map,
 and `RunLocationTargetedMessageBuffer` gates on **location, not identity** — so two players
@@ -1223,7 +1250,32 @@ run before it, where the host's bypassed plays kept the pool backed up long enou
 reach `#1` and `#2`. So the tie-break — initiative — is what orders most contested plays, and "your
 first beats their second" is the exception rather than the rule.
 
-**DECIDED AND BUILT 2026-08-12 (unplayed): the tie alternates within the turn.** Because ties are
+**REPLACED 2026-08-12 (unplayed): ordering is a timeline, not a fairness rule.** Lucas, after
+watching a burst beat a single card: *"it is not like a fairness rule… it is a matter of laying the
+events out on a timeline. If you play 3 cards in a burst, card 1 happens at 0 seconds, then 2 at .5,
+then 3 at 1. Player 2 plays a card at .3 seconds, that should beat"* the second one.
+
+He is right, and the per-player index was a **proxy for that which could invert it**: play at 0 and
+0.5 against a single play at 0.6, and the index made the *later* card win for being its owner's
+first. A quota, not a chronology, and the inversion is the kind a player notices.
+
+So each play now carries a `PlayAt` — the moment it was made, pushed later only by its own player's
+0.4s cooldown — and the earliest one resolves next. **The cooldown moved from `TickTurnModel` into
+the scheduler**, which is the whole fix: held in the model it could only delay your *own*
+submissions, so a burst reached the pool as three separate "now"s and the opponent's click was
+ordered behind all of it. Applied by the host to both players, a burst occupies 0 / 0.4 / 0.8 of its
+owner's line and a click at 0.3 falls between the first and the second.
+
+**A play also waits for its own moment even when the board is idle**, and that is not an
+optimisation to remove: releasing the burst's second card as soon as the executor was free would
+consume the slot the 0.3s card should get, deciding the order before the other player's card
+existed.
+
+The index survives in the log only, so `#N` still reads as "that player's Nth", and the release line
+now carries `at +Nms` — how long the cooldown held it — which is what tells you the spacing is real.
+
+**Ties are now genuinely ties: 60ms or less apart**, below which "who was first" is jitter and a
+frame of network rather than a fact. Those go to initiative, alternating within the turn: Because ties are
 the common case, a tie-break that always went to the initiative holder did not mean "you strike
 first this turn" — it meant **"you win every trade this turn"**, compounding across the turn's
 exchanges (your Strike before their Block, repeatedly) and then inverting wholesale on the next
@@ -1238,14 +1290,10 @@ a different reason: *"why did my card lose"* has to have an answer a player can 
 The release line now names why it won — `[lowest index]` or `[tie N this turn → initiative
 / alternated]` — so the next playtest can be read rather than felt.
 
-**Deliberately not done at the same time: resetting the index per turn** rather than per drain. It
-sounds like the natural partner — your 2nd play of the turn beating their 3rd — but each player's
-0.4s cooldown already spaces their plays out, so real bursts are rare and it would change few
-orderings, while adding the odd case where the board goes still, both players click, and one loses
-because they played earlier in the turn. One change at a time. **The evidence that would reopen it
-is a booking whose index is not `#0`**; if those start appearing now that the dwell is 0.55s, the
-index is doing more work than this assumed. Do not tune the reset window into a third arbitrary
-number — that was the first attempt's mistake in a new costume.
+**What to watch in the log now**, since the index no longer decides anything: a booking reading
+`pending at +400ms` (or +800) is the cooldown spacing a burst, and a release reading `[earliest]`
+after it is the timeline ordering working. A release reading `[tie …]` means two plays landed inside
+60ms of each other, which should be rare and is the only place initiative touches ordering at all.
 
 Three things about it worth not re-deriving:
 

@@ -45,25 +45,20 @@ namespace SpirePvp.Duel.Turns;
 /// </summary>
 public sealed class TickTurnModel : IPlanningTurnModel
 {
-    /// <summary>
-    /// The gap between your plays leaving, in milliseconds.
-    ///
-    /// Lucas's figure, 2026-08-12: "maybe .4 second ish". Shorter than the 0.6s OSRS tick M8.5
-    /// takes as its reference, and a playtest question rather than a design one.
-    /// </summary>
-    private const double CooldownMs = 400;
-
     public string Name => "real-time (paced)";
 
-    /// <summary>Plays waiting for the cooldown, in the order they were clicked.</summary>
+    /// <summary>
+    /// Plays handed to the scheduler and not yet resolved, in the order they were clicked.
+    ///
+    /// **In flight, not waiting.** There was a 400ms submission cooldown here until 2026-08-12, and
+    /// it was the reason the scheduler could never be fair — see <see cref="ShouldDefer"/>. The list
+    /// stays because energy reservation and the queued-card highlight both need to know what you
+    /// have committed but not yet seen resolve; it simply no longer gates anything.
+    /// </summary>
     private readonly List<GameAction> _queued = new List<GameAction>();
 
-    private DateTime _nextRelease = DateTime.MinValue;
-
-    /// <summary>Re-entrancy guard: the pump submits through the same path it defers on.</summary>
+    /// <summary>Re-entrancy guard: a release submits through the same path it defers on.</summary>
     private bool _releasing;
-
-    private bool _pumping;
 
     /// <summary>
     /// Energy promised to queued plays.
@@ -235,47 +230,92 @@ public sealed class TickTurnModel : IPlanningTurnModel
             return false;
         }
 
-        // **Your end turn queues behind your plays rather than jumping them.** Ending the turn with
-        // cards still waiting would roll the turn over before they resolve, which is the mistake the
-        // lock-in model spent four attempts learning (DESIGN §7).
-        if (_queued.Count == 0 && DateTime.UtcNow >= _nextRelease)
-        {
-            _nextRelease = DateTime.UtcNow.AddMilliseconds(CooldownMs);
-
-            // **Even the instant play goes through the scheduler on the host.** Letting it reach
-            // `RequestEnqueue` would enqueue it there and then, in arrival order, which is the
-            // advantage slice 2 removes — and it would do it for the one play most likely to
-            // decide an exchange. Booking it costs nothing: its tick is the current one, which is
-            // already due, so it is released on the next frame rather than after a wait.
-            if (RunManager.Instance?.NetService.Type == NetGameType.Host)
-            {
-                DuelPlayScheduler.Submit(action, LocalContext.NetId ?? 0UL);
-                return true;
-            }
-
-            return false;
-        }
-
+        // **Hand it over the moment it is clicked. The pacing is the scheduler's job, not ours.**
+        //
+        // This used to hold a burst locally and drip it out one card per cooldown, which quietly
+        // destroyed the information the scheduler needs. Measured 2026-08-12, over a whole duel:
+        // **22 bookings, every one `pending (1 waiting)`, every one `#0`.** A player who fired three
+        // cards had them booked as three separate `#0`s, seconds apart, each released into an idle
+        // executor before the opponent's play had even arrived — so the opponent's first card was
+        // ordered behind all three, which is the exact "got stiffed" case slice 2 was written to
+        // fix and had been reported fixed. The fairness rule could not fire, because the backlog it
+        // compares against was hidden in *this* class rather than in the pool.
+        //
+        // Now every play goes straight to the pool, so a burst is `#0, #1, #2` and the opponent's
+        // first card is a `#0` that beats `#1` and `#2` — which is what "your first beats their
+        // second" was always supposed to mean.
+        //
+        // **The cooldown moved to the scheduler rather than disappearing**, and the move is the
+        // point. It still spaces your burst — your three clicks are played at 0, 0.4 and 0.8 on your
+        // own line — but the spacing is now applied to *both* players by the one machine that sees
+        // both, so an opponent's click at 0.3 lands between your first and your second instead of
+        // behind all three. Held here, the same rule could only ever delay your own submissions,
+        // which is how a burst came to look instantaneous to the scheduler and unbeatable to the
+        // opponent.
+        //
+        // **Your end turn still queues behind your plays rather than jumping them**, which was the
+        // gate's other job and is now the scheduler's: a player's own indices only ever increase,
+        // and they are reset only when that player has nothing pending, so their end turn cannot
+        // overtake their own cards. That was the mistake the lock-in model spent four attempts
+        // learning (DESIGN §7).
         _queued.Add(action);
         LockInPlanView.ShowPlanned(action);
-        Log.Info($"[SpirePvp] paced: queued {action} ({_queued.Count} waiting, "
+        Log.Info($"[SpirePvp] paced: submitting {action} ({_queued.Count} in flight, "
                  + $"{ReservedEnergy} energy reserved)");
-        Pump();
+        Release(action);
         return true;
     }
 
-    /// <summary>Clears the queue at a turn boundary, where energy refills and nothing may carry over.</summary>
+    /// <summary>
+    /// Drops a play from the in-flight list once the sim is done with it, so its energy stops being
+    /// reserved.
+    ///
+    /// **A cancelled play never gets here**, because the executor skips it before firing either of
+    /// its events (the same fact `DuelPace.WatchBatch` is built around). Such a play stays reserved
+    /// until <see cref="OnTurnStarted"/> clears the list, so the cost of that edge is bounded to one
+    /// turn — and it errs toward reserving energy you have already spent rather than letting you
+    /// spend energy twice, which is the safe direction of the two.
+    /// </summary>
+    public void OnActionResolved(GameAction action)
+    {
+        // **Identity is not enough, and on a client it is never enough.** A play is submitted as a
+        // request and comes back as the host's ordered copy, so the object that executes here is not
+        // the object we put in the list — the same mismatch `DuelPlanQueuePatch` handles for the
+        // queue view, and it would leak every client-side reservation until the turn rolled. Match
+        // the card model, which survives the round trip.
+        CardModel? resolved = CardOf(action);
+        for (int i = 0; i < _queued.Count; i++)
+        {
+            GameAction queued = _queued[i];
+            bool same = ReferenceEquals(queued, action)
+                || (resolved != null && ReferenceEquals(CardOf(queued), resolved))
+                || (action is EndPlayerTurnAction && queued is EndPlayerTurnAction);
+
+            if (!same)
+            {
+                continue;
+            }
+
+            _queued.RemoveAt(i);
+            Log.Info($"[SpirePvp] paced: resolved {action} ({_queued.Count} still in flight)");
+            return;
+        }
+    }
+
+    /// <summary>
+    /// Clears the in-flight list at a turn boundary, where energy refills and nothing may carry
+    /// over. Also the backstop for a play the sim cancelled, which never reports back — see
+    /// <see cref="OnActionResolved"/>.
+    /// </summary>
     public void OnTurnStarted()
     {
         _turnsSeen++;
 
         if (_queued.Count > 0)
         {
-            Log.Warn($"[SpirePvp] paced: dropping {_queued.Count} play(s) still queued at turn start");
+            Log.Info($"[SpirePvp] paced: clearing {_queued.Count} in-flight play(s) at turn start");
             _queued.Clear();
         }
-
-        _nextRelease = DateTime.MinValue;
     }
 
     private bool DropQueuedEndTurn()
@@ -291,52 +331,6 @@ public sealed class TickTurnModel : IPlanningTurnModel
         }
 
         return false;
-    }
-
-    private void Pump()
-    {
-        if (_pumping)
-        {
-            return;
-        }
-
-        _pumping = true;
-        TaskHelper.RunSafely(PumpAsync());
-    }
-
-    /// <summary>
-    /// Releases one queued play per cooldown.
-    ///
-    /// Frames rather than a timer, so the wait is wall-clock and unaffected by Fast Mode; the loop
-    /// costs one comparison a frame and only runs while something is queued.
-    /// </summary>
-    private async Task PumpAsync()
-    {
-        try
-        {
-            while (_queued.Count > 0)
-            {
-                while (DateTime.UtcNow < _nextRelease)
-                {
-                    await Engine.GetMainLoop().ToSignal(Engine.GetMainLoop(), SceneTree.SignalName.ProcessFrame);
-                }
-
-                GameAction next = _queued[0];
-                _queued.RemoveAt(0);
-                _nextRelease = DateTime.UtcNow.AddMilliseconds(CooldownMs);
-                Release(next);
-            }
-        }
-        catch (Exception e)
-        {
-            // A queue that stops draining is a hand that never resolves, so say so rather than
-            // leaving the player clicking at a dead interface.
-            Log.Error($"[SpirePvp] paced: pump stopped — {e.Message}");
-        }
-        finally
-        {
-            _pumping = false;
-        }
     }
 
     private void Release(GameAction action)

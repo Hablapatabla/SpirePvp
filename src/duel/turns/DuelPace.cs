@@ -152,6 +152,11 @@ public static class DuelPace
 
     private static void OnActionExecuted(GameAction action)
     {
+        // The paced model reserves energy for everything it has handed to the scheduler, so it needs
+        // telling when the sim is finished with one. Outside the beat's own guards below, because a
+        // play still has to stop being reserved in a model or a mode that takes no beat at all.
+        (DuelTurnModel.Current as TickTurnModel)?.OnActionResolved(action);
+
         // Every model that holds plays wants a beat after each one; only the length differs, and
         // the model owns that. Unpaced blitz (`BlitzTurnModel`) is the one that does not, and
         // nothing selects it any more.
