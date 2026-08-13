@@ -814,10 +814,36 @@ answer, but it *can* be given one the simulation already defines identically on 
 it safe was never the getter — it was `DuelAoeActor` having a deterministic actor to name, and
 falling back to vanilla's empty list when it has none.
 
-**Known and measured, not fixed:** four `Node not found: "%ControllerIcon"` / `"%KeyboardIcon"`
-errors per session, two per result screen on each client. They come from `SpirePvpRematchButton`'s
-cloned `HotkeyIcon` looking for unique names that do not exist under it. Pre-existing, cosmetic, and
-counted here so the next person does not have to measure it again.
+### FOUR FIXES TO VALIDATE TOGETHER (2026-08-13, all UNPLAYED)
+
+Batched deliberately, and each has its **own** signal so a failure is still attributable to one of
+them. Three are log-countable and one is visual.
+
+| # | Fix | How you know it worked |
+|---|---|---|
+| 1 | **Initiative arrow off the result screen** (`DuelResult.Declare`) | Visual: "You move first" is gone once the banner is up. Reported after a timeout death |
+| 2 | **The `NCard` double-frees** (`KillPendingQueueTweens`) | `grep -c "already been freed" logs/host.log` → **3 becomes 0** |
+| 3 | **Rematch hotkey icon** (`DuelRematchPatch`) | `grep -c "Node not found" logs/host.log` → **4 becomes 0**, 2 per result screen per client |
+| 4 | **Combat teardown audit** (`DuelEndCombatPatch`) | Visual: a hover tip no longer hangs over the result screen. The other added row (`PlayersTakingExtraTurn`) only shows across a **rematch** |
+
+**The double-free was root-caused from the log, and the recorded suspicion was impossible.** It had
+been blamed on `NCardPlayQueue.AnimOut` — which is reached only from `NCombatUi.OnCombatEnded`, a
+`CombatManager.CombatEnded` subscriber, and `DuelEndCombatPatch` never raises that event. **`AnimOut`
+cannot run in a duel at all.** The suspicion had named the method whose *description* matched the
+symptom, in a file the patch had already cut off at the root. What the log actually shows is two
+cancelled plays, two errors, and a `Callable.From` trampoline in the trace — a tween callback:
+`TweenCardForCancellation` is a 0.5s fade ending in `TweenCallback(card.QueueFreeSafely)`, the result
+screen goes up inside that half second, and the callback then returns an already-freed node.
+
+**Row 24 of the teardown audit is still skipped, and the double-free fix does not unblock it.**
+Raising `CombatEnded` would make `AnimOut` run for the **first** time rather than a second, so that
+risk is untested rather than removed. It remains the prime suspect for *"the killing blow hangs in
+mid-air"*, and it is the next thing to try — on its own, not in a batch.
+
+**A pooling rule worth keeping, learned twice in one afternoon:** `QueueFreeSafely` hands an
+`IPoolable` node back to `NodePool`. That is right for a node the pool issued and wrong for one this
+mod built with `Duplicate()` — returning it puts a node in the pool that nothing ever took out. Use
+plain `QueueFree` for anything the mod constructed. It is the same family as the double-free above.
 
 **"You move first" survived onto the result screen** after a timeout death — reported in the same
 session and **fixed, unplayed**. See `DuelResult.Declare`: the arrow is raised and cleared at *turn
