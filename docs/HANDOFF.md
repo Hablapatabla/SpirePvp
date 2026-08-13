@@ -814,6 +814,42 @@ answer, but it *can* be given one the simulation already defines identically on 
 it safe was never the getter — it was `DuelAoeActor` having a deterministic actor to name, and
 falling back to vanilla's empty list when it has none.
 
+### Three items scoped 2026-08-13, each larger than its one-line description
+
+Worked down the open list in order and stopped at the first line of each, because the queue file's
+summaries understate all three. **Nothing below is built.** The findings are the value — each one is
+the thing that would have been discovered two hours into building it.
+
+**M8.5 slice 3 (opponent's unsubmitted queue) and the planned potion share one blocker.**
+`NCardPlayQueue` has no by-model entry point: every public method keys on a `PlayCardAction`
+(`OnLocalCardPlayed`, `RemoveCardFromQueueForCancellation`, `UpdateCardBeforeExecution`), and
+`OnLocalCardPlayed` additionally gates on `model.Pile?.Type == PileType.Hand`. So drawing a play the
+local client does not have an action for means **fabricating a `PlayCardAction` purely for
+presentation** — and then suppressing the real one when the host's copy arrives, or the card is filed
+twice. The suppression already exists (`DuelPlanQueuePatch` does exactly this for the local plan) and
+should be reused rather than rebuilt. The potion is the same wall in miniature: `UsePotionAction` is
+buffered like a card and the queue is a *card strip*, so it has nowhere to go.
+
+The honest shape of slice 3 is therefore four parts, not one: a wire format for the pending pool
+(host-authoritative, appended last — ids are positional), host broadcast on every pool change,
+fabricated presentation entries on receipt, and suppression of the double-file. Plus the standing
+rules: arm on run start, release in `OnRunEnded`, and a fabricated action must never reach the sim.
+
+**The both-die corner in `DuelRaceDeath` cannot be fixed the way the queue file suggests.** "Copy
+`DuelDrawPrompt`'s crossing shape" does not transfer, and the reason is ordering. Crossed *draw
+offers* are reconciled before any result exists; crossed *deaths* are not. Each client's sequence is:
+declare `_declared`, broadcast "the opponent wins", then `DeclareWinner(false)` — which sets
+`DuelPhase.Complete`, runs `RunManager.OnEnded` and puts a DEFEAT screen up. The peer's mirror-image
+message then arrives at a client whose `Declare` **returns early on `Complete`**. So both players
+correctly see DEFEAT and there is no live path to change it.
+
+Fixing it means one of two things, and both are decisions rather than code: **delay** the local
+declaration by a short window so a crossing death can be reconciled first — which taxes every race
+death for a case measured as rare — or allow a declared result to be **upgraded to a draw** after the
+screen is up, which means re-running work `RunManager.OnEnded` has already done. Note the desync case
+is *not* precedent: it is symmetric because the reason code is delivered to both sides before either
+declares.
+
 ### OPEN: the corner brackets around the initiative holder (2026-08-13, marked not fixed)
 
 **Deferred by Lucas — "it's fine, just mark it and let's come back to it."** Recorded now while the
