@@ -127,8 +127,16 @@ public sealed class TickTurnModel : IPlanningTurnModel
     /// it is what "can be queued" means — but if it ever feels like lag rather than like a backlog,
     /// this number is the knob: the scheduler releases one card per drain, so the dwell *is* the
     /// resolution rate.
+    ///
+    /// **0.55s from 2026-08-12**, Lucas's figure after playing the fixed ordering: "still a bit too
+    /// quick to react". It is deliberately no longer equal to <see cref="CooldownMs"/>, and that
+    /// gap is the thing to watch — you may now submit (0.4s) slightly faster than the stream
+    /// resolves (0.55s), so a player clicking flat out builds a backlog of 0.15s per play. Energy
+    /// bounds it in practice: a turn is about three plays, so the drift is under half a second and
+    /// self-clears at the turn boundary. If it ever reads as lag, raise the cooldown to match rather
+    /// than dropping this one back — the reaction window is what the mode is *for*.
     /// </summary>
-    public float BeatSeconds => 0.4f;
+    public float BeatSeconds => 0.55f;
 
     private ulong _firstInitiative;
 
