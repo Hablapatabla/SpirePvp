@@ -79,7 +79,7 @@ abandons the rest, so one typo disables an arbitrary subset while the mod still 
 still logs "loaded". `SpirePvpInit` therefore applies each patch class independently and logs
 a count. **On every launch, confirm the log says `N patch classes applied cleanly`** — if it
 says `PATCH FAILED`, some of the mod is not running and in-game results mean nothing.
-**66 as of this handoff** (103 methods), confirmed against a live log 2026-08-12. The count is per *class*, not per patch: a class holding
+**67 as of this handoff** (104 methods), confirmed against a live log 2026-08-12. The count is per *class*, not per patch: a class holding
 several patch methods still counts once, so grouping patches by concern does not move it.
 
 **Harmony resolves `[HarmonyPatch(typeof(X))]` against methods declared on `X` only.** Naming
@@ -953,10 +953,17 @@ selection screen is right to offer it, and `NCard.GetNodeForCard` finds our queu
 
 **Do not fix it by filtering the list.** A card selection travels as a player choice keyed by
 *index*, so a list the two clients build differently is a desync — and the client cannot know the
-host's plan anyway. What is genuinely open is whether discarding a planned card should cancel its
-play loudly rather than silently, and whether the node should return to the queue rather than the
-hand. Re-observe it first: this was seen while the client's plays were resolving on arrival, so
-Survivor ran *during planning*; with the gate fixed it runs inside the flush instead.
+host's plan anyway. The selection is *right* to offer the card; the player just could not see which
+one it was.
+
+**Marked instead, 2026-08-12 (`DuelQueuedCardHighlightPatch`, unplayed).** Anything the grid shows
+that still has a node waiting in the play queue gets vanilla's own `HighlightCard` ring, so
+discarding a Defend you have already queued is at least a visible choice rather than an invisible
+one. Note the predicate: **the queue, not the turn model's buffer.** By the time a selection opens
+mid-resolution the batch has been flushed and `_local` is empty — the model has already forgotten
+what was planned, while the queue still holds the node.
+
+Still open: whether discarding a queued card should cancel its play *loudly* rather than silently.
 
 ### M9's initiative is in (2026-08-12, unplayed)
 
@@ -1018,7 +1025,7 @@ guessing at it.
 **Everything from the 2026-08-12 session is built and playtested.** The loop, the desync fixes, the
 result screen, rematch — all confirmed in play on both clients, with the only errors in either log
 being vanilla's `Error deleting path …current_run_mp.save.backup`, which is noise and predates this
-work. Patch count is **66 classes / 103 methods**; confirm that line on every launch.
+work. Patch count is **67 classes / 104 methods**; confirm that line on every launch.
 
 Closed and confirmed this session, so nothing below needs re-testing:
 
