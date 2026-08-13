@@ -1179,6 +1179,34 @@ replacing fixed slot order, and shown as a gold arrow bobbing over the leading d
 turn. During planning, deliberately: that is when knowing it changes what you do, and a banner as
 the batch resolves would arrive too late to use.
 
+**The opening turn was inverted in the paced model, found by playing 2026-08-12 and fixed
+(unplayed).** Reported as "still felt like it was waiting for the other player first on turn 1", and
+the log says it in two lines: `paced: opening initiative to 1 (reached the arena first)` and then
+`initiative: 1001 strikes first this turn` on turn 1, with player 1 leading turn 2. So the arrow
+alternated correctly and started on the wrong side — which is why it reads as a feel rather than a
+fault.
+
+**Two counters with different meanings and the same parity test copied between them.**
+`LockInTurnModel` counts turns **closed** (`_turnsClosed`), which is 0 for the whole opening turn, so
+`% 2 == 0` means "the first turn" and is correct there. `TickTurnModel` counts turns **started**, and
+`OnTurnStarted` increments *before* anything reads `CurrentLeader` — so turn 1 was odd and the
+opening initiative went to whoever reached the arena **second**. It now takes the parity of the turn
+number, clamped, because the scheduler reads it before the first `TurnStarted` too.
+
+**It is not cosmetic, for a reason worth knowing:** `DuelPlayScheduler` breaks ties on
+`CurrentLeader`, and ties are the common case (below), so an inverted opening turn hands a turn of
+tempo to the wrong player.
+
+**Open, and a design call rather than a bug: the per-player index almost never engages.** The
+scheduler resets `_nextIndex` whenever the pool drains, and the pool drains after nearly every
+release — because each player's own 0.4s cooldown means their plays arrive spaced rather than in a
+burst. Measured across a whole duel: **every booking in the log is `#0`**, both players, every turn.
+So "your first beats their second" is rarely what decides anything; initiative decides it, via the
+tie-break. The outcome may well be right — a player's backlog waits in their *own* cooldown queue
+rather than in the pool, which is the flooding the rule existed to prevent — but the mechanism doing
+the work is not the documented one. Decide what "an exchange" means before changing the reset rule;
+watch a log for a booking that is not `#0` first.
+
 Three things about it worth not re-deriving:
 
 - **Arrival order is decided by the host and rides on `DuelStartMessage`.** It is not a local fact:

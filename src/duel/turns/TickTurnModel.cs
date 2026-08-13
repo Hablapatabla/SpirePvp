@@ -131,6 +131,11 @@ public sealed class TickTurnModel : IPlanningTurnModel
     public float BeatSeconds => 0.4f;
 
     private ulong _firstInitiative;
+
+    /// <summary>
+    /// Turns *started*, so the first turn of the duel is 1 — not the lock-in model's turns *closed*,
+    /// which is 0 for that same turn. `CurrentLeader` is where that difference bit.
+    /// </summary>
     private int _turnsSeen;
 
     public void SetInitiative(ulong netId)
@@ -142,6 +147,19 @@ public sealed class TickTurnModel : IPlanningTurnModel
     /// <summary>
     /// Whoever reached the arena first, alternating each turn — the same M9 rule the lock-in model
     /// uses, doing a different job here: breaking ties inside a tick.
+    ///
+    /// **The parity is on the turn number, not on the counter, and the two are not the same
+    /// counter in the two models.** `LockInTurnModel` counts turns *closed*, which is 0 throughout
+    /// the opening turn, so `% 2 == 0` means "the first turn" there and is right. This model counts
+    /// turns *started*, and `OnTurnStarted` increments before anything reads this — so the same test
+    /// made turn 1 odd and handed the opening initiative to whoever reached the arena **second**,
+    /// with every turn after it inverted too. Measured 2026-08-12: `opening initiative to 1
+    /// (reached the arena first)` and then `initiative: 1001 strikes first this turn` on turn 1.
+    ///
+    /// Not cosmetic. `DuelPlayScheduler` breaks ties on this, and because the pool drains between
+    /// plays the per-player indices reset constantly — so most contested plays are #0 against #0 and
+    /// **initiative decides them**. An inverted opening turn is a turn of tempo handed to the wrong
+    /// player, which is what "it felt like it was waiting for the other player first" was.
     /// </summary>
     public ulong CurrentLeader
     {
@@ -165,7 +183,11 @@ public sealed class TickTurnModel : IPlanningTurnModel
                 }
             }
 
-            if (_turnsSeen % 2 == 0)
+            // Clamped rather than raw: this is read before the first `TurnStarted` too — the
+            // scheduler asks on every release — and the duel's opening moments belong to the same
+            // player its first turn does.
+            int turnNumber = Math.Max(_turnsSeen, 1);
+            if (turnNumber % 2 == 1)
             {
                 return opening;
             }
