@@ -87,6 +87,8 @@ public static class DuelResultQuotes
                 {
                     DuelEndReason.Flag => ("wonFlag", "Your opponent ran out of time."),
                     DuelEndReason.Resign => ("wonResign", "Your opponent resigned."),
+                    DuelEndReason.RaceDeath =>
+                        ("wonRaceDeath", "Your opponent died before reaching the arena."),
 
                     // Only the winner ever reads this one: the player who dropped is, by
                     // definition, not looking at a screen we drew.
@@ -115,6 +117,8 @@ public static class DuelResultQuotes
                 {
                     DuelEndReason.Flag => ("lostFlag", "You ran out of time."),
                     DuelEndReason.Resign => ("lostResign", "You resigned."),
+                    DuelEndReason.RaceDeath =>
+                        ("lostRaceDeath", "You died before reaching the arena."),
                     _ => ("lostHp", "Your opponent won the duel.")
                 };
         }

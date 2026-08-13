@@ -144,6 +144,7 @@ public static class DuelMatch
         DuelRendezvous.Disarm();
         DuelResult.Disarm();
         DuelResign.Disarm();
+        DuelRaceDeath.Disarm();
         DuelStats.Disarm();
         DuelRematch.Disarm();
         RaceProgress.Disarm();
@@ -252,6 +253,7 @@ public static class DuelMatch
         RaceProgress.Arm();
         DuelResign.Reset();
         DuelResign.Arm();
+        DuelRaceDeath.Arm();
         DuelStats.Reset();
         DuelStats.Arm();
         DuelRematch.Reset();

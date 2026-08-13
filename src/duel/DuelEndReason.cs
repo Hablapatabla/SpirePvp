@@ -70,4 +70,14 @@ public static class DuelEndReason
     /// <see cref="DuelDisconnect.Declare"/>).
     /// </summary>
     public const int Desync = 6;
+
+    /// <summary>
+    /// A duelist died during the *race*, before either reached the arena.
+    ///
+    /// Distinct from <see cref="Hp"/>, which is a death in the duel itself: the loser never fought
+    /// their opponent, and the result screen should not tell them they lost a duel they never had.
+    /// Declared by the client it happened to — see `DuelRaceDeath` for why that is not a breach of
+    /// host authority.
+    /// </summary>
+    public const int RaceDeath = 7;
 }
