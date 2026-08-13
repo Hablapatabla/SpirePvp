@@ -89,6 +89,17 @@ public static class DuelPlayScheduler
 
         /// <summary>Position in this player's own run of plays. Logging only — the clock orders.</summary>
         public required int Index;
+
+        /// <summary>
+        /// When this play reached the pool, so a release can say how long it actually waited.
+        ///
+        /// **Diagnostic only, and it exists because the felt complaint was unmeasurable.** Reported
+        /// 2026-08-13: "the ironclad's defend waited for silent's strike instead of just going
+        /// through". The log could not answer it — the `+Nms` on a booking is the *cooldown* offset,
+        /// the game's log lines carry no timestamps, and nothing recorded the gap between a booking
+        /// and its release. So "it waited" and "it went straight through" produced identical logs.
+        /// </summary>
+        public required DateTime BookedAt;
     }
 
     private static readonly List<Pending> _pending = new List<Pending>();
@@ -148,11 +159,20 @@ public static class DuelPlayScheduler
         }
 
         _lastPlayAt[ownerId] = playAt;
-        _pending.Add(new Pending { Action = action, Owner = ownerId, PlayAt = playAt, Index = index });
+        _pending.Add(new Pending
+        {
+            Action = action, Owner = ownerId, PlayAt = playAt, Index = index, BookedAt = now
+        });
 
+        // **Whether the board was busy is the whole story of a "why did my card wait".** An idle
+        // board means Release runs synchronously below and the card is committed to the executor
+        // inside this very click — so nothing the opponent does afterwards can get ahead of it, and
+        // no ordering rule is involved in what follows. A busy board is the only state in which two
+        // plays can meet in the pool and actually be arbitrated.
+        bool busy = RunManager.Instance?.ActionExecutor.IsRunning == true;
         double heldMs = (playAt - now).TotalMilliseconds;
         Log.Info($"[SpirePvp] queue: {ownerId}'s play #{index} pending at +{heldMs:F0}ms "
-                 + $"({_pending.Count} waiting)");
+                 + $"({_pending.Count} waiting, board {(busy ? "BUSY" : "idle")})");
         Pump();
     }
 
@@ -319,8 +339,18 @@ public static class DuelPlayScheduler
         }
 
         _pending.Remove(best);
-        run.ActionQueueSynchronizer.EnqueueAction(best.Action, best.Owner);
+
+        // **Name who lost, before the enqueue.** A release that beat nothing and a release that beat
+        // the opponent's card look identical otherwise, and `EnqueueAction` below runs the action to
+        // completion synchronously, so anything logged after it prints a long way down the file.
+        double waitedMs = (DateTime.UtcNow - best.BookedAt).TotalMilliseconds;
+        string beaten = _pending.Count == 0
+            ? "uncontested"
+            : "beat " + string.Join(", ", _pending.Select(p => $"{p.Owner}#{p.Index}"));
+
         Log.Info($"[SpirePvp] queue: releasing {best.Owner}'s play #{best.Index} "
-                 + $"[{reason}] ({_pending.Count} still waiting)");
+                 + $"[{reason}] after {waitedMs:F0}ms — {beaten} ({_pending.Count} still waiting)");
+
+        run.ActionQueueSynchronizer.EnqueueAction(best.Action, best.Owner);
     }
 }

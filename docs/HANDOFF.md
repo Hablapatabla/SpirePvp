@@ -789,8 +789,10 @@ doesn't show the clock" report — it was vanilla's `NRunTimer`, and the mod's c
 been switched on in any run); **dying in the race now ends the match**; the arena heal fires **on
 arrival, before the deck review**, at the right time; and the campfire cue plays.
 
-**THE ONE OPEN THREAD IS CLOSED — cause found 2026-08-13 afternoon, fixed, UNPLAYED. Playtest this
-first; what to watch is at the end of this section.**
+**THE ONE OPEN THREAD IS CLOSED — cause found, fixed, and CONFIRMED IN PLAY 2026-08-13 afternoon.**
+Host `arrived at 80/80`, client `arrived at 70/70`, each matching what the other had healed itself
+to, and **zero divergences on either side**. The safety net still logged a reconcile, so it is doing
+no harm but is no longer the thing holding the match together.
 
 **The `hp`/`maxHp` fields were never on the wire.** `DuelMessages.cs` hand-writes every
 `Serialize`/`Deserialize` pair, and the commit that added the two fields to `DuelArrivedMessage` —
@@ -845,11 +847,75 @@ host, `reconciled 1 to 70 / 70` on the client — while the send was broken.
 - Then play one card and check for `State divergence detected!`. Checksum ID 0 is the one that
   caught this; getting past it is the result.
 
-**Still unplayed and queued behind that:** the timeline ordering in `DuelPlayScheduler` (`PlayAt`
-plus the cooldown moved into the scheduler), the alternating tie-break, the 0.55s dwell — and the
-whole `overnight/2026-08-13` branch, which is **unmerged** and carries the AoE/`HittableEnemies`
-work. Read `docs/OVERNIGHT_REPORT.md` before merging it: that change patches a getter this document
-had called unpatchable since M1, with an argument, and it has never run.
+**Still unplayed and queued behind that:** the alternating tie-break — and the whole
+`overnight/2026-08-13` branch, which is **unmerged** and carries the AoE/`HittableEnemies` work. Read
+`docs/OVERNIGHT_REPORT.md` before merging it: that change patches a getter this document had called
+unpatchable since M1, with an argument, and it has never run.
+
+### The real-time wait is the dwell, not the ordering — measured 2026-08-13
+
+Reported after the same session: *"queued 2 defends and 1 attack on Silent, then 1 defend on
+Ironclad, and the Ironclad's defend waited for Silent's strike instead of just going through because
+it's the first card."* This is the fourth report of this shape and the first with a log that answers
+it. **The ordering rule is not what this hits, and changing it would fix nothing** — which is exactly
+what `docs/OVERNIGHT_QUEUE.md` P6 predicted, and the evidence it named as the thing that would
+reopen the question (`pending (N waiting)` with N ≥ 2, and an index that is not `#0`) **still does not
+exist in any log.**
+
+The exchange, from the host log, in order:
+
+```
+paced: submitting PlayCardAction CARD.STRIKE_SILENT
+queue: 1's play #0 pending at +0ms (1 waiting)
+queue: releasing 1's play #0 [earliest]
+[ActionExecutor] Executing action: PlayCardAction CARD.STRIKE_SILENT
+queue: 1001's play #0 pending at +0ms (1 waiting)     <- the defend arrives HERE
+[SpirePvp] paced: resolved CARD.STRIKE_SILENT
+queue: releasing 1001's play #0 [earliest]
+```
+
+**The defend was booked after the strike was already in the executor.** There was no contest for the
+scheduler to arbitrate — and there never has been: across the whole match, **every one of the 20
+bookings read `(1 waiting)` and every release read `[earliest]`.** `[tie …]` has still never fired
+once, in any session.
+
+**Why the pool can never accumulate on an idle board, which is the structural fact under all four
+reports.** `Submit` calls `Pump`, and `PumpAsync`'s wait loop does not await at all when the executor
+is idle and the play is due — so `Release` runs *synchronously inside the click*, and
+`EnqueueAction` in turn runs the action to completion before returning. A play made on a still board
+is therefore committed to the executor before control leaves the click handler. Two plays can only
+meet in the pool when the second arrives while the executor is busy with a *third*.
+
+**The same match contains the control case, which is what settles it.** In the first exchange the
+identical four cards were played in the identical order and it felt fine — because the Ironclad
+defend arrived a fraction later, *after* `paced: resolved CARD.STRIKE_SILENT`, and went straight
+through. Whether a card "goes instantly" or "waits" is decided entirely by whether the click lands
+inside the opponent's card's resolution-plus-dwell window. Nothing about firstness, and nothing a
+scheduler can preempt: once a card is in the executor it cannot be pulled back.
+
+**And the design does handle the case it was written for** — a genuine burst. Silent clicking three
+cards at 0.0/0.1/0.2 gets `PlayAt` 0.0/0.4/0.8; an Ironclad click at 0.5 enters a pool that still
+holds `S#1@0.4` and `S#2@0.8`, and beats the third. That requires clicks fast enough to outrun the
+executor, which **one person alt-tabbing between two windows cannot produce** — the plays in this log
+are 330ms+ apart with each one fully resolved before the next. Note this is the rig limitation
+HANDOFF already documents, but the conclusion is the opposite of last time: here the rig accounts for
+the evidence *and* for what the player described, which is the case where it is not an excuse.
+
+**So the only real levers are `BeatSeconds` (0.55s) and a contest window**, and both are Lucas's
+call, because both trade the reaction window the mode exists for:
+
+- **Lower the dwell.** It is already named as the knob, and the warning attached to it stands: the
+  reaction window is the point of pacing, and 0.4s cooldown against 0.55s dwell already lets a player
+  submit slightly faster than the stream resolves.
+- **Do not release instantly on an idle board** — hold ~60–150ms so near-simultaneous plays actually
+  meet and initiative's tie-break becomes reachable at all. Costs that latency on every play, and
+  **would not have changed this report**, since the click in question was far more than 150ms late.
+
+**What was added instead (2026-08-13, unplayed, no behaviour change):** the booking now records
+whether the board was `BUSY` or `idle`, and a release reports `after Nms — beat 1001#0` or
+`uncontested`. The old lines could not distinguish "waited" from "went straight through" — the
+`+Nms` on a booking is the *cooldown* offset, not a wait, and the game's log lines carry no
+timestamps at all. Any future report of this shape is now one grep.
 
 
 
