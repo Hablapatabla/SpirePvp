@@ -20,6 +20,41 @@ function Get-Sts2Exe { Join-Path (Get-Sts2Path) "SlayTheSpire2.exe" }
 function Get-Sts2LogPath { Join-Path $env:APPDATA "SlayTheSpire2\logs\godot.log" }
 
 <#
+Split the running instances into the ones this rig started and the ones it did not.
+
+host.ps1 stops what it finds before building, because a running instance holds an open
+handle on the installed mod DLL and the post-build copy then fails with a dozen lines of
+MSBuild retry noise that reads like a compile error. It used to find them with
+`Get-Process SlayTheSpire2` - which also matches a game launched through Steam, so starting
+a test killed a real match Lucas was in the middle of with a friend (2026-08-13).
+
+`--force-steam=off` is the discriminator, and a reliable one in both directions: a dev client
+cannot run without it (a direct launch otherwise fails SteamAPI_Init with "No appID found"
+and quits), and a Steam launch never passes it. Win32_Process is the only way to read another
+process's command line from PowerShell; Get-Process cannot.
+
+A CIM query that fails - permissions, the WMI service, a locked-down box - returns *nothing*
+rather than throwing, so the caller stops nothing. That is the safe direction to fail in: the
+cost is a build error naming the locked DLL, against the cost of ending someone's match.
+#>
+function Get-Sts2Process {
+    param([switch]$Foreign)
+
+    try {
+        $procs = @(Get-CimInstance Win32_Process -Filter "Name = 'SlayTheSpire2.exe'" -ErrorAction Stop)
+    }
+    catch {
+        Write-Host "Could not read process command lines - assuming no instances are running." -ForegroundColor Yellow
+        return @()
+    }
+
+    @($procs | Where-Object {
+        $isDev = $_.CommandLine -and $_.CommandLine -match '--force-steam=off'
+        if ($Foreign) { -not $isDev } else { $isDev }
+    })
+}
+
+<#
 With --force-steam=off the platform layer is NullPlatformUtilStrategy, whose LocalPlayerId
 is 1 by default or whatever --clientId says. That id names the save profile directory, so
 the host and the joining client keep entirely separate settings.

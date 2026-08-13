@@ -531,6 +531,47 @@ Both launchers **rotate the log** rather than truncating it, keeping the last fi
 `logs/host.<timestamp>.log`. `--log-file` truncates on open, and losing the previous run cost a
 real investigation on 2026-08-06 — the host's half of the run being diagnosed was already gone.
 
+### Testing while playing a normal Steam game (fixed 2026-08-13)
+
+**You can run the two-client rig and a Steam game at the same time.** Only one thing ever
+prevented it, and it was the launcher rather than the game: `host.ps1` ran
+`Get-Process SlayTheSpire2` and killed everything it found, because a running instance holds an
+open handle on the installed mod DLL and the post-build copy then fails with a dozen lines of
+MSBuild retry noise that reads like a compile error. That kill also took down a real match Lucas
+was in the middle of with a friend.
+
+`Get-Sts2Process` now splits the instances by command line: **`--force-steam=off` is the
+discriminator**, and it is reliable in both directions — a dev client cannot run without it (a
+direct launch otherwise fails `SteamAPI_Init` with "No appID found" and quits), and a Steam launch
+never passes it. `host.ps1` stops only its own; `stop.ps1` does the same and takes `-All` for the
+old behaviour. A CIM query that fails, or a process whose command line cannot be read, counts as
+**foreign and is left alone** — the safe direction, since the cost of not killing is a build error
+naming the locked DLL, against the cost of ending someone's match.
+
+**Nothing else collides, and this was checked rather than assumed:**
+
+- **The profiles are separate directory trees.** A Steam launch uses
+  `%APPDATA%\SlayTheSpire2\steam\<steamid64>\`; the dev clients use
+  `%APPDATA%\SlayTheSpire2\default\1\` and `…\1001\`. `Set-Sts2DevProfile` writes only under
+  `default\`, so the windowing and mod-consent edits cannot reach the Steam profile.
+- **The DLL lock is already moot on this machine.** Mod enablement is per profile, and SpirePvp is
+  `"is_enabled": false` on the Steam profile (four Workshop mods are on there). `RemoveDisabledMods`
+  marks it `ModLoadState.Disabled` and the loader returns **before** `LoadFromAssemblyPath` and
+  before `LoadResourcePack` — so a Steam instance opens neither the DLL nor the `.pck`, and a build
+  during one succeeds. Keep it disabled there: it is required anyway to play with an unmodded
+  friend, since `JoinFlow` refuses a mod mismatch outright.
+- **Transports do not meet.** The dev clients are ENet on `127.0.0.1:33771`; a Steam game uses the
+  Steam transport, and `--force-steam=off` skips Steamworks entirely, which is also what sidesteps
+  the one-instance-per-account limit.
+- **Logs do not interleave.** The dev clients write `logs/host.log` and `logs/client.log` via
+  `--log-file`; a Steam instance writes `%APPDATA%\SlayTheSpire2\logs\godot.log`. `Move-Sts2Log`
+  rotates only the path it is handed, and `check-log.ps1` reads the shared log without writing it.
+
+**The one case that still cannot work:** playing SpirePvp *itself* with someone over Steam while
+rebuilding. Then the mod is enabled on that profile, the DLL and pack are open, and the post-build
+copy fails on the lock — `host.ps1` now says so before MSBuild does. Use `-NoBuild`, or finish the
+Steam match first.
+
 - `--force-steam=off` skips Steamworks entirely (`NGame.InitializePlatform`). Required: a
   direct launch otherwise fails `SteamAPI_Init` with "No appID found" and the game quits. It
   also sidesteps Steam's one-instance-per-account limit, which is what makes two local clients

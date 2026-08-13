@@ -39,11 +39,26 @@ if (-not $NoBuild) {
     # A running instance holds an open handle on the installed DLL, so the post-build copy
     # fails with ~12 lines of MSBuild retry noise that reads like a compile error. Clear it
     # first - relaunching is the whole point of running this script.
-    $running = Get-Process SlayTheSpire2 -ErrorAction SilentlyContinue
-    if ($running) {
-        Write-Host "Stopping $($running.Count) running instance(s) - they lock the mod DLL." -ForegroundColor Yellow
-        $running | ForEach-Object { Stop-Process -Id $_.Id -Force }
+    #
+    # Only the instances this rig started: see Get-Sts2Process. A game launched through Steam
+    # is left alone, so you can test while playing.
+    $running = @(Get-Sts2Process)
+    if ($running.Count -gt 0) {
+        Write-Host "Stopping $($running.Count) dev instance(s) - they lock the mod DLL." -ForegroundColor Yellow
+        $running | ForEach-Object { Stop-Process -Id $_.ProcessId -Force }
         Start-Sleep -Milliseconds 700
+    }
+
+    # A Steam instance survives the line above, but it still holds the DLL open if SpirePvp is
+    # *enabled* in that profile - and then the build fails on a file lock rather than on
+    # anything wrong with the code. Mod enablement is per profile, so disabling SpirePvp on the
+    # Steam profile costs the dev profiles nothing and is required anyway to play with an
+    # unmodded friend (JoinFlow refuses a mod mismatch outright). Say so before MSBuild does.
+    $foreign = @(Get-Sts2Process -Foreign)
+    if ($foreign.Count -gt 0) {
+        Write-Host "$($foreign.Count) non-dev instance(s) running (Steam?) - left alone." -ForegroundColor Cyan
+        Write-Host "  If the build fails on a locked SpirePvp.dll, disable the mod on that profile's" -ForegroundColor DarkGray
+        Write-Host "  Mods screen, or re-run with -NoBuild." -ForegroundColor DarkGray
     }
 
     Write-Host "Building..." -ForegroundColor Cyan
