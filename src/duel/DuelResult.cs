@@ -138,6 +138,21 @@ public static class DuelResult
         // freezes the final values, which is what you want to read off the result screen.
         DuelClockService.Stop();
 
+        // **The initiative arrow comes down with the match, not with the run.** Reported 2026-08-13:
+        // "You move first" survived onto the result screen after a timeout death. It is raised and
+        // cleared at *turn start* (`DuelTurnModel.OnTurnStarted`), and a decided match has no next
+        // turn — so nothing took it down until `DuelMatch.OnRunEnded`, which is a screen too late:
+        // the run is still in progress while the result screen is up.
+        //
+        // Here rather than in the death path, because "the duel is over" is the condition and death
+        // is only one route to it — a clock expiry, a resignation, either kind of draw, a race death
+        // and a desync all reach a result without anyone dying. This method is the single point they
+        // share, which is the same reason the clocks and the stats broadcast are already on it.
+        //
+        // Before `ShowGameOverScreen` below: the arrow hangs off a creature's node in the combat
+        // scene underneath, so it has to go while that scene is still the thing being torn down.
+        Turns.LockInPlanView.ClearInitiative();
+
         // Before OnEnded, and that ordering is the whole trick. The result screen wants to
         // compare both players' numbers, but the run teardown that follows disposes the net
         // service — so a stats broadcast sent afterwards goes into a dead transport, which is

@@ -790,20 +790,43 @@ Keep that split if you extend this.
 ordering, cross-player beat, contest window — *"felt great"*), and turn-based end to end (*"working
 great"*), which closes the lock-in gate inversion. Details are in the sections below.
 
-**The next playtest, and it is the risky one.** Two commits were cherry-picked from
-`overnight/2026-08-13` onto master this afternoon, both **UNPLAYED**:
+**THE AoE FIX IS PLAYTESTED AND GOOD** (2026-08-13, *"wow looks like it worked great, did a more
+complex test and everything worked well"*). Confirmed from the log rather than the report:
 
-1. **The AoE actor** (`DuelAoeActor`, `DuelAoeTargetingPatch`, `DuelHookListenerScopePatch`) — "all
-   enemies" effects have hit nothing in a duel since M2. It patches `CombatState.HittableEnemies`,
-   a getter this document called unpatchable since M1, deliberately and with an argument. **Watch
-   for a checksum divergence rather than a wrong number on screen** — a desync voids the match as a
-   draw, so it announces itself. What to try: any AoE card (Cleave, Thunderclap, Shockwave) or Bag
-   of Marbles, which is the relic the whole thing was reported from. Thunderclap is the best single
-   test, because its damage and its Vulnerable travel by two different routes that must agree.
-2. **The opponent's relics in the deck review** — small, and visible on the entry screen.
+- `71 patch classes applied cleanly (109 methods)` — the new count seen in a live log for the first
+  time.
+- **Zero divergences on either client**, which was the failure mode to watch for: the actor is
+  resolved inside sim code, so a disagreement would have shown as a checksum split rather than a
+  wrong number on screen.
+- **Zero unresolved AoE reads.** `DuelTelemetry.NoteUnresolvedAoe` fired not once, so every "all
+  enemies" read the match produced found an actor — no silent fallbacks to vanilla's empty list.
+- **Bag of Marbles was the relic actually tested** (`cmd relic BAG_OF_MARBLES` in the log), which is
+  the exact report the whole thing came from.
+- **Timeout death works**, tested in the same session.
 
-**Patch count is now 71 classes / 109 methods** — this has never been seen in a log, so confirm that
-exact line on the next launch before trusting anything else in the run.
+**The opponent's relics reached the review too**, wire and screen both:
+`DuelArrivedMessage { … hp = 80, maxHp = 80, deck = …, relics = … }`, then
+`opponent 1001 arrived with 11 cards and 1 relic(s)`, then `duel entry — 1 opponent relic(s) drawn`.
+
+**So `CombatState.HittableEnemies` is patchable after all**, under a condition this document should
+now state precisely rather than leaving as the old blanket "unpatchable": the getter cannot invent an
+answer, but it *can* be given one the simulation already defines identically on both peers. What made
+it safe was never the getter — it was `DuelAoeActor` having a deterministic actor to name, and
+falling back to vanilla's empty list when it has none.
+
+**Known and measured, not fixed:** four `Node not found: "%ControllerIcon"` / `"%KeyboardIcon"`
+errors per session, two per result screen on each client. They come from `SpirePvpRematchButton`'s
+cloned `HotkeyIcon` looking for unique names that do not exist under it. Pre-existing, cosmetic, and
+counted here so the next person does not have to measure it again.
+
+**"You move first" survived onto the result screen** after a timeout death — reported in the same
+session and **fixed, unplayed**. See `DuelResult.Declare`: the arrow is raised and cleared at *turn
+start*, and a decided match has no next turn, so nothing took it down until `DuelMatch.OnRunEnded` —
+a screen too late, because the run is still in progress while the result is up. Cleared in `Declare`
+rather than in the death path, because "the duel is over" is the condition and death is one route to
+it; a clock expiry, a resignation, either draw, a race death and a desync all reach a result with
+nobody dying. That method is the single point they share, which is why the clocks and the stats
+broadcast already live on it.
 
 **Still on the branch, not taken:** `32e59a5` (audit of the combat teardown the duel skips, which is
 the "killing blow hangs in mid-air" fix) and `3c43656` (the `NCard` double-free root cause). Both
