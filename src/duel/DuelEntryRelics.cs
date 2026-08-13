@@ -134,12 +134,27 @@ public static class DuelEntryRelics
 
         // Position from the caption rather than from constants — see the note above. Done after
         // the row is in the tree so its own size is real.
+        //
+        // **The width comes from the screen, not from the caption, and that was the bug.** It used
+        // `label.Size.X`, and `_infoLabel`'s *node* is only 88px wide — its text is centred and
+        // overflows it. An `HFlowContainer` given 88px wraps after the first relic, so six relics
+        // drew as a vertical stack running down into the caption. Reported 2026-08-13: "the
+        // opponent relic bar is vertical and should be horizontal".
+        //
+        // The caption is centred on the screen, so a full-width row with centred alignment lines up
+        // with it and stays lined up at any resolution — which is the same reason the position is
+        // read off the caption rather than hard-coded.
         Vector2 captionTopLeft = label.GlobalPosition;
-        row.Size = new Vector2(label.Size.X, RowHeightAboveCaption);
-        row.GlobalPosition = new Vector2(captionTopLeft.X, captionTopLeft.Y - RowHeightAboveCaption);
+        float width = screen.Size.X > 0 ? screen.Size.X : label.Size.X;
 
-        Log.Warn($"[SpirePvp] duel entry — {drawn} opponent relic(s) drawn at {row.GlobalPosition}, "
-                 + $"above the caption at {captionTopLeft} (size {label.Size})");
+        row.Alignment = FlowContainer.AlignmentMode.Center;
+        row.Size = new Vector2(width, RowHeightAboveCaption);
+        row.GlobalPosition = new Vector2(screen.GlobalPosition.X,
+                                         captionTopLeft.Y - RowHeightAboveCaption);
+
+        Log.Warn($"[SpirePvp] duel entry — {drawn} opponent relic(s) drawn at {row.GlobalPosition} "
+                 + $"across {width:F0}px, above the caption at {captionTopLeft} "
+                 + $"(caption node size {label.Size})");
     }
 
     /// <summary>
