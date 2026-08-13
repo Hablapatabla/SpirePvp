@@ -76,6 +76,19 @@ public static class DuelPlayScheduler
     /// </summary>
     private const double SimultaneousMs = 60;
 
+    /// <summary>
+    /// How long a burst's next card waits at the release point for the opponent to answer, in
+    /// milliseconds. See <see cref="HoldingForContest"/>.
+    ///
+    /// **Sized against what the log actually missed by**, not picked for feel: the two turns that
+    /// failed had the client's card arrive a beat after the host's next card was released, while the
+    /// turn that worked had it arrive just before. 150ms is wide enough to catch that margin and
+    /// short enough to sit under the 400ms cooldown it shares a purpose with, so it never becomes
+    /// the thing pacing a burst. It costs nothing at all to a player answering rather than bursting,
+    /// because a `#0` is never held.
+    /// </summary>
+    private const double ContestWindowMs = 150;
+
     private sealed class Pending
     {
         public required GameAction Action;
@@ -234,8 +247,24 @@ public static class DuelPlayScheduler
                 // rather than blocking here forever), and `CurrentlyRunningAction` covers one that
                 // is genuinely mid-execution. Neither is true during a beat, which is a gap in the
                 // presentation and not in the sim.
-                while (QueueIsBusy() || NothingIsDueYet())
+                DateTime freeSince = DateTime.MaxValue;
+                while (true)
                 {
+                    bool busy = QueueIsBusy();
+                    if (busy)
+                    {
+                        freeSince = DateTime.MaxValue;
+                    }
+                    else if (freeSince == DateTime.MaxValue)
+                    {
+                        freeSince = DateTime.UtcNow;
+                    }
+
+                    if (!busy && !NothingIsDueYet() && !HoldingForContest(freeSince))
+                    {
+                        break;
+                    }
+
                     await Engine.GetMainLoop().ToSignal(Engine.GetMainLoop(), SceneTree.SignalName.ProcessFrame);
                 }
 
@@ -258,6 +287,67 @@ public static class DuelPlayScheduler
         {
             _pumping = false;
         }
+    }
+
+    /// <summary>
+    /// Whether to hold a burst's next card a moment longer, in case the opponent is answering.
+    ///
+    /// **The last gap between "my first card jumped their third" and "my first card waited for it",
+    /// and the log named it exactly.** Measured 2026-08-13 across three turns of one match: in turn
+    /// 3 the client's `#0` arrived while the host's `#2` was still pending and won on position in
+    /// 50ms (`beat 1#2`); in turns 1 and 2 the identical play arrived `(1 waiting)` — *alone* — a
+    /// moment after the host's `#2` had been released, and waited 901ms and 763ms behind it. An
+    /// enqueued card cannot be preempted, so the whole difference was which side of one release
+    /// instant the click landed on. Position ordering is powerless there: there is nothing to order.
+    ///
+    /// So a card that would *extend a burst* waits out a short window before being committed, and
+    /// the opponent's first card can arrive inside it and take the slot instead.
+    ///
+    /// **A player's own first card is never held**, which is Lucas's rule almost verbatim
+    /// (2026-08-13): *"their card play should come out instantly for the first card play and after
+    /// that there is essentially a global cooldown."* The responsive case pays nothing; only the
+    /// player already several cards deep waits, and only while they hold the stream alone.
+    ///
+    /// Dropped the moment the opponent has anything pending — then a contest exists and
+    /// <see cref="Release"/> can do its job, so there is nothing left to wait for.
+    /// </summary>
+    private static bool HoldingForContest(DateTime freeSince)
+    {
+        if (freeSince == DateTime.MaxValue
+            || (DateTime.UtcNow - freeSince).TotalMilliseconds >= ContestWindowMs)
+        {
+            return false;
+        }
+
+        DateTime now = DateTime.UtcNow;
+        ulong soleOwner = 0;
+        int lowestDue = int.MaxValue;
+        foreach (Pending candidate in _pending)
+        {
+            if (candidate.PlayAt > now)
+            {
+                continue;
+            }
+
+            if (soleOwner == 0)
+            {
+                soleOwner = candidate.Owner;
+            }
+            else if (candidate.Owner != soleOwner)
+            {
+                // Both players are waiting: this is the contest the window exists to allow, so stop
+                // waiting for it and go and arbitrate.
+                return false;
+            }
+
+            if (candidate.Index < lowestDue)
+            {
+                lowestDue = candidate.Index;
+            }
+        }
+
+        // Index 0 is a player's opening card of the turn and is never held.
+        return lowestDue > 0 && lowestDue != int.MaxValue;
     }
 
     /// <summary>

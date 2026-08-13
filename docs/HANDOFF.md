@@ -1029,9 +1029,50 @@ information: the model's own submission cooldown, then the scheduler's busy-gate
 earliest-clock pick was always due by construction, whereas a lowest-position pick has to be told, or
 a player's not-yet-due second card could be released ahead of its own cooldown.
 
-**Still not done, and still worth doing:** the contest window — not releasing instantly on an idle
-board, so near-simultaneous plays meet more often than by luck. Lucas wants it; it is explicitly
-**not** what these reports were about.
+#### The contest window, which turned out to be the rest of it after all (2026-08-13, UNPLAYED)
+
+Position ordering was played immediately and the report was *"third turn actually felt good this
+time, but I still think turns 1 and 2 should've let the client get its defend out — am I
+hallucinating?"* **No.** One match, three turns, and the log separates them cleanly:
+
+```
+turn 3:  1's play #2    pending at +174ms (1 waiting, board BUSY)
+         1001's play #0 pending at +0ms   (2 waiting, board BUSY)
+         releasing 1001's play #0 [position #0] after 50ms — beat 1#2
+
+turns 1 and 2:
+         1001's play #0 pending at +0ms   (1 waiting, board BUSY)
+         releasing 1001's play #0 [position #0] after 901ms — uncontested
+```
+
+**Same play, same position, opposite outcome — decided by which side of one release instant the
+click landed on.** In turn 3 the host's `#2` was still pending, so a contest existed and position
+won it. In turns 1 and 2 the host's `#2` had been released a moment earlier, and **an enqueued card
+cannot be preempted**, so there was nothing to arbitrate: `(1 waiting)`, alone in the pool, 901ms and
+763ms spent behind a card that was already committed.
+
+Position ordering is powerless there by construction, which is worth stating plainly because it
+looks like the same bug and is not: ordering can only choose between things that are pending
+together. Making them pending together is a different mechanism, and it is the **contest window**
+this document twice recorded as "wanted, but not what this report is about". It was what the report
+was about; the two earlier dismissals were wrong, and each was argued from a log in which no contest
+could form at all.
+
+**A card that would extend a burst now waits up to 150ms at the release point** before being
+committed, so the opponent's answer can arrive inside that window and take the slot on position.
+**A player's own `#0` is never held**, which is Lucas's rule nearly verbatim: *"their card play
+should come out instantly for the first card play and after that there is essentially a global
+cooldown."* The player answering pays nothing; only the player already several cards deep waits, and
+only while they hold the stream alone. The hold is dropped the instant the opponent has anything
+pending, because then the contest exists and there is nothing left to wait for.
+
+150ms is sized against the margin the log missed by, and sits under the 400ms cooldown so it never
+becomes the thing pacing a burst.
+
+**Four mechanisms have now been found flattening this same signal**, which is the thing to remember
+if it ever regresses: the model's own submission cooldown, the scheduler's `IsRunning` busy-gate, the
+per-drain index reset, and finally releasing the moment the board freed. Each hid the next, and every
+one of them individually made the ordering rule untestable while looking like a working duel.
 
 
 
