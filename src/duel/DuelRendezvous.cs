@@ -1,3 +1,4 @@
+using MegaCrit.Sts2.Core.Entities.Creatures;
 using MegaCrit.Sts2.Core.Commands;
 using MegaCrit.Sts2.Core.Context;
 using MegaCrit.Sts2.Core.Entities.Players;
@@ -88,9 +89,19 @@ public static class DuelRendezvous
         RecordArrival(LocalContext.NetId ?? 0UL);
         Log.Warn("[SpirePvp] arena: arrived, waiting for opponent");
 
+        // **The rest happens on arrival, before the announcement carries our state.** You can read
+        // both players' HP on the deck review, so a heal applied later shows the review a number
+        // that is about to be wrong. Healing here and *sending* the result is what makes the
+        // reveal honest — see DuelArenaRest, and note the message field exists because the sync
+        // does not carry your own state to the peer.
+        DuelArenaRest.HealLocalDuelist(RunManager.Instance.State);
+
+        Creature? mine = LocalContext.GetMe(RunManager.Instance.State)?.Creature;
         RunManager.Instance.NetService.SendMessage(new DuelArrivedMessage
         {
             modVersion = DuelEntry.ModVersion,
+            hp = mine?.CurrentHp ?? 0,
+            maxHp = mine?.MaxHp ?? 0,
             deck = LocalDeckSnapshot()
         });
 
@@ -126,6 +137,38 @@ public static class DuelRendezvous
         _armed = false;
     }
 
+    /// <summary>
+    /// Writes the opponent's post-rest HP into our copy of them, so the deck review reads true.
+    ///
+    /// **This is the peer's own fact, not a local calculation**, which is the whole reason it is on
+    /// the wire. Guarded to zero so a message from an older build cannot blank a duelist's HP —
+    /// message ids are positional and the version gate above already refuses a mismatch, but a
+    /// field that silently means "dead" is not one to leave ungarded.
+    ///
+    /// The pre-combat sync still runs at arena entry and remains authoritative; this only has to be
+    /// right for the screen in between.
+    /// </summary>
+    private static void ApplyOpponentHp(ulong senderId, int hp, int maxHp)
+    {
+        if (hp <= 0 || maxHp <= 0)
+        {
+            return;
+        }
+
+        foreach (Player player in RunManager.Instance.State?.Players ?? Array.Empty<Player>())
+        {
+            if (player.NetId != senderId)
+            {
+                continue;
+            }
+
+            player.Creature.MaxHp = maxHp;
+            player.Creature.CurrentHp = hp;
+            Log.Info($"[SpirePvp] arena: opponent {senderId} arrived at {hp}/{maxHp} after their rest");
+            return;
+        }
+    }
+
     private static void OnArrived(DuelArrivedMessage message, ulong senderId)
     {
         if (message.modVersion != DuelEntry.ModVersion)
@@ -143,6 +186,7 @@ public static class DuelRendezvous
         _remoteArrived = true;
         RecordArrival(senderId);
         OpponentDeck = RebuildDeck(message.deck);
+        ApplyOpponentHp(senderId, message.hp, message.maxHp);
         Log.Warn($"[SpirePvp] arena: opponent {senderId} arrived with {OpponentDeck?.Count ?? 0} cards");
 
         ShowWaitingPortrait();

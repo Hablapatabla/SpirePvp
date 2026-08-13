@@ -262,12 +262,6 @@ public static class DuelArena
             await runManager.CombatStateSynchronizer.WaitForSync();
             Log.Warn("[SpirePvp] duel: state sync complete");
 
-            // **The rest goes here and nowhere earlier.** Both duelists arrive from the Act 1 boss
-            // at 20-30 HP, where whoever attacks first wins on turn one. Applied *after* the sync
-            // and to *both* duelists, because only now do the two machines hold identical state for
-            // both creatures — the first build healed each side's own duelist before the sync and
-            // diverged on checksum 0 of the first match that tried it. See DuelArenaRest.
-            DuelArenaRest.HealBothDuelists(runManager.State);
 
             if (runManager.CombatReplayWriter.IsEnabled)
             {

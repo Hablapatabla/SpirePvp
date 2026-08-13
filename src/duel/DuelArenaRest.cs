@@ -1,3 +1,4 @@
+using MegaCrit.Sts2.Core.Context;
 using MegaCrit.Sts2.Core.Entities.Creatures;
 using MegaCrit.Sts2.Core.Helpers;
 using MegaCrit.Sts2.Core.Nodes;
@@ -46,11 +47,20 @@ namespace SpirePvp.Duel;
 /// action stream has to be applied from state both sims already agree on, or it is a guess.** Before
 /// the sync they do not agree — that is what the sync is *for*.
 ///
-/// So the heal now runs **after `WaitForSync` completes**, and heals **both** duelists on **both**
-/// clients. That sounds like the more dangerous option and is the safer one: after the sync the two
-/// machines hold identical state for both creatures, so the same arithmetic applied to both on each
-/// machine lands on the same numbers by construction. Healing only your own before the sync was the
-/// version that could not agree.
+**That divergence taught the actual rule, which is not about placement:** the pre-combat sync does
+/// **not** carry your own state to the peer — it fixes *your* copy of *them*. So a self-heal before
+/// it is invisible to the opponent's machine, forever, and the first checksum catches it.
+///
+/// **Second build ran it after `WaitForSync` and healed both duelists on both clients**, which is
+/// safe — after the sync both machines hold identical state, so identical arithmetic lands on
+/// identical numbers. It was also too late to be seen: **you can read both players' HP on the deck
+/// review**, which opens before arena entry, so the review showed numbers that were about to change.
+///
+/// **Third build, and the one here: heal on arrival, locally, and *send* the result.** The healed HP
+/// rides on `DuelArrivedMessage` beside the deck, which is there for the identical reason — the race
+/// decouples the runs, so anything read about the opponent is stale and what the peer needs must be
+/// sent rather than looked up. The pre-combat sync still runs at arena entry and is still
+/// authoritative; this only has to be right for the screen in between, and now it is.
 ///
 /// **Arithmetic, not `ExecuteRestSiteHeal`.** Vanilla's helper runs the rest-site hook chain, and
 /// hooks are exactly the kind of thing vanilla routes through `RestSiteSynchronizer` *because* they
@@ -66,32 +76,28 @@ public static class DuelArenaRest
     ///
     /// Called from `DuelArena` after `WaitForSync`, never before it — see the note above.
     /// </summary>
-    public static void HealBothDuelists(IRunState? state)
+    public static void HealLocalDuelist(IRunState? state)
     {
         if (state == null)
         {
             return;
         }
 
-        foreach (Player player in state.Players)
+        Player? me = LocalContext.GetMe(state);
+        if (me == null || me.Creature.IsDead)
         {
-            Creature creature = player.Creature;
-
             // A duelist who died on the way here has a result on the way (`DuelRaceDeath`), and
-            // healing a corpse is the more confusing of the two outcomes. Skipped identically on
-            // both machines, because both have just synced.
-            if (creature.IsDead)
-            {
-                continue;
-            }
-
-            int before = creature.CurrentHp;
-            int amount = (int)HealRestSiteOption.GetBaseHealAmount(creature);
-            creature.CurrentHp = Math.Min(creature.MaxHp, creature.CurrentHp + amount);
-
-            Log.Warn($"[SpirePvp] arena rest: healed {player.NetId} {before} -> "
-                     + $"{creature.CurrentHp} / {creature.MaxHp} before the duel");
+            // healing a corpse is the more confusing of the two outcomes.
+            return;
         }
+
+        Creature creature = me.Creature;
+        int before = creature.CurrentHp;
+        int amount = (int)HealRestSiteOption.GetBaseHealAmount(creature);
+        creature.CurrentHp = Math.Min(creature.MaxHp, creature.CurrentHp + amount);
+
+        Log.Warn($"[SpirePvp] arena rest: healed {me.NetId} {before} -> "
+                 + $"{creature.CurrentHp} / {creature.MaxHp} on arrival");
 
         PlayRestCue();
     }

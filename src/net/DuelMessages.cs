@@ -359,6 +359,24 @@ public record struct DuelArrivedMessage : INetMessage
     public string modVersion;
 
     /// <summary>
+    /// The sender's HP after their arena rest, and their max HP.
+    ///
+    /// **Same reason the deck travels, and it took a desync to see it.** The heal used to run on
+    /// arena entry, after the pre-combat sync — safe, but too late to show on the deck review,
+    /// where you can read both players' HP. Moving it earlier meant each client mutating its own
+    /// duelist during the race, and the sync does *not* carry your own state to the peer: it fixes
+    /// your copy of *them*. Measured 2026-08-13 — host healed 56 to 70, client healed 52 to 66, and
+    /// the first checksum of the duel diverged, because the host was still holding 52 for the
+    /// client.
+    ///
+    /// So the healed value is sent, exactly as the deck is, and for the identical reason: what the
+    /// peer needs must be sent, not looked up. Riding on the arrival keeps the ordering free.
+    /// </summary>
+    public int hp;
+
+    public int maxHp;
+
+    /// <summary>
     /// The sender's deck, as it stands on arrival.
     ///
     /// **The decklist has to travel, because the reader's copy of it is a lie.** The race
