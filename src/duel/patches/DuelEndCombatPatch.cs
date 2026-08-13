@@ -2,6 +2,7 @@ using HarmonyLib;
 using MegaCrit.Sts2.Core.Combat;
 using MegaCrit.Sts2.Core.Entities.Multiplayer;
 using MegaCrit.Sts2.Core.Logging;
+using MegaCrit.Sts2.Core.Nodes.Combat;
 using MegaCrit.Sts2.Core.Nodes.HoverTips;
 using MegaCrit.Sts2.Core.Runs;
 
@@ -102,6 +103,10 @@ public static class DuelEndCombatPatch
         // Row 12. Nothing else takes a hover tip down on the way to the result screen.
         NHoverTipSet.Clear();
 
+        // Row 24, the half of it that is safe — and the fix for the three `NCard` double-frees.
+        // See KillPendingQueueTweens.
+        KillPendingQueueTweens();
+
         DuelResult.ShowFor(turnState.State);
 
         // **Required, and its absence was the `duel over` NullReferenceException.**
@@ -122,5 +127,78 @@ public static class DuelEndCombatPatch
 
         // Skip the original entirely.
         return false;
+    }
+
+    /// <summary>
+    /// **The three `NCard` double-frees at duel teardown. Root-caused 2026-08-13 from the log, and
+    /// this is the fix — unplayed.**
+    ///
+    /// Symptom: `Tried to free object &lt;Control#…&gt; (NCard) back to pool … but it's already been
+    /// freed!`, measured at 3 per match and 0 before the play queue started holding planned cards.
+    ///
+    /// **The recorded suspicion was `NCardPlayQueue.AnimOut`, and that is impossible.** `AnimOut` is
+    /// reached only from `NCombatUi.AnimOut`, which is reached only from `NCombatUi.OnCombatEnded`,
+    /// which is a `CombatManager.CombatEnded` subscriber — and this patch never raises that event
+    /// (row 24 above). **`AnimOut` cannot run in a duel at all.** Worth keeping as a lesson: the
+    /// suspicion named the method whose *description* matched the symptom, in a file the patch has
+    /// already cut off at the root.
+    ///
+    /// What the log actually says, on the 2026-08-12 Steam duel:
+    ///
+    /// ```
+    /// [ActionQueueSet] Cancelling action PlayCardAction CARD.NEUROSURGE
+    /// [ActionQueueSet] Cancelling action PlayCardAction CARD.PUTREFY
+    /// …
+    /// Tried to free object <Control#3947980929700> (NCard) … already been freed!
+    /// Tried to free object <Control#3949423775052> (NCard) … already been freed!
+    ///     at NodePool`1.Free(T obj)
+    ///     at Godot.Callable.<From>g__Trampoline|1_0(…)
+    /// ```
+    ///
+    /// **Two cancelled plays, two errors**, and the trace is a `Callable.From` trampoline — a tween
+    /// callback. The killing blow ends the combat, the opponent's still-queued plays are cancelled,
+    /// and `NCardPlayQueue.RemoveCardFromQueueForCancellation` hands each to
+    /// `TweenCardForCancellation`: a 0.5s fade ending in `TweenCallback(Callable.From(card.QueueFreeSafely))`.
+    /// The result screen goes up inside that half second, the card node is freed with everything
+    /// else, and the callback then returns an already-freed node to the pool.
+    ///
+    /// **What rules out the other two tween-callback frees in the engine** (`CardPileCmd`'s exhaust
+    /// fade and its card-removal preview, both also `Callable.From(cardNode.QueueFreeSafely)`): they
+    /// call `cardNode.CreateTween()`, so the tween is bound to the very node it frees and dies with
+    /// it. `TweenCardForCancellation` calls `CreateTween()` on **the queue**, so its tween outlives
+    /// the card. That asymmetry is the whole bug, and it is why only this one can misfire.
+    ///
+    /// The fix is the first line of vanilla's own `AnimOut` — `item.currentTween?.Kill()` for each
+    /// item — and deliberately *only* that line. AnimOut's remaining work re-tweens and re-parents
+    /// cards, which is the part that would risk running twice; killing a pending tween cannot.
+    ///
+    /// **One correction to the note this closes:** the pool *refused* the second free, so nothing
+    /// was ever handed out twice. HANDOFF worried that a doubly-freed pooled node would land in a
+    /// later combat and that rematch makes that reachable; it would not. This is log noise — but log
+    /// noise that made every read of a duel log start by discounting two real-looking errors.
+    /// </summary>
+    private static void KillPendingQueueTweens()
+    {
+        NCardPlayQueue? queue = NCardPlayQueue.Instance;
+        if (queue == null)
+        {
+            return;
+        }
+
+        int killed = 0;
+        foreach (NCardPlayQueue.QueueItem item in queue._playQueue)
+        {
+            if (item.currentTween != null)
+            {
+                item.currentTween.Kill();
+                killed++;
+            }
+        }
+
+        if (killed > 0)
+        {
+            Log.Warn($"[SpirePvp] duel teardown: killed {killed} pending play-queue tween(s) so a "
+                     + "cancellation fade cannot free a card node the result screen has already taken");
+        }
     }
 }

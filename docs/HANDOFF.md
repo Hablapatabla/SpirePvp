@@ -2325,18 +2325,38 @@ blessing (`RaceNoCoopCardsPatch`).
 
 Smaller known gaps, none blocking:
 
-- **Three `NCard` double-frees at the end of a turn-based duel**, found 2026-08-12 and not
-  root-caused. `Tried to free object <Control#…> (NCard) back to pool … but it's already been
-  freed!`, three of them, all after `stats received` — so at teardown, with the match already
-  decided. **Measured rather than assumed: 3 per match, and 0 in the run before the play queue
-  started holding planned cards**, so it belongs to that change. The suspicious interaction is
-  `NCardPlayQueue.AnimOut`, which at combat end hands every locally-owned queued card back to the
-  hand (`NPlayerHand.Instance.Add`) — a path vanilla rarely takes, because in blitz the queue is
-  almost never occupied when a combat ends, while a planned batch can have a card in it at the
-  moment the killing blow lands. **Which call frees first is not proven** (`NPlayerHand.AnimOut`
-  only tweens; it does not free), so start by finding the first free, not by assuming this one.
-  Worth fixing before it is left alone: a pooled node handed out twice would land in a *later*
-  combat, and Rematch keeps the process alive across runs.
+- ~~**Three `NCard` double-frees at the end of a turn-based duel**, not root-caused.~~
+  **ROOT-CAUSED AND FIXED 2026-08-13 from the log, unplayed** (`DuelEndCombatPatch.KillPendingQueueTweens`).
+
+  **The recorded suspicion was `NCardPlayQueue.AnimOut`, and it was impossible.** `AnimOut` is
+  reached only from `NCombatUi.AnimOut` ← `NCombatUi.OnCombatEnded` ← the `CombatManager.CombatEnded`
+  event — the one line `DuelEndCombatPatch` never raises. **It cannot run in a duel at all.** Keep
+  the lesson: the suspicion named the method whose *description* matched the symptom, inside a file
+  the patch had already cut off at the root. "Find the first free rather than assuming" was the right
+  instruction and it is what settled this.
+
+  What the log says, in the 2026-08-12 Steam duel: two `Cancelling action PlayCardAction` lines
+  (Neurosurge, Putrefy — the opponent's queued plays, cancelled when the killing Squeeze landed) and
+  then **exactly two** double-free errors, whose stack is a `Godot.Callable.<From>` trampoline into
+  `NodePool.Free` — a tween callback. That is
+  `NCardPlayQueue.TweenCardForCancellation`: a 0.5s fade ending in
+  `TweenCallback(Callable.From(card.QueueFreeSafely))`. The result screen goes up inside that half
+  second, the node is freed with everything else, and the callback then hands an already-freed node
+  back to the pool.
+
+  **What rules out the engine's other two tween-callback frees** (`CardPileCmd`'s exhaust fade and
+  its card-removal preview, both also `Callable.From(cardNode.QueueFreeSafely)`): they call
+  `cardNode.CreateTween()`, so the tween is bound to the node it frees and dies with it.
+  `TweenCardForCancellation` calls `CreateTween()` on **the queue**, so its tween outlives the card.
+  That asymmetry is the whole bug.
+
+  The fix is the first line of vanilla's own `AnimOut` — kill each item's pending tween — and
+  deliberately only that line; AnimOut's remaining work re-tweens and re-parents cards, which is
+  the part that could run twice.
+
+  **One correction to what this note feared:** the pool *refused* the second free, so no node was
+  ever handed out twice and rematch was never at risk. It is log noise — but noise that made every
+  read of a duel log begin by discounting two real-looking errors.
 - ~~`HellraiserPower`'s infinite-combo cap misfires in a duel (`HittableEnemies.All(...)` on an
   empty list is vacuously true), capping auto-plays at 9 per turn.~~ **Should be gone as a
   side-effect of the 2026-08-13 AoE fix, unplayed:** the list is no longer empty, so
