@@ -1030,6 +1030,33 @@ information: the model's own submission cooldown, then the scheduler's busy-gate
 earliest-clock pick was always due by construction, whereas a lowest-position pick has to be told, or
 a player's not-yet-due second card could be released ahead of its own cooldown.
 
+#### Turn-based confirmed in play 2026-08-13 — and the resolution was too slow
+
+**"Turn-based seems to be working great"** — so the lock-in gate inversion fixed on 2026-08-12 is
+confirmed, and the mode is no longer "believed working on no evidence". Both models are now
+playtested.
+
+**Then: "one card every 3 seconds, kinda painfully slow — I turned Fast Mode on mid-combat and it
+stayed slow."** Two separate causes, and the second half is this mod working as designed:
+
+1. **A duel pins Fast Mode for both clients** (`DuelFastModePatch`), so a mid-duel toggle does
+   nothing by construction. That pin is right and stays — vanilla sizes almost every wait through
+   Fast Mode, so an unpinned duel hands reaction time to whoever has the faster setting. But it was
+   pinning to **`Normal`**, and the reason recorded for choosing `Normal` over `Fast` was "the report
+   asked for a *feelable* delay". That conflated two mechanisms introduced the same week: **the
+   feelable delay is `DuelPace`'s beat**, which is a `Cmd.Wait` and *does not shorten at `Fast`* —
+   `Cmd.Wait` only skips outright at `Instant`. So `Normal` was buying nothing but slower animations
+   inside an unchanged gap. **Pinned to `Fast` now**; the readable gap is untouched.
+2. **The lock-in beat was 1.2s**, set before real-time had a beat at all. Real-time reads at 0.55s
+   and was reported as feeling right, and a resolving round is if anything *easier* to follow — it is
+   a replay of plays already committed, with nothing to decide while you watch. **0.8s now.**
+
+**Never pin to `Instant`.** `Cmd.Wait` skips entirely there, so it would silently delete the beat —
+the exact unreadable round the beat exists to prevent, reached through a setting rather than a code
+change. The two knobs are separable and worth keeping straight: **the pin decides the card's own
+animation time, `BeatSeconds` decides the gap after it**, and the second means the same thing at any
+setting.
+
 #### CONFIRMED IN PLAY 2026-08-13 — "felt great this time"
 
 The four fixes below are **playtested together and good**. From the confirming log: contests now form

@@ -15,10 +15,25 @@ namespace SpirePvp.Duel.Patches;
 /// how long the loser of an exchange spends unable to read it. Raised by Lucas 2026-08-12: "maybe
 /// fast mode should be fixed across host and client? otherwise there's an advantage?"
 ///
-/// So for the duration of the duel both clients read `Normal`, whatever either of them prefers.
-/// Normal rather than Fast because the same report asked for a *feelable* delay — the pacing exists
-/// to make a play readable, and the faster settings are exactly what was reported as making plays
-/// feel instantaneous.
+/// So for the duration of the duel both clients read the same level, whatever either of them
+/// prefers.
+///
+/// **`Fast`, changed from `Normal` on 2026-08-13.** Reported after the first turn-based playtest:
+/// *"let's speed up how quick the cards play on turn end, because it's like one every 3 seconds,
+/// kinda painfully slow — I turned fast mode on mid-combat and it stayed slow."* The staying-slow
+/// half is this patch working as designed; the speed half was this patch overreaching.
+///
+/// Normal was originally chosen "because the same report asked for a *feelable* delay". That
+/// conflated two mechanisms that arrived in the same week. **The feelable delay is `DuelPace`'s
+/// beat**, which is a `Cmd.Wait` of the model's own `BeatSeconds` and is *not* scaled by Fast Mode —
+/// `Cmd.Wait` does not shorten at `Fast`, it only skips outright at `Instant`. So the readable gap
+/// after each play is identical at `Fast` and at `Normal`, and all the pin was buying by choosing
+/// `Normal` was slower vanilla animations *inside* that gap. The pacing survives the change; only
+/// the card's own flight time shortens.
+///
+/// **Never `Instant`, and this is the trap in the neighbourhood.** `Cmd.Wait` skips entirely at
+/// `Instant`, so pinning there would silently delete `DuelPace`'s beat — the exact unreadable round
+/// the beat exists to prevent, arrived at through a setting rather than through a code change.
 ///
 /// **The getter, not the stored value.** Writing the preference would mean writing it back
 /// afterwards and getting that right through every route out of a duel — a disconnect, a
@@ -39,7 +54,7 @@ public static class DuelFastModePatch
     {
         if (DuelSession.IsDuelActive)
         {
-            __result = FastModeType.Normal;
+            __result = FastModeType.Fast;
         }
     }
 }

@@ -226,7 +226,21 @@ public sealed class LockInTurnModel : IPlanningTurnModel
     /// Long, because a resolved batch is a story told after the decisions are made: six plays land
     /// in a row and the only thing to do is read them.
     /// </summary>
-    public float BeatSeconds => 1.2f;
+    /// <summary>
+    /// **0.8s, down from 1.2s on 2026-08-13** — the second half of "one card every 3 seconds, kinda
+    /// painfully slow", the first being that a duel pinned Fast Mode to `Normal`
+    /// (`DuelFastModePatch`, now `Fast`).
+    ///
+    /// The two knobs are separable and worth keeping straight: the pin decides how long the card's
+    /// own animation takes, and this decides the gap *after* it. `Cmd.Wait` does not scale with Fast
+    /// Mode, so this number means the same thing at any setting.
+    ///
+    /// 1.2s was set before the real-time mode had a beat at all. Real-time now reads at 0.55s and
+    /// was reported as feeling right, and a resolving round is if anything *easier* to follow than a
+    /// live exchange — it is a replay of plays already committed, with nothing to decide while you
+    /// watch. 0.8s keeps it clearly slower than real-time without being the thing you wait on.
+    /// </summary>
+    public float BeatSeconds => 0.8f;
 
     /// <summary>
     /// **The same beat, deliberately.** A resolving round is interleaved by design — one of yours,

@@ -23,17 +23,18 @@ namespace SpirePvp.Duel.Turns;
 /// animation half — the two look alike and only this one gives a real reading window, because the
 /// next card's damage has not landed yet.
 ///
-/// **Paced on each client, from that client's own Fast Mode.** The gap is a `Cmd.Wait` — vanilla's
-/// Godot-timer wait, which respects timescale and lag where `Task.Delay` would not — sized from the
-/// game's existing Fast Mode setting, so the duel speeds up exactly as everything else does and
-/// nobody has to learn a second speed control. The alternative —
-/// the host releasing one action per tick — would have made the host's personal preference decide
-/// the pace on both screens, and would have handed the client's reading window to network jitter.
-/// Pacing locally cannot desync: it changes *when* a client executes, never *what* or in which
-/// order, and the ordering is still entirely the host's.
+/// **Paced on each client, and the gap is the same length on both.** The gap is a `Cmd.Wait` —
+/// vanilla's Godot-timer wait, which respects timescale and lag where `Task.Delay` would not — of
+/// the model's own `BeatSeconds`. The alternative — the host releasing one action per tick — would
+/// have made the host's personal preference decide the pace on both screens, and would have handed
+/// the client's reading window to network jitter. Pacing locally cannot desync: it changes *when* a
+/// client executes, never *what* or in which order, and the ordering is still entirely the host's.
 ///
-/// Note `FastModeType.Instant` skips the wait outright, which is vanilla's meaning of the setting
-/// and is left alone: a player who has asked for no animations has asked for this too.
+/// **The beat is not scaled by Fast Mode**, and this summary claimed the opposite for a while. It is
+/// a rule rather than an animation, and a display preference must not delete a mechanic — see
+/// `BeatSeconds` below for the two separate reports that settled it. `Cmd.Wait` happens to make that
+/// easy: it does not shorten at `Fast`, only skipping outright at `Instant` — and `Instant` cannot
+/// occur inside a duel, because `DuelFastModePatch` pins both clients to `Fast` throughout.
 ///
 /// **The pause is vanilla's own, and the unpause is the thing to be careful with.**
 /// `ActionExecutor.Pause` is documented for exactly this — stopping the action queue without
