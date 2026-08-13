@@ -59,6 +59,18 @@ public static class DuelRaceDeath
         }
 
         CombatManager.Instance.CombatEnded += OnCombatEnded;
+
+        // **`CombatEnded` is not enough, and the first build proved it.** Measured 2026-08-13: the
+        // host died to the Waterfall Giant and the combat simply never ended — vanilla auto-readies
+        // a dead player every turn (`Setting player 1 to ready at start of turn. IsDead: True`) and
+        // goes on waiting for the rest of the party, who in a race are not in this combat at all.
+        // So turns kept passing over a corpse and nothing was ever raised. The telemetry probe
+        // caught it exactly: `resultArmed=False` beside a dead duelist, then that turn-start line
+        // repeating.
+        //
+        // `TurnStarted` is the event that *does* keep firing there, and a death is final by the time
+        // a new turn begins — revival effects resolve inside the turn that killed you.
+        CombatManager.Instance.TurnStarted += OnTurnStarted;
         _armed = true;
     }
 
@@ -70,11 +82,16 @@ public static class DuelRaceDeath
         }
 
         CombatManager.Instance.CombatEnded -= OnCombatEnded;
+        CombatManager.Instance.TurnStarted -= OnTurnStarted;
         _armed = false;
         _declared = false;
     }
 
-    private static void OnCombatEnded(CombatRoom room)
+    private static void OnTurnStarted(CombatState state) => CheckForDeath();
+
+    private static void OnCombatEnded(CombatRoom room) => CheckForDeath();
+
+    private static void CheckForDeath()
     {
         // The duel owns its own ending (`DuelResult`), including a death in the arena. This is the
         // race's half of the same question and must not answer for both.
