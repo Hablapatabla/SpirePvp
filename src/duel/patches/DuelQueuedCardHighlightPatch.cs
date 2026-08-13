@@ -2,6 +2,7 @@ using Godot;
 using HarmonyLib;
 using MegaCrit.Sts2.Core.Models;
 using MegaCrit.Sts2.Core.Nodes.Cards;
+using MegaCrit.Sts2.Core.Nodes.Cards.Holders;
 using MegaCrit.Sts2.Core.Nodes.Combat;
 using SpirePvp.Duel.Turns;
 
@@ -70,48 +71,43 @@ public static class DuelQueuedCardHighlightPatch
     }
 
     /// <summary>
-    /// Colours the ring as it appears, rather than when the grid is filled.
+    /// Colours the ring in the **hand**, which is where a discard selection actually happens.
     ///
-    /// **The grid raises highlights again on every relayout** — `AssignCardsToRow` re-reads
-    /// `_highlightedCards` and calls `AnimShow` — and card nodes are pooled and reassigned as you
-    /// scroll. A colour set once when the grid was built would therefore be missed by nodes that
-    /// did not exist yet, and stranded on nodes that later belong to a different card. Setting it
-    /// at the moment the ring is shown is the only point where the node and the card it is
-    /// currently displaying are both known.
+    /// **The first version patched `NCardHighlight.AnimShow` and never showed at all**, and Lucas
+    /// named the reason from the outside before I found it: "could that be overriding it?". It
+    /// could. `NHandCardHolder.UpdateCard` calls `AnimShow()` and *then* assigns
+    /// `Modulate = playableColor`, so anything set from the show was painted over a line later.
+    /// Postfixing the method that does the assigning is the only place after it.
     ///
-    /// White for everything else, which is the default this node ships with: vanilla only overrides
-    /// the modulate on reward screens, so restoring it cannot erase a colour anything in a duel set.
+    /// The other half of that miss is worth keeping too: a card-selection effect like Survivor
+    /// brings the cards **back into the hand** to be picked from, rather than opening a grid — so
+    /// the `NCardGrid` patch below was watching a widget the discard never used. Both are patched
+    /// now, because a duel reaches both: the hand for in-combat selections, the grid for the deck
+    /// review.
+    ///
+    /// Vanilla's own colours all mean something already — cyan for playable, red and gold for the
+    /// glow states a card asks for — so this only overrides the cyan, and leaves red and gold
+    /// alone. A card that is both queued and shouting for other reasons keeps the louder signal.
     /// </summary>
-    [HarmonyPatch(typeof(NCardHighlight), nameof(NCardHighlight.AnimShow))]
+    [HarmonyPatch(typeof(NHandCardHolder), nameof(NHandCardHolder.UpdateCard))]
     [HarmonyPostfix]
-    public static void AfterHighlightShown(NCardHighlight __instance)
+    public static void AfterHandCardUpdated(NHandCardHolder __instance)
     {
         if (!DuelSession.IsDuelActive || DuelTurnModel.Current is not IPlanningTurnModel)
         {
             return;
         }
 
+        NCard? node = __instance.CardNode;
         NCardPlayQueue? queue = NCardPlayQueue.Instance;
-        CardModel? card = OwningCard(__instance)?.Model;
-        if (queue == null || card == null)
+        if (node?.Model == null || queue == null)
         {
             return;
         }
 
-        __instance.Modulate = queue.GetCardNode(card) != null ? QueuedColor : Colors.White;
-    }
-
-    /// <summary>The card this ring belongs to. `%Highlight` is a nested unique name, so walk up.</summary>
-    private static NCard? OwningCard(Node node)
-    {
-        for (Node? parent = node.GetParent(); parent != null; parent = parent.GetParent())
+        if (queue.GetCardNode(node.Model) != null && node.CardHighlight.Modulate == NCardHighlight.playableColor)
         {
-            if (parent is NCard card)
-            {
-                return card;
-            }
+            node.CardHighlight.Modulate = QueuedColor;
         }
-
-        return null;
     }
 }
