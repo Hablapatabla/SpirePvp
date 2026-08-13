@@ -646,15 +646,43 @@ mechanic. Note `HittableEnemies` is **not** patchable — it has no acting-playe
   fixes model A's host-latency edge as a side effect: if resolution is quantised to a tick, a half
   RTT stops deciding anything unless it crosses a tick boundary.
 
+  **Specified 2026-08-12 by Lucas, who thinks this is what the real-time mode should actually be**
+  rather than a third option beside it. Four rules:
+
+  1. **Your first play is instant.** No cooldown on the opener, so opening speed still decides the
+     first exchange and blitz keeps its texture.
+  2. **A cooldown of ~0.4s before your next play.** Tunable; note this is shorter than the 0.6s
+     OSRS tick quoted above, and the number is a playtest question.
+  3. **Plays can be queued during the cooldown**, OSRS-style — you commit the next action while the
+     current one is still resolving, rather than being locked out of the interface.
+  4. **You can see what the opponent has queued**, which is what makes a reaction possible at all,
+     together with longer animation and resolution windows so there is time to act on it.
+
+  **Rule 4 is a change to the information rules (§1), not just a HUD.** Every other surface in this
+  mod hides intent — `HoverSuppressionPatch` exists to stop even a pointer leaking — and this
+  deliberately reveals it. The justification is the same one M8.5 opened with: in blitz the
+  opponent's effects arrive as things that simply happen, so there is nothing to fence with. A
+  visible queue is the thing being reacted *to*.
+
+  It is also cheaper than it sounds: **vanilla already draws a remote player's queued cards.**
+  `NCardPlayQueue.OnActionEnqueued` has a remote branch that flies the other player's card in from
+  their intent handler, which is co-op's own answer to "what is my teammate doing". Blitz plays
+  already pass through that path, so this may be less a feature to build than one to stop
+  suppressing.
+
   Open questions for whoever builds it:
-  - **Where the pacing goes.** The host orders the stream, so the host should pace it — releasing
-    one queued action per tick rather than draining the queue. `ActionExecutor` is the obvious
-    place to look; the risk is that vanilla assumes the queue drains promptly.
-  - **Tick length is a playtest question**, not a design one. 0.6s is the reference point, not a
-    decision.
+  - **Cooldown is a submit-rate limit; the pacing built for the lock-in model is a resolve-rate
+    limit.** They are different mechanisms and this milestone needs both — `DuelPace` slows the
+    resolution, and rule 2 slows how often a play may be *requested*. Do not try to make one do
+    the other's job.
+  - **Where the cooldown is enforced.** Locally is honest and cheap (the client refuses to submit),
+    but a client is not trustworthy about its own timing; the host holding a per-player next-allowed
+    timestamp is the version that survives someone patching their own copy. Friendly play does not
+    need the second, and the seam is `ActionQueueSynchronizer.RequestEnqueue` either way — the same
+    gate `IDuelTurnModel` already sits behind.
   - **Whether the card animation is lengthened or the resolution is delayed.** These look the same
     on screen and are not the same thing: one changes presentation, the other changes when damage
-    lands. Only the second gives a real reaction window.
+    lands. Only the second gives a real reaction window, and it is what `DuelPace` already does.
 
 - **M9 — Turn-model tuning.** Revisit resolution order (§3.1b) now that both modes are
   playable and can be compared by feel rather than argument; per-round planning timer for
