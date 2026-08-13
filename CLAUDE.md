@@ -1,8 +1,8 @@
 # SpirePvp — agent orientation
 
-1v1 real-time blitz PvP mod for Slay the Spire 2 (Godot 4.5.1 .NET, official mod loader,
-Harmony ships with the game). Two players race identical-seed runs through Act 1, then duel
-in real time with chess clocks.
+1v1 PvP mod for Slay the Spire 2 (Godot 4.5.1 .NET, official mod loader, Harmony ships with the
+game). Two players race identical-seed runs through Act 1, then duel — under one of two turn
+models, paced real-time or batched turn-based, with chess clocks over both.
 
 **Read first:** `docs/HANDOFF.md` — current state, how to run two local clients, console
 commands, architecture tour, and the traps that cost real time. Then `README.md` (toolchain,
