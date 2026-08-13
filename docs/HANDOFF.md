@@ -956,9 +956,44 @@ report `after Nms — beat 1001#0` or `uncontested` on release, because the old 
 distinguish "waited" from "went straight through" — the `+Nms` on a booking is the *cooldown* offset,
 not a wait, and the game's log lines carry no timestamps at all.
 
+#### The second half, and the first half could not work without it (2026-08-13, UNPLAYED)
+
+The owner-aware beat above was played immediately and **the report came back unchanged**: *"happened
+again with certainty on every turn… again with client waiting for host card to resolve."* The log
+says why in one line, and it is the leak named two paragraphs up — written down, and then not fixed:
+
+```
+queue: releasing 1001's play #0 [earliest] after 579ms — uncontested
+```
+
+**579ms with nothing executing.** The `Pausing queue` / `Un-pausing queue` pair straddles it: the
+scheduler was waiting out the host's beat before it would even *release* the client's card.
+
+**And that deadlocked the new cut-off against the scheduler.** The beat shortens itself once the
+opponent's play is **enqueued**; the play could not be enqueued until the beat **ended**. Each waited
+on the other. That is why `pace: cut` appears only 3 times on the host across a whole match instead
+of on every exchange — it fired only where the card happened to be queued *before* the beat began,
+which is the case that never needed it.
+
+**The predicate was wrong, and it is the same trap this document keeps recording.**
+`ActionExecutor.IsRunning` tracks the queue-drain *task*, which stays alive across `WaitForUnpause` —
+so an executor merely paused for presentation reads as busy. It correlates with "the sim is working"
+everywhere except the one state this mode invented. `DuelPlayScheduler` now asks
+`!ActionQueueSet.IsEmpty || ActionExecutor.CurrentlyRunningAction != null` — a card queued and not
+yet executed, or one genuinely mid-execution. Neither is true during a beat.
+
+Two properties worth not re-deriving: a release enqueues immediately, so `IsEmpty` goes false at once
+and **exactly one card still leaves per drain** — the pool cannot empty itself into a single beat.
+And a **cancelled** action is dropped from the queue by the executor's own skip, so it cannot wedge
+this loop the way a hand-kept in-flight set would have. That was the first design tried here and it
+would have turned a cancelled play into a hung duel.
+
 **Still not done, and still worth doing:** the contest window — not releasing instantly on an idle
 board, so near-simultaneous plays can actually meet and the tie-break becomes reachable at all.
 Lucas wants it; it is explicitly **not** what this report was about and would not have changed it.
+Note the ground has shifted under it, though: this match produced
+`1001's play #0 pending at +0ms (2 waiting, board BUSY)` — **the first genuine two-play contest in
+any log.** The pool can now hold one, which is the precondition the window was waiting on.
 
 
 

@@ -195,17 +195,34 @@ public static class DuelPlayScheduler
             {
                 // **One card in flight at a time, and never before its moment.**
                 //
-                // The first half keeps the choice live: while the executor is working — including
-                // the readable dwell `DuelPace` adds after each play — nothing is committed to an
-                // id, so a card played during someone else's run can still take the next slot
-                // instead of queueing behind all of it.
+                // The first half keeps the choice live: while a card is queued or executing,
+                // nothing further is committed to an id, so a card played during someone else's
+                // run can still take the next slot instead of queueing behind all of it.
                 //
                 // The second half is what makes the cooldown mean anything. Releasing a burst as
                 // fast as the executor allowed would put its second card into the slot that a card
                 // played at 0.3s should get, and the interleave could never happen — the opponent's
                 // play had not arrived yet, so the choice was made before there was a choice. So a
                 // play waits for its own place on the line even when the board is idle.
-                while (RunManager.Instance?.ActionExecutor.IsRunning == true || NothingIsDueYet())
+                //
+                // **Not `ActionExecutor.IsRunning`, and that distinction is the whole of a bug.**
+                // `IsRunning` tracks the queue-drain task, which stays alive across
+                // `WaitForUnpause` — so an executor merely *paused* for `DuelPace`'s readable beat
+                // reads as busy. Gating on it made the host's own beat hold the client's card back:
+                // measured 2026-08-13, `releasing 1001's play #0 after 579ms` with nothing running.
+                //
+                // It also deadlocked the beat's own cut-off against this loop. The beat shortens
+                // itself once the opponent's play is *enqueued*; the play could not be enqueued
+                // until the beat ended. Each waited for the other, so `pace: cut` fired only in the
+                // cases where the card happened to be queued before the beat began.
+                //
+                // These two ask what was always meant: `IsEmpty` covers a card released and not yet
+                // executed (a release enqueues immediately, so exactly one card leaves per drain,
+                // and a *cancelled* action is dropped from the queue by the executor's own skip
+                // rather than blocking here forever), and `CurrentlyRunningAction` covers one that
+                // is genuinely mid-execution. Neither is true during a beat, which is a gap in the
+                // presentation and not in the sim.
+                while (QueueIsBusy() || NothingIsDueYet())
                 {
                     await Engine.GetMainLoop().ToSignal(Engine.GetMainLoop(), SceneTree.SignalName.ProcessFrame);
                 }
@@ -227,6 +244,24 @@ public static class DuelPlayScheduler
         {
             _pumping = false;
         }
+    }
+
+    /// <summary>
+    /// Whether the sim is still working: a card queued and not yet executed, or one executing now.
+    ///
+    /// Deliberately blind to <see cref="ActionExecutor.IsPaused"/> — see the wait loop above. A
+    /// paused executor with an empty queue is a *reading gap*, and the next card may be chosen
+    /// during it.
+    /// </summary>
+    private static bool QueueIsBusy()
+    {
+        RunManager? run = RunManager.Instance;
+        if (run == null)
+        {
+            return false;
+        }
+
+        return !run.ActionQueueSet.IsEmpty || run.ActionExecutor.CurrentlyRunningAction != null;
     }
 
     /// <summary>
