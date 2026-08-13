@@ -1,9 +1,11 @@
+using Godot;
 using HarmonyLib;
 using MegaCrit.Sts2.Core.Combat;
 using MegaCrit.Sts2.Core.Entities.Multiplayer;
 using MegaCrit.Sts2.Core.Logging;
 using MegaCrit.Sts2.Core.Nodes.Combat;
 using MegaCrit.Sts2.Core.Nodes.HoverTips;
+using MegaCrit.Sts2.Core.Nodes.Rooms;
 using MegaCrit.Sts2.Core.Runs;
 
 namespace SpirePvp.Duel.Patches;
@@ -107,6 +109,10 @@ public static class DuelEndCombatPatch
         // See KillPendingQueueTweens.
         KillPendingQueueTweens();
 
+        // Row 24's *presentation* half, which is what a player actually sees is missing. See
+        // FadeCombatPresentation.
+        FadeCombatPresentation();
+
         DuelResult.ShowFor(turnState.State);
 
         // **Required, and its absence was the `duel over` NullReferenceException.**
@@ -177,6 +183,48 @@ public static class DuelEndCombatPatch
     /// later combat and that rematch makes that reachable; it would not. This is log noise — but log
     /// noise that made every read of a duel log start by discounting two real-looking errors.
     /// </summary>
+    /// <summary>
+    /// Fades the combat play area out on the way to the result screen, the way vanilla does.
+    ///
+    /// **Reported 2026-08-13:** *"can still see the card and background of the match dimly in the
+    /// death screen."* That is `NCombatUi.PostCombatCleanUp`, which is one line — a 0.25s tween of
+    /// `PlayContainer.modulate` to transparent — and which never runs in a duel because it hangs off
+    /// `NCombatUi.OnCombatEnded`, a `CombatManager.CombatEnded` subscriber that row 24 does not
+    /// raise. The room is not exited while the result screen is up, so nothing else takes the combat
+    /// scene down and it simply sits there underneath.
+    ///
+    /// **Why this rather than raising `CombatEnded` and getting the whole wind-down**, which is what
+    /// row 24 is really asking for and what would also address the leftover UI framing around the
+    /// duelists. `OnCombatEnded` is `AnimOut()` *and* `PostCombatCleanUp()`, and `AnimOut` calls
+    /// `NCardPlayQueue.AnimOut`, which for any play **not** owned locally — i.e. every one of the
+    /// opponent's queued cards — starts `TweenCardForCancellation`: the exact 0.5s fade ending in
+    /// `QueueFreeSafely` whose callback outlived the result screen and produced the three `NCard`
+    /// double-frees fixed above.
+    ///
+    /// And it cannot simply be ordered around, which is the finding worth recording: `AnimOut` ends
+    /// with `_playQueue.Clear()`, so running <see cref="KillPendingQueueTweens"/> afterwards would
+    /// iterate an empty queue and kill nothing, while the tweens it just created stayed live. The
+    /// tween-killer only works *before* `AnimOut`, and before `AnimOut` those tweens do not exist
+    /// yet. Raising the event therefore reintroduces the double-free by construction unless the
+    /// queue is drained by hand first — which is a real change to who frees a card node, and wants
+    /// its own pass and its own playtest rather than riding along with a fade.
+    ///
+    /// So this takes the half that is one tween on one container, changes no ownership and frees
+    /// nothing. Purely local presentation: it cannot desync.
+    /// </summary>
+    private static void FadeCombatPresentation()
+    {
+        Control? playContainer = NCombatRoom.Instance?.Ui?.PlayContainer;
+        if (playContainer == null || !GodotObject.IsInstanceValid(playContainer))
+        {
+            return;
+        }
+
+        // Vanilla's own timing and target, from PostCombatCleanUp.
+        Tween fade = playContainer.CreateTween();
+        fade.TweenProperty(playContainer, "modulate", Colors.Transparent, 0.25);
+    }
+
     private static void KillPendingQueueTweens()
     {
         NCardPlayQueue? queue = NCardPlayQueue.Instance;
