@@ -77,6 +77,11 @@ public static class DuelEntryScreenPatch
 
         Relabel(__instance);
 
+        // Their relics, beside their deck. Here rather than in DuelEntry.Open because the row is
+        // positioned from the caption's resolved rect, and that is only real once the overlay has
+        // been shown — the same reason the relabel and the caption live here.
+        DuelEntryRelics.Show(__instance, DuelEntry.Opponent);
+
         // The screen writes _prefs.Prompt into _infoLabel. CardSelectorPrefs only takes a
         // LocString (loc table + key, no raw-text constructor), so the prompt is set from a
         // placeholder key and corrected here — otherwise it reads "Choose a card to Upgrade".

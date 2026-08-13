@@ -56,6 +56,13 @@ public static class DuelEntry
     /// </summary>
     public static bool OpponentReady => _opponentReady;
 
+    /// <summary>
+    /// The player whose deck this screen is showing. Read by <see cref="DuelEntryRelics"/>, which
+    /// needs an owner for the relic models it draws — see `NRelicHistory.LoadRelics`, vanilla's own
+    /// version of the same problem.
+    /// </summary>
+    public static Player? Opponent => _opponent;
+
     /// <summary>Opens the opponent's deck as the duel's entry screen.</summary>
     public static bool Open()
     {
@@ -192,6 +199,8 @@ public static class DuelEntry
         net?.UnregisterMessageHandler<DuelReadyMessage>(OnReady);
         net?.UnregisterMessageHandler<DuelStartMessage>(OnStart);
 
+        DuelEntryRelics.Clear();
+
         _localReady = false;
         _opponentReady = false;
         _opponent = null;
@@ -280,6 +289,11 @@ public static class DuelEntry
         }
 
         IsChoosing = false;
+
+        // Ours to take down before the screen goes: the relic row is a node we added to vanilla's
+        // screen, and letting the overlay free a parent we still hold is the shape behind the
+        // NCard double-frees already on the books.
+        DuelEntryRelics.Clear();
 
         // The screen was pushed onto NOverlayStack, so it has to come off the same stack.
         // Closing NCapstoneContainer here did nothing, leaving the grid on top of the duel

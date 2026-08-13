@@ -395,6 +395,25 @@ public record struct DuelArrivedMessage : INetMessage
     /// </summary>
     public List<SerializableCard> deck;
 
+    /// <summary>
+    /// The sender's relics, for the same reason and by the same route as <see cref="deck"/>.
+    ///
+    /// Wanted after the 2026-08-12 session: *"the opponent's relics are not shown in the deck
+    /// review."* They fall under the identical rule — your copy of their `Player` stopped updating
+    /// when the race began, so every relic they picked up in the race is invisible to you, and a
+    /// relic list that is quietly wrong is worse than none. **This has to be sent, not looked up.**
+    ///
+    /// Riding on the arrival message rather than in one of its own keeps the ordering free, exactly
+    /// as the deck does: the review opens once both arrivals are in hand.
+    ///
+    /// **Appended after the deck, not inserted.** Field order is the wire format here — `Serialize`
+    /// and `Deserialize` are hand-written and positional in the same way message *ids* are — so a
+    /// new field goes last. Both clients must be on the same build regardless (the engine's own
+    /// mod-match gate enforces it), which is what makes adding one safe at all.
+    /// </summary>
+    public List<SerializableRelic> relics;
+
+
     // **A field on the struct is not a field on the wire.** These are hand-written serializers, so
     // adding `hp`/`maxHp` above and populating them at the send site left them out of the packet
     // entirely: the receiver read the struct's default and every arrival announced `hp=0/0`, which
@@ -407,6 +426,7 @@ public record struct DuelArrivedMessage : INetMessage
         writer.WriteInt(hp);
         writer.WriteInt(maxHp);
         writer.WriteList<SerializableCard>(deck ?? new List<SerializableCard>());
+        writer.WriteList<SerializableRelic>(relics ?? new List<SerializableRelic>());
     }
 
     public void Deserialize(PacketReader reader)
@@ -415,6 +435,7 @@ public record struct DuelArrivedMessage : INetMessage
         hp = reader.ReadInt();
         maxHp = reader.ReadInt();
         deck = reader.ReadList<SerializableCard>();
+        relics = reader.ReadList<SerializableRelic>();
     }
 }
 

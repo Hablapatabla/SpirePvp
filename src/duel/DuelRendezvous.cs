@@ -58,12 +58,25 @@ public static class DuelRendezvous
     /// </summary>
     public static IReadOnlyList<CardModel>? OpponentDeck { get; private set; }
 
+    /// <summary>
+    /// The opponent's relics as they stood on arrival, still in wire form. Null until they arrive.
+    ///
+    /// **Kept serialized rather than rebuilt here, unlike the deck**, and that is not an
+    /// inconsistency: `RelicModel` display wants an `Owner` (vanilla's own `NRelicHistory` sets one
+    /// before building a holder, and the hover tip reads through it), and the opponent's `Player`
+    /// is resolved by `DuelEntry` rather than known here. Rebuilding at display time means the
+    /// owner is in hand at the moment it is needed, instead of a second lookup at arrival to feed a
+    /// screen that may never open.
+    /// </summary>
+    public static IReadOnlyList<SerializableRelic>? OpponentRelics { get; private set; }
+
     public static void Reset()
     {
         _localArrived = false;
         _remoteArrived = false;
         _firstToArrive = 0;
         OpponentDeck = null;
+        OpponentRelics = null;
     }
 
     /// <summary>True when <paramref name="coord"/> is this run's arena node.</summary>
@@ -102,7 +115,8 @@ public static class DuelRendezvous
             modVersion = DuelEntry.ModVersion,
             hp = mine?.CurrentHp ?? 0,
             maxHp = mine?.MaxHp ?? 0,
-            deck = LocalDeckSnapshot()
+            deck = LocalDeckSnapshot(),
+            relics = LocalRelicSnapshot()
         });
 
         ShowWaitingPortrait();
@@ -195,8 +209,10 @@ public static class DuelRendezvous
         _remoteArrived = true;
         RecordArrival(senderId);
         OpponentDeck = RebuildDeck(message.deck);
+        OpponentRelics = message.relics ?? new List<SerializableRelic>();
         ApplyOpponentHp(senderId, message.hp, message.maxHp);
-        Log.Warn($"[SpirePvp] arena: opponent {senderId} arrived with {OpponentDeck?.Count ?? 0} cards");
+        Log.Warn($"[SpirePvp] arena: opponent {senderId} arrived with {OpponentDeck?.Count ?? 0} cards "
+                 + $"and {OpponentRelics.Count} relic(s)");
 
         ShowWaitingPortrait();
         TryOpenDeckReview();
@@ -219,6 +235,34 @@ public static class DuelRendezvous
         }
 
         return cards;
+    }
+
+    /// <summary>This client's relics, in the form the wire takes. Same argument as the deck.</summary>
+    private static List<SerializableRelic> LocalRelicSnapshot()
+    {
+        List<SerializableRelic> relics = new List<SerializableRelic>();
+        Player? me = LocalContext.GetMe(RunManager.Instance?.State?.Players
+                                        ?? (IEnumerable<Player>)Array.Empty<Player>());
+        if (me == null)
+        {
+            return relics;
+        }
+
+        foreach (RelicModel relic in me.Relics)
+        {
+            // One unreadable relic should cost that relic, not the arrival message — the same
+            // tolerance RebuildDeck applies at the other end.
+            try
+            {
+                relics.Add(relic.ToSerializable());
+            }
+            catch (Exception e)
+            {
+                Log.Warn($"[SpirePvp] arena: could not serialize a relic ({e.Message})");
+            }
+        }
+
+        return relics;
     }
 
     /// <summary>

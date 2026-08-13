@@ -1174,6 +1174,61 @@ generate together, on top of the six quiet omissions `DuelArena` has already pro
 costs race-clock time. It should, or the race bank stops meaning anything at the finish line — but
 that is Lucas's call, and it only bites in a timed match, which no run has used yet.
 
+#### RE-SCOPED 2026-08-13 (still NOT built): two of the three constraints above are wrong
+
+The overnight session took this as its second priority, read the decompile for it, and **stopped
+rather than build it** — the plan above cannot be executed as written, and the corrected plan turns
+on a rules decision that is Lucas's. What each constraint got wrong:
+
+**Constraint 2 is already solved, for the whole race.** "The rest synchroniser waits for a
+co-located party" is true of vanilla and false of this mod: `RaceSoloRestSitePatch` pre-completes
+every absent player's `PlayerRestSite` at `BeginRestSite` whenever `DuelSession.IsRaceActive`, which
+is exactly why race rest sites work today (it closed "a client that could not leave a rest site" on
+2026-08-11). **A rest entered while the race is still active therefore needs no shared coord at
+all** — it is solo, like every other race room, and `RaceIgnoreRemoteRoomPatch` drops the
+opponent's rest traffic anyway. Constraint 3 (split `DuelArena` so the coord move comes first) falls
+with it.
+
+**Constraint 1 and the "find that makes it cheap" are in direct contradiction, and the thing that
+settles it was missed: `RestSiteRoom.Exit` generates a checksum.** Its last line is
+`ChecksumTracker.GenerateChecksum("Exiting rest site room")`. `RaceCoordinator.EndRace` is what
+re-enables `ChecksumTracker` (it is off for the whole race, `BeginRace` line 60), and the two runs
+are divergent by construction until `CombatStateSynchronizer.WaitForSync` — which runs *inside*
+`DuelArena.EnterRoom`, i.e. after the deck review. So a rest room placed where the design wants it,
+**after `EndRace` and before the sync, produces a `StateDivergence` on every single match** — and
+since 2026-08-12 a desync voids the match as a draw, so this would not even fail loudly as a bug.
+The engine's both-players gate cannot be used here: it only exists after the phase flip, and after
+the phase flip the checksum is live.
+
+**So there is exactly one viable placement, and it is the opposite of the one designed:** the rest
+belongs **inside the race phase**, at the moment the player clicks the arena node, *before*
+`DuelRendezvous.ArriveLocal`. Checksums are off, the solo patch handles the absent opponent, the
+deck the arrival message carries is post-upgrade so the reveal stays honest, and the both-players
+gate is the rendezvous itself — which is the gate this flow already trusts, and the one whose
+ordering guarantee is written up above ("Why the rendezvous is immune").
+
+**What is left to build, and why it was not built tonight:**
+
+1. **Entering and leaving the room.** `DuelRendezvous` would fade out, run `EnterMapPointInternal`'s
+   preamble for a `RestSiteRoom` (a *different* subset from `DuelArena.EnterRoom`'s — no replay
+   state, no sync, but `ClearScreens` and the fade still), await the local rest completing
+   (`AfterAllRestSitesCompleted` returns as soon as the local player's options are exhausted, since
+   the opponent's source is pre-completed), then `ExitCurrentRooms()` and announce arrival. This is
+   the `RunManager.EnterRoom` trap again, at a third door; it wants the same step-by-step
+   commented mirror `DuelArena` has, and it cannot be verified by compiling.
+2. **Which options a pre-duel rest offers is a competitive rule, not an implementation detail.**
+   Vanilla's set includes Smith (upgrade), Dig (a *relic*), Kindle, Lift, Cook, Clone and Hatch.
+   "Rest before a duel" reads as heal-or-upgrade; handing someone a relic at the finish line is a
+   different game. `RestSiteOption.Generate` is the filter point (`RaceNoCoopSurfacesPatch` already
+   strips Mend there), but **which to strip is Lucas's call.**
+3. **The clock question is unchanged and is now load-bearing rather than theoretical.** Inside the
+   race phase the race bank keeps running while a player reads a rest screen, so building it this
+   way *answers* "resting costs race-clock time" by default. That is the answer the note above leans
+   toward, but it would be answered by omission rather than decided.
+
+`DuelArenaRest` (the plain 30% heal, built 2026-08-12, unplayed) is unaffected by any of this and
+remains what a match gets today.
+
 ### Dying in the race now loses the match (2026-08-12, unplayed)
 
 Reported: *"I died to the boss and it didn't end the run, giving the opponent the victory."* The
@@ -1479,10 +1534,23 @@ reopens planning.
   so there is nothing to react to. Resolving one card at a time on a fixed cadence (OSRS's 0.6s
   tick is the reference) makes each play a readable event. It is a third turn model and slots into
   the `IDuelTurnModel` seam that already exists.
-- **The opponent's relics are not shown in the deck review.** Wanted. Note the rule it falls under:
-  the race decouples the two runs, so your copy of their relics is **stale** — this has to be
-  *sent*, not looked up. `DuelArrivedMessage` already carries their deck for exactly this reason
-  and is the natural place to add them, which also keeps the ordering free.
+- ~~**The opponent's relics are not shown in the deck review.**~~ **Built 2026-08-13, unplayed**
+  (`DuelEntryRelics`). They ride on `DuelArrivedMessage` beside the deck, for the reason the note
+  gave: the race decouples the two runs, so your copy of their relics is **stale** and this has to
+  be *sent*, not looked up. Three things worth knowing about it:
+  - **`NRelicHistory.LoadRelics` is the worked example and it is followed step for step** —
+    `RelicModel.FromSerializable`, `DeprecatedRelic` as the fallback for an id this build does not
+    know, **assign `Owner`**, then `NRelicBasicHolder.Create`. The owner assignment is the
+    non-obvious one: the holder's hover tip reads through the model, and vanilla sets an owner in
+    the one place it draws relics that are not attached to a live player. Nothing is added to the
+    opponent's real relic list.
+  - **`NRelicBasicHolder`, not a bare `NRelic`** — the holder brings the hover tip. A row of
+    nameless icons satisfies "show their relics" and answers nothing.
+  - **The row is positioned from `_infoLabel`'s resolved rect, not from constants**, and the rect
+    is logged. Nobody has seen where it lands; if it is wrong, the log line says what it was told
+    to sit above. (This project has already reverted one placement "corrected" from a screenshot.)
+  - The new field goes **last** in `DuelArrivedMessage`'s hand-written `Serialize`/`Deserialize`,
+    for the same positional reason message ids go last.
 - **"Does a client pull in the host's mods automatically?" — no, and not in this game.**
   Answered 2026-08-12 against the decompile so it does not have to be wondered about again.
   `Core/Modding` has a `workshopId` field for identifying a Workshop-sourced mod but no subscribe
