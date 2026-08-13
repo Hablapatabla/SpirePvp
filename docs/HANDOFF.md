@@ -814,6 +814,31 @@ answer, but it *can* be given one the simulation already defines identically on 
 it safe was never the getter — it was `DuelAoeActor` having a deterministic actor to name, and
 falling back to vanilla's empty list when it has none.
 
+### OPEN: the corner brackets around the initiative holder (2026-08-13, marked not fixed)
+
+**Deferred by Lucas — "it's fine, just mark it and let's come back to it."** Recorded now while the
+evidence is fresh, because the next person will otherwise start from the wrong suspect.
+
+**What it is:** four faint L-shaped corner marks framing a duelist, visible in a screenshot on the
+*result* screen around the surviving character. **It accompanies the initiative arrow and moves with
+it when turns end**, so it is part of the initiative indicator as a player experiences it.
+
+**What it is not, and this is the part worth keeping.** It is not the mod's. SpirePvp constructs
+exactly **two** nodes in the whole codebase — `LockInPlanView`'s `Polygon2D` arrow and
+`DuelRematchPatch`'s vote-marker `TextureRect` — and the arrow is freed in `DuelResult.Declare` along
+with its caption, which is a child of it. That the caption ("You move first") *is* gone while the
+brackets remain is the proof: the two are one node tree, so whatever survives is not that tree.
+
+**Also not a bug**, in the same screenshot: the gold pointer beside the fallen duelist is the
+*opponent's mouse cursor*, which is a deliberate feature on the result screen — see the note above
+about it being the only co-op presence surface that is wanted. Do not "fix" it.
+
+**Best hypothesis:** vanilla combat framing left up by the same unraised `CombatEnded` (row 24 of the
+teardown audit), i.e. the same root cause as the dim play area, of which only the `PlayContainer`
+fade half has been taken. Something is presumably highlighting whichever creature the arrow is
+parented to. The cheap next step is to find what draws a four-corner frame on an `NCreature` and
+whether it keys on a child being added, on hover, or on a targeting state that never clears.
+
 ### FOUR FIXES TO VALIDATE TOGETHER (2026-08-13, all UNPLAYED)
 
 Batched deliberately, and each has its **own** signal so a failure is still attributable to one of
