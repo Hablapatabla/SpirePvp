@@ -814,6 +814,27 @@ answer, but it *can* be given one the simulation already defines identically on 
 it safe was never the getter — it was `DuelAoeActor` having a deterministic actor to name, and
 falling back to vanilla's empty list when it has none.
 
+### CLOSED: the badge teardown guard is reachable and stays (2026-08-13)
+
+Listed as "may be unreachable — find the route or drop it as unreachable", on the reasoning that
+the Main Menu button does not appear until the badges have finished animating, so nothing can be
+clicked during the window the guard protects.
+
+**That enumerated the wrong exit.** `NGameOverScreen._Ready` wires `%ContinueButton` straight to
+`OpenSummaryScreen`, and Continue is on the screen from the moment the result is shown — it is
+visible in the 2026-08-13 screenshots, next to the banner, long before any badge has animated. So a
+player who clicks Continue while the badges are still coming in leaves the screen mid-animation,
+which is exactly the window.
+
+It was never hypothetical either, which the note missed: the guard's own comment records the failure
+as **measured** — `ObjectDisposedException: 'Godot.HBoxContainer'` out of `GetChildren`, reported as
+"duel badges failed" and reading like broken badge logic rather than a screen that had simply gone.
+Vanilla's own `AnimateScoreBar` throws the same exception on the same click.
+
+**So the guard stays**, and this is the project's own rule arriving in a new costume: *guard on the
+condition, not on each route out — there is always another route.* The note reasoned about the one
+exit it happened to think of.
+
 ### Three items scoped 2026-08-13, each larger than its one-line description
 
 Worked down the open list in order and stopped at the first line of each, because the queue file's
