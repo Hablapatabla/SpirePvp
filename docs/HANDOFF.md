@@ -845,10 +845,10 @@ reopens planning.
   an empty turn-model row means the run carries no `DuelBlitz`/`DuelTurnBased` modifier, so
   `DuelMatch.IsPvpRun` is false and the run is not a duel at all. Until it is fixed, check that one
   chip in each of the three rows is ticked before starting.
-- **The energy counter by the end-turn button is not visible at all** in a duel. Reported
-  2026-08-12, not investigated. Worth checking whether it is duel-specific or turn-based-specific
-  before assuming either — and note the top-bar deck counter has a known vanilla staleness quirk
-  nearby, so confirm which widget is actually missing rather than stale.
+- ~~**The energy counter by the end-turn button is not visible at all** in a duel.~~ **Not
+  reproducing — Lucas can see the orb in a duel (2026-08-12).** Left here because the note sent one
+  investigation down a blind alley: nothing in the mod touches that widget, and its absence would
+  have had no log signature either way.
 - ~~**Cards reported still playable past 3 energy spent.**~~ **Real, and fixed 2026-08-12** — the
   reservation had no consumer at all (see the top of this section). `DuelPlanEnergyPatch` now
   spends it.
@@ -958,8 +958,39 @@ play loudly rather than silently, and whether the node should return to the queu
 hand. Re-observe it first: this was seen while the client's plays were resolving on arrival, so
 Survivor ran *during planning*; with the gate fixed it runs inside the flush instead.
 
-Then **M9's initiative**: the tiebreak seam is `LockInTurnModel.StartsTheRound`, and the candidate
-is Lucas's — whoever reached the arena first starts the alternation, alternating each round.
+### M9's initiative is in (2026-08-12, unplayed)
+
+**Whoever reached the arena first leads, and it alternates every turn after** — Lucas's rule,
+replacing fixed slot order, and shown as a gold arrow bobbing over the leading duelist for the whole
+turn. During planning, deliberately: that is when knowing it changes what you do, and a banner as
+the batch resolves would arrive too late to use.
+
+Three things about it worth not re-deriving:
+
+- **Arrival order is decided by the host and rides on `DuelStartMessage`.** It is not a local fact:
+  each client knows when its own arrival happened and when the other's message reached it, so on a
+  slow link both can honestly believe they were first. This is the field that message was left
+  empty waiting for — "a field nobody reads is worse than no field".
+- **The alternation counts turns, not batches.** Per batch, a player could commit a throwaway
+  one-card batch purely to flip who leads the next one, turning initiative into something you
+  manipulate by splitting your turn rather than something you earned in the race.
+- **The arrow is a `Polygon2D` built in code**, so it needs no art, no scene and no `.pck` change.
+  It hangs off the creature's node and is placed by `GetTopOfHitbox`, vanilla's documented anchor
+  for aligning UI to a creature — *not* the `IntentContainer`, which `NCreature` hides. Swapping in
+  a texture when there is art is one line.
+
+**Also fixed: you no longer press End Turn with a dead hand.** Reported as "having to click end turn
+when nothing's playable and couldn't play in the first place" — the batch model was charging the
+common case for the rare one, since energy is a *turn* resource but planning is a *batch* activity.
+A player with no playable card and no potion has their turn closed for them, through the button's
+own `CallReleaseLogic` so it is the same event a press is. A potion stops it: drinking is exactly
+what you do once the energy is gone.
+
+**Still open, deliberately parked by Lucas:** turn-based "feels weird" in a way neither of us has
+pinned down yet — his words, "the interleaving of energy and planning is wonky in some way". Two
+things it is *not*: the energy orb is visible in a duel (so the older "energy counter missing" note
+is stale), and it is not supposed to tick down as you plan. Revisit after more play rather than
+guessing at it.
 
 ### The old M8 note, kept for its scoping
 

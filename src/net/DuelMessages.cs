@@ -102,6 +102,21 @@ public record struct DuelReadyMessage : INetMessage
 /// </summary>
 public record struct DuelStartMessage : INetMessage
 {
+    /// <summary>
+    /// Who strikes first in the duel's opening turn, and therefore who strikes first in every
+    /// odd-numbered one — the turn model alternates from here (M9).
+    ///
+    /// **It has to be on the wire because arrival order is not a local fact.** Whoever reached the
+    /// arena first is the rule, and each client only knows when its *own* arrival happened and when
+    /// the other's message reached it: on a slow link both can honestly believe they were first.
+    /// The host sees both in one order, so the host decides — the same reasoning every other duel
+    /// parameter follows, and the reason this message exists at all.
+    ///
+    /// This is the field `DuelStartMessage` was left empty waiting for: "a field nobody reads is
+    /// worse than no field", and now `LockInTurnModel.StartsTheRound` reads it.
+    /// </summary>
+    public ulong firstInitiative;
+
     public bool ShouldBroadcast => true;
 
     public NetTransferMode Mode => NetTransferMode.Reliable;
@@ -112,10 +127,12 @@ public record struct DuelStartMessage : INetMessage
 
     public void Serialize(PacketWriter writer)
     {
+        writer.WriteULong(firstInitiative);
     }
 
     public void Deserialize(PacketReader reader)
     {
+        firstInitiative = reader.ReadULong();
     }
 }
 

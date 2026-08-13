@@ -31,6 +31,19 @@ public static class DuelRendezvous
 {
     private static bool _localArrived;
     private static bool _remoteArrived;
+
+    /// <summary>
+    /// Who reached the arena first, as *this* client saw it. Only the host's answer is used.
+    ///
+    /// **Arrival order is not a local fact**, which is the whole reason this is host-decided and
+    /// travels on `DuelStartMessage`: each client knows when its own arrival happened and when the
+    /// other's message landed, so on a slow link both can honestly believe they were first. The
+    /// host sees both in one order. Reading it anywhere but the host is a bug.
+    /// </summary>
+    private static ulong _firstToArrive;
+
+    /// <summary>The netId that reached the arena first, or 0 if nobody has arrived yet.</summary>
+    public static ulong FirstToArrive => _firstToArrive;
     private static bool _armed;
 
     public static bool LocalArrived => _localArrived;
@@ -48,6 +61,7 @@ public static class DuelRendezvous
     {
         _localArrived = false;
         _remoteArrived = false;
+        _firstToArrive = 0;
         OpponentDeck = null;
     }
 
@@ -71,6 +85,7 @@ public static class DuelRendezvous
         }
 
         _localArrived = true;
+        RecordArrival(LocalContext.NetId ?? 0UL);
         Log.Warn("[SpirePvp] arena: arrived, waiting for opponent");
 
         RunManager.Instance.NetService.SendMessage(new DuelArrivedMessage
@@ -126,6 +141,7 @@ public static class DuelRendezvous
         }
 
         _remoteArrived = true;
+        RecordArrival(senderId);
         OpponentDeck = RebuildDeck(message.deck);
         Log.Warn($"[SpirePvp] arena: opponent {senderId} arrived with {OpponentDeck?.Count ?? 0} cards");
 
@@ -239,6 +255,20 @@ public static class DuelRendezvous
         NMapScreen.Instance?.Close(animateOut: false);
         DuelEntry.Open();
         await run.FadeIn();
+    }
+
+    /// <summary>
+    /// First arrival wins and later ones are ignored, so this is safe to call on every arrival.
+    /// </summary>
+    private static void RecordArrival(ulong netId)
+    {
+        if (_firstToArrive != 0 || netId == 0)
+        {
+            return;
+        }
+
+        _firstToArrive = netId;
+        Log.Warn($"[SpirePvp] arena: {netId} reached the arena first — they take the opening initiative");
     }
 
     private static ulong OpponentNetId()

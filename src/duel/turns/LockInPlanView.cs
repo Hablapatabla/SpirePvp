@@ -1,11 +1,17 @@
+using Godot;
 using MegaCrit.Sts2.Core.Combat;
+using MegaCrit.Sts2.Core.Entities.Creatures;
+using MegaCrit.Sts2.Core.Entities.Players;
+using MegaCrit.Sts2.Core.Helpers;
+using MegaCrit.Sts2.Core.Logging;
+using MegaCrit.Sts2.Core.Nodes.Rooms;
+using MegaCrit.Sts2.Core.Runs;
 using MegaCrit.Sts2.Core.Entities.Multiplayer;
 using MegaCrit.Sts2.Core.GameActions;
 using MegaCrit.Sts2.Core.Localization;
 using MegaCrit.Sts2.Core.Models;
 using MegaCrit.Sts2.Core.Nodes.Cards;
 using MegaCrit.Sts2.Core.Nodes.Combat;
-using MegaCrit.Sts2.Core.Nodes.Rooms;
 
 namespace SpirePvp.Duel.Turns;
 
@@ -119,6 +125,101 @@ internal static class LockInPlanView
     /// matters here (`CanTurnBeEnded` refuses mid-card-play).
     /// </summary>
     public static void PressEndTurn() => NCombatRoom.Instance?.Ui.EndTurnButton?.CallReleaseLogic();
+
+    /// <summary>
+    /// Points at whoever strikes first this turn.
+    ///
+    /// **You have to know it while you are planning, not while you are watching**, which is why it
+    /// sits over the duelist for the whole turn rather than announcing itself as the batch
+    /// resolves. It is the fact that changes what you plan: leading means your first card lands
+    /// before theirs, so `[Strike, Block]` against `[Block, Strike]` has opposite winners depending
+    /// on which of you starts.
+    ///
+    /// **Drawn rather than loaded.** The mod ships no arrow art, and a `Polygon2D` built in code
+    /// needs no `.pck` change, no scene and no font — so this is a real indicator today and a
+    /// one-line swap when there is a texture for it. It hangs off the creature's own node and is
+    /// placed by `GetTopOfHitbox`, vanilla's documented anchor for "aligning UI elements to a
+    /// creature's hitbox", so it follows the duelist rather than being positioned in screen space.
+    ///
+    /// Not the `IntentContainer`, which would have been the obvious parent: `NCreature` hides it,
+    /// and an indicator inside a node something else switches off is an indicator that vanishes
+    /// for reasons you will not find.
+    /// </summary>
+    public static void ShowInitiative(ulong leaderNetId)
+    {
+        ClearInitiative();
+
+        NCombatRoom? room = NCombatRoom.Instance;
+        IRunState? state = RunManager.Instance?.State;
+        if (room == null || state == null || leaderNetId == 0)
+        {
+            return;
+        }
+
+        Creature? leader = null;
+        foreach (Player player in state.Players)
+        {
+            if (player.NetId == leaderNetId)
+            {
+                leader = player.Creature;
+                break;
+            }
+        }
+
+        NCreature? node = leader == null ? null : room.GetCreatureNode(leader);
+        if (node == null)
+        {
+            return;
+        }
+
+        Polygon2D arrow = new Polygon2D
+        {
+            Polygon = new[]
+            {
+                new Vector2(-26f, -46f),
+                new Vector2(26f, -46f),
+                new Vector2(0f, -12f),
+            },
+            Color = StsColors.gold,
+            ZIndex = 100,
+        };
+
+        node.AddChildSafely(arrow);
+        arrow.GlobalPosition = node.GetTopOfHitbox();
+        _initiativeArrow = arrow;
+
+        // A still triangle reads as scenery; a moving one reads as a pointer. Looped rather than
+        // one-shot so it is still saying something a minute into a long planning phase.
+        if (arrow.IsInsideTree())
+        {
+            arrow.CreateTween().SetLoops()
+                .TweenProperty(arrow, "position:y", -10f, 0.7)
+                .AsRelative()
+                .SetEase(Tween.EaseType.InOut)
+                .SetTrans(Tween.TransitionType.Sine);
+            arrow.CreateTween().SetLoops()
+                .TweenProperty(arrow, "position:y", 10f, 0.7)
+                .AsRelative()
+                .SetDelay(0.7)
+                .SetEase(Tween.EaseType.InOut)
+                .SetTrans(Tween.TransitionType.Sine);
+        }
+
+        Log.Info($"[SpirePvp] initiative: {leaderNetId} strikes first this turn");
+    }
+
+    /// <summary>Drops the arrow. Called before redrawing it and on run teardown.</summary>
+    public static void ClearInitiative()
+    {
+        if (_initiativeArrow != null && GodotObject.IsInstanceValid(_initiativeArrow))
+        {
+            _initiativeArrow.QueueFreeSafely();
+        }
+
+        _initiativeArrow = null;
+    }
+
+    private static Polygon2D? _initiativeArrow;
 
     private static void SetLabel(string text) =>
         NCombatRoom.Instance?.Ui.EndTurnButton?._label?.SetTextAutoSize(text);

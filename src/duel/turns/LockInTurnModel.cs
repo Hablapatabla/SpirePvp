@@ -208,13 +208,63 @@ public sealed class LockInTurnModel : IDuelTurnModel
     public bool OpponentLockedIn => _remoteLockedIn || _remoteDone;
 
     /// <summary>
-    /// Whose first card resolves first. Fixed slot order for now: the lower net id starts, which
-    /// is the host.
+    /// Who reached the arena first, from the host — the opening turn's initiative (M9).
     ///
-    /// **The whole of the tiebreak lives here**, deliberately, so M9 replaces one expression rather
-    /// than unpicking a merge loop.
+    /// Zero until the duel starts, and zero for the legacy `duel on` path, which never passes
+    /// through the rendezvous and so has no arrival order to report. Both fall back to slot order.
     /// </summary>
-    private static ulong StartsTheRound(IRunState state)
+    private ulong _firstInitiative;
+
+    /// <summary>How many turns have closed, which is what the alternation counts.</summary>
+    private int _turnsClosed;
+
+    /// <summary>Set once, from `DuelStartMessage`, on both sides.</summary>
+    public void SetInitiative(ulong netId)
+    {
+        _firstInitiative = netId;
+        Log.Warn($"[SpirePvp] lock-in: opening initiative to {netId} (reached the arena first)");
+    }
+
+    /// <summary>
+    /// Whose first card resolves first this turn.
+    ///
+    /// **M9's rule, replacing fixed slot order: whoever reached the arena first leads, and it
+    /// alternates every turn after.** Proposed by Lucas, and the argument for it is that it is
+    /// *earned* — it gives the race a tactical consequence rather than only a material one, while
+    /// alternating stops it being a first-strike advantage in every turn of the duel. It is
+    /// explicitly not a random tiebreak: DESIGN §1 works hardest to make sure no player can be
+    /// luckier than the other, and the relic-contention animation is the right way to *display*
+    /// priority, not to decide it.
+    ///
+    /// **Alternating per turn, not per batch.** Per batch reads more granular and is worse: a
+    /// player could commit a throwaway one-card batch purely to flip who leads the next one, which
+    /// turns initiative into something you manipulate by splitting your turn rather than something
+    /// you earned in the race. Per turn, the number of batches you take cannot change who leads.
+    ///
+    /// **The whole of the tiebreak still lives here**, so whatever replaces it replaces one
+    /// expression rather than unpicking a merge loop.
+    /// </summary>
+    private ulong StartsTheRound(IRunState state)
+    {
+        ulong opening = _firstInitiative != 0 ? _firstInitiative : LowestNetId(state);
+        if (_turnsClosed % 2 == 0)
+        {
+            return opening;
+        }
+
+        foreach (Player player in state.Players)
+        {
+            if (player.NetId != opening)
+            {
+                return player.NetId;
+            }
+        }
+
+        return opening;
+    }
+
+    /// <summary>Slot order, the fallback when nobody's arrival was recorded.</summary>
+    private static ulong LowestNetId(IRunState state)
     {
         ulong first = ulong.MaxValue;
         foreach (Player player in state.Players)
@@ -226,6 +276,13 @@ public sealed class LockInTurnModel : IDuelTurnModel
         }
 
         return first;
+    }
+
+    /// <summary>Who leads the current turn, for the indicator over their head.</summary>
+    public ulong CurrentLeader()
+    {
+        IRunState? state = RunManager.Instance?.State;
+        return state == null ? 0 : StartsTheRound(state);
     }
 
     public bool ShouldDefer(GameAction action)
@@ -601,6 +658,9 @@ public sealed class LockInTurnModel : IDuelTurnModel
             _remoteEnd = null;
             _localDone = false;
             _remoteDone = false;
+
+            // The alternation counts turns, not batches — see StartsTheRound.
+            _turnsClosed++;
         }
     }
 

@@ -177,12 +177,25 @@ with A wastes B's block entirely; starting with B absorbs the strike. Same hands
 What interleaving buys is that the tiebreak stops being *decisive* — one card of advantage rather
 than a whole hand — which is exactly what makes shipping an arbitrary one acceptable for M8.
 
-**The tiebreak is the seam where initiative goes later.** Fixed slot order is deterministic and
-costs nothing; it is not a design statement. The candidate to replace it (M9) is **whoever reached
-the duel arena first starts the alternation, alternating each round after** — proposed by Lucas
-2026-08-12. It is the best of the options considered because it is *earned*: it gives the race a
+**The tiebreak is the seam where initiative goes later.** ~~Fixed slot order is deterministic and
+costs nothing; it is not a design statement.~~ **Replaced 2026-08-12: whoever reached the duel arena
+first leads, alternating each turn after** — proposed by Lucas It is the best of the options considered because it is *earned*: it gives the race a
 tactical consequence rather than only a material one (HP, deck, relics), and alternating keeps it
 from being a first-strike advantage in every round of the duel.
+
+**Built 2026-08-12, with two decisions that were not in the proposal.** *Arrival order is decided by
+the host and rides on `DuelStartMessage`*, because it is not a local fact: each client knows only
+when its own arrival happened and when the other's message reached it, so on a slow link both can
+honestly believe they were first. The host sees both in one order — the same reasoning every other
+duel parameter follows, and what the message was left empty waiting for. And *the alternation counts
+turns, not batches*: per batch, a player could commit a throwaway one-card batch purely to flip who
+leads the next one, which makes initiative something you manipulate by splitting your turn rather
+than something you earned in the race.
+
+It is shown as an arrow over the leading duelist for the whole turn — during planning, because that
+is when the fact changes what you do, rather than as the batch resolves, when it is too late to use.
+Drawn as a `Polygon2D` in code so it needs no art, no scene and no `.pck` change; swapping in a
+texture later is one line.
 
 **Rejected for the same reason, and it is a project principle rather than taste: a random
 initiative.** Deciding it with the relic-contention rock-paper-scissors animation, or the map-icon

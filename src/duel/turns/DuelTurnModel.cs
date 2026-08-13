@@ -1,3 +1,4 @@
+using MegaCrit.Sts2.Core.Combat;
 using MegaCrit.Sts2.Core.GameActions;
 using MegaCrit.Sts2.Core.Logging;
 using MegaCrit.Sts2.Core.Context;
@@ -70,14 +71,32 @@ public static class DuelTurnModel
         }
 
         net.RegisterMessageHandler<DuelLockInMessage>(OnLockIn);
+
+        // Display only: the indicator over the leader's head changes at turn boundaries, and this
+        // is the engine's own event for one. Nothing about the round loop keys off it, so it
+        // carries none of the ordering hazards a turn-start *reset* would.
+        CombatManager.Instance.TurnStarted += OnTurnStarted;
         _armed = true;
     }
 
     public static void Disarm()
     {
         RunManager.Instance?.NetService?.UnregisterMessageHandler<DuelLockInMessage>(OnLockIn);
+        CombatManager.Instance.TurnStarted -= OnTurnStarted;
         _armed = false;
     }
+
+    private static void OnTurnStarted(CombatState state)
+    {
+        if (state.CurrentSide == CombatSide.Player && Current is LockInTurnModel lockIn)
+        {
+            LockInPlanView.ShowInitiative(lockIn.CurrentLeader());
+        }
+    }
+
+    /// <summary>The host's ruling on who takes the opening initiative, from `DuelStartMessage`.</summary>
+    public static void SetInitiative(ulong netId) =>
+        (Current as LockInTurnModel)?.SetInitiative(netId);
 
     private static void OnLockIn(DuelLockInMessage message, ulong senderId)
     {

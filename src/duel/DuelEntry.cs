@@ -253,16 +253,22 @@ public static class DuelEntry
             return;
         }
 
-        // Empty by design. The clocks and turn model are modifiers on the run, so both clients
-        // already agree on them; this message exists only to make one client, not two, decide
-        // the moment the arena is entered. See DuelStartMessage.
-        RunManager.Instance.NetService.SendMessage(new DuelStartMessage());
+        // The clocks and turn model are modifiers on the run, so both clients already agree on
+        // them and none of them ride here. Initiative does: it is the one duel parameter neither
+        // client can work out for itself, because arrival order is only unambiguous from the
+        // host's seat. See DuelStartMessage.firstInitiative.
+        ulong first = DuelRendezvous.FirstToArrive;
+        RunManager.Instance.NetService.SendMessage(new DuelStartMessage { firstInitiative = first });
 
+        // The host does not receive its own broadcast, so it applies the same value it just sent
+        // rather than waiting for a message that is never coming back.
+        Turns.DuelTurnModel.SetInitiative(first);
         Begin();
     }
 
     private static void OnStart(DuelStartMessage message, ulong senderId)
     {
+        Turns.DuelTurnModel.SetInitiative(message.firstInitiative);
         Begin();
     }
 
