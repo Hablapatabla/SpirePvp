@@ -988,12 +988,50 @@ And a **cancelled** action is dropped from the queue by the executor's own skip,
 this loop the way a hand-kept in-flight set would have. That was the first design tried here and it
 would have turned a cancelled play into a hung duel.
 
+#### And the third half: it really was the ordering rule, once a contest could exist to show it
+
+Reported again immediately — *"same deal turn 2"* — and this time the log holds something no previous
+one did. The gate fix worked: the pool held two plays at once, which is the contest four sessions of
+reasoning had been done without.
+
+```
+queue: 1's play #0   pending at +261ms (1 waiting, board BUSY)   <- host's THIRD card of the burst
+queue: 1001's play #0 pending at +0ms  (2 waiting, board BUSY)   <- client's FIRST, due now
+queue: releasing 1's play #0 [earliest] after 830ms — beat 1001#0
+```
+
+**Chronology looks fair and is not, because a burst buys its own priority.** The host's third card was
+pushed to `+261ms` by its own cooldown and the client's first was due immediately — and the third card
+still won, because it had been *clicked* earlier and cooldown time is still time. The player already
+monopolising the stream is exactly the player whose next card is nearest on the clock, so ordering by
+clock compounds a lead instead of arbitrating it.
+
+**So ordering is by position again** — your Nth card of the turn races their Nth — which is the rule
+this class was written around and which its own summary never stopped describing. Ties at the same
+position go to the clock, and near-simultaneous ties inside 60ms to alternating initiative, which is
+where initiative belongs and where it now might actually fire.
+
+**The argument for the change is that position satisfies both of Lucas's reports and chronology
+satisfies one.** The case chronology was adopted for — 2026-08-12, *"player 2 plays a card at .3
+seconds, that should beat player 1's second card at .5"* — is player 2's **first** card against player
+1's **second**, so position gives player 2 as well. What position gives up, stated plainly: your `#0`
+beats their `#1` even when yours was clicked slightly later, bounded by the cooldown. That is what
+"your first card cannot be buried by their burst" is made of, and it is what was asked for four times.
+
+**The rule could not have worked before this even if it had been left in place**, which is worth
+knowing before anyone reads the earlier attempts as failures of the idea. `_nextIndex` was cleared
+whenever the pool drained, and the pool drained between almost every pair of plays — so **every card
+in every duel was booked as `#0`** and there was no position to compare. It resets at the turn
+boundary now. Note this is the third distinct mechanism that had quietly flattened the same
+information: the model's own submission cooldown, then the scheduler's busy-gate, now the index reset.
+
+**Only *due* plays are candidates**, which pure chronology got for free and position does not: the
+earliest-clock pick was always due by construction, whereas a lowest-position pick has to be told, or
+a player's not-yet-due second card could be released ahead of its own cooldown.
+
 **Still not done, and still worth doing:** the contest window — not releasing instantly on an idle
-board, so near-simultaneous plays can actually meet and the tie-break becomes reachable at all.
-Lucas wants it; it is explicitly **not** what this report was about and would not have changed it.
-Note the ground has shifted under it, though: this match produced
-`1001's play #0 pending at +0ms (2 waiting, board BUSY)` — **the first genuine two-play contest in
-any log.** The pool can now hold one, which is the precondition the window was waiting on.
+board, so near-simultaneous plays meet more often than by luck. Lucas wants it; it is explicitly
+**not** what these reports were about.
 
 
 

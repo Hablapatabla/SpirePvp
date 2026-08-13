@@ -87,7 +87,12 @@ public static class DuelPlayScheduler
         /// </summary>
         public required DateTime PlayAt;
 
-        /// <summary>Position in this player's own run of plays. Logging only — the clock orders.</summary>
+        /// <summary>
+        /// Position in this player's own run of plays this turn, and **the primary ordering key** —
+        /// see <see cref="Release"/>. It was demoted to logging for a spell while the clock ordered,
+        /// and reinstated 2026-08-13 after a contest showed chronology handing the slot to whoever
+        /// was already mid-burst. Reset only at the turn boundary.
+        /// </summary>
         public required int Index;
 
         /// <summary>
@@ -129,7 +134,14 @@ public static class DuelPlayScheduler
     /// A new turn starts the tie alternation over, so initiative's first strike is the leader's in
     /// every turn rather than in every other one.
     /// </summary>
-    public static void OnTurnStarted() => _tiesThisTurn = 0;
+    public static void OnTurnStarted()
+    {
+        _tiesThisTurn = 0;
+
+        // Both players start the turn even. This is the only place the per-player positions reset —
+        // see the note in `PumpAsync` about why a drained pool is not such a place.
+        _nextIndex.Clear();
+    }
 
     /// <summary>
     /// Takes a play — the host's own, or one that arrived from the client — into the pool.
@@ -230,9 +242,11 @@ public static class DuelPlayScheduler
                 Release();
             }
 
-            // The board is still and nothing is pending: the exchange is over, so nobody carries a
-            // lead into the next one.
-            _nextIndex.Clear();
+            // **The indices deliberately survive a drained pool.** They used to be cleared here, on
+            // the theory that a still board ended the exchange — but the pool drains between almost
+            // every pair of plays, so every card in the duel was booked as `#0` and the per-player
+            // position the whole rule is built on never existed. See `Release`. They reset at the
+            // turn boundary instead, where energy refills and the exchange genuinely restarts.
         }
         catch (Exception e)
         {
@@ -294,14 +308,71 @@ public static class DuelPlayScheduler
         // straddle a turn boundary.
         ulong leader = (DuelTurnModel.Current as IPlanningTurnModel)?.CurrentLeader ?? 0;
 
-        // **Earliest on the timeline wins.** Not a fairness quota — a chronology. Lucas, 2026-08-12:
-        // "it is a matter of laying the events out on a timeline… player 2 plays a card at .3
-        // seconds, that should beat player 1's second card at .5". The per-player index this
-        // replaced was a proxy for exactly that and could invert it: play at 0 and 0.5 against a
-        // single play at 0.6, and the index made the later card win for having been its owner's
-        // first.
-        DateTime earliest = DateTime.MaxValue;
+        // **Only plays whose own cooldown has come round may be chosen.** Ordering below is by
+        // position rather than by clock, so unlike a pure-chronology pick this has to say so:
+        // otherwise a player's not-yet-due second card could be released ahead of its own beat.
+        DateTime now = DateTime.UtcNow;
+        List<Pending> due = new List<Pending>();
         foreach (Pending candidate in _pending)
+        {
+            if (candidate.PlayAt <= now)
+            {
+                due.Add(candidate);
+            }
+        }
+
+        if (due.Count == 0)
+        {
+            return;
+        }
+
+        // **Your Nth card of the turn races their Nth card. Position, not chronology.**
+        //
+        // This restores the rule the class was written around and that its own summary still
+        // describes — "round-robin by each player's own position in their own queue" — after a spell
+        // ordering purely by clock. Both are Lucas's, and the second is what four playtests running
+        // reported as wrong: *"the Ironclad's defend waited for Silent's strike instead of just going
+        // through because it's the first card."*
+        //
+        // **Chronology looks fair and is not, because a burst buys its own priority.** Measured
+        // 2026-08-13, the first genuine contest any log has held: the host's *third* card was booked
+        // at `+261ms` (its own cooldown pushing it later) and the client's *first* was due at `+0ms`
+        // — and the third card still won, because it had been *clicked* earlier and cooldown time is
+        // still time. `releasing 1's play #0 [earliest] after 830ms — beat 1001#0`. The player
+        // already monopolising the stream is exactly the player whose next card is nearest on the
+        // clock, so chronology compounds a lead rather than arbitrating it.
+        //
+        // **The rule this replaced was argued from a case that position also gets right.** Lucas,
+        // 2026-08-12: "player 2 plays a card at .3 seconds, that should beat player 1's second card
+        // at .5" — player 2's card is their *first* and player 1's is their *second*, so position
+        // gives player 2 as well. Position satisfies both reports; chronology satisfies only that
+        // one. That is the whole argument for the change.
+        //
+        // What it genuinely gives up, stated plainly: your `#0` beats their `#1` even when yours was
+        // clicked slightly later. Bounded by the cooldown, and it is the trade "your first card
+        // cannot be buried by their burst" is made of.
+        int lowest = int.MaxValue;
+        foreach (Pending candidate in due)
+        {
+            if (candidate.Index < lowest)
+            {
+                lowest = candidate.Index;
+            }
+        }
+
+        List<Pending> contenders = new List<Pending>();
+        foreach (Pending candidate in due)
+        {
+            if (candidate.Index == lowest)
+            {
+                contenders.Add(candidate);
+            }
+        }
+
+        // Same position on both sides: now the clock is the right question, because neither player
+        // is ahead of the other in the exchange.
+        DateTime earliest = DateTime.MaxValue;
+        foreach (Pending candidate in contenders)
         {
             if (candidate.PlayAt < earliest)
             {
@@ -309,9 +380,9 @@ public static class DuelPlayScheduler
             }
         }
 
-        Pending best = _pending[0];
+        Pending best = contenders[0];
         int tied = 0;
-        foreach (Pending candidate in _pending)
+        foreach (Pending candidate in contenders)
         {
             if ((candidate.PlayAt - earliest).TotalMilliseconds <= SimultaneousMs)
             {
@@ -322,7 +393,7 @@ public static class DuelPlayScheduler
         string reason;
         if (tied <= 1 || leader == 0)
         {
-            foreach (Pending candidate in _pending)
+            foreach (Pending candidate in contenders)
             {
                 if (candidate.PlayAt == earliest)
                 {
@@ -331,7 +402,7 @@ public static class DuelPlayScheduler
                 }
             }
 
-            reason = "earliest";
+            reason = $"position #{lowest}";
         }
         else
         {
@@ -351,8 +422,12 @@ public static class DuelPlayScheduler
             bool leaderTakesIt = _tiesThisTurn % 2 == 0;
             _tiesThisTurn++;
 
+            // Over `contenders`, not `_pending`: a tie is only a tie between plays at the *same*
+            // position that are also due. Scanning everything pending here would let initiative hand
+            // the slot to a card that had already lost on position, or to one whose own cooldown has
+            // not come round.
             Pending? pick = null;
-            foreach (Pending candidate in _pending)
+            foreach (Pending candidate in contenders)
             {
                 if ((candidate.PlayAt - earliest).TotalMilliseconds > SimultaneousMs)
                 {
@@ -370,7 +445,8 @@ public static class DuelPlayScheduler
             }
 
             best = pick ?? best;
-            reason = $"tie {_tiesThisTurn} this turn → {(leaderTakesIt ? "initiative" : "alternated")}";
+            reason = $"position #{lowest}, tie {_tiesThisTurn} this turn → "
+                     + $"{(leaderTakesIt ? "initiative" : "alternated")}";
         }
 
         _pending.Remove(best);
