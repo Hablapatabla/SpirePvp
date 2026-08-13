@@ -695,6 +695,53 @@ Keep that split if you extend this.
 
 ## Immediate next step
 
+### Read this first (written 2026-08-12, for whoever picks this up cold)
+
+**A duel now has two modes and both were rebuilt on 2026-08-12. Almost everything below this
+heading is built and *not yet played*, so treat "it works" as a claim, not a fact.**
+
+- **Real-time is paced** (`TickTurnModel`). Your first play is instant, the next leaves on a 0.4s
+  cooldown, and what you click in between is queued rather than dropped. The host orders the two
+  players' plays with `DuelPlayScheduler`.
+- **Turn-based is batched** (`LockInTurnModel`). Locking in commits a *batch*; an empty batch ends
+  the turn; a turn holds as many plan→resolve exchanges as the players want, which is what makes
+  draw cards work.
+- Both defer plays, so both implement `IPlanningTurnModel` and share the energy reservation, the
+  play-queue presentation and the queued-card highlight.
+- Initiative (M9) is live in both: whoever reached the arena first leads, alternating each turn,
+  shown as an arrow over that duelist with "You move first" / "They move first" above it.
+
+**Patch count: 68 classes / 106 methods.** Verified against a live log before the last two commits,
+which add no patches (`DuelTurnModel.ShouldDefer`'s guard, and the scheduler rewrite/rename).
+**Those two have never been run in game at all** — they compile and nothing more.
+
+**Playtest order, because the pieces stack:**
+
+1. **Real-time.** One player plays three cards; the other then plays their *first*. That first card
+   should take the next slot rather than waiting behind the other three — the whole point of
+   `DuelPlayScheduler`. Watch for `queue: <id>'s play #N pending` and `queue: releasing <id>'s play
+   #N` in the log; the numbers are per-player positions, so `1001`'s `#0` beating `1`'s `#1` is the
+   thing working.
+2. **Turn-based**, which has not been played since the batch model, the auto-close, the arrow and
+   the purple highlight all landed together.
+
+**Three things nobody has confirmed, and one of them is a trap:**
+
+- **Powers "not ticking down" is not supported by the log** — the per-turn dump shows
+  `VULNERABLE_POWER:2` → `1` → gone, and amounts matching their sources (Bash applies 2). If it
+  still looks wrong on screen, suspect the **display**: `NPowerContainer` refreshes off
+  `PowerRemoved`, and 2 → 1 removes nothing. Do not "fix" the model without new evidence.
+- **Whether the queue side-split shows in real-time.** It is the same patch that works in
+  turn-based and it keys on any deferring model, so it should. Unconfirmed by eye.
+- **Three `NCard` double-frees at duel teardown**, measured at 3 per match and 0 before the play
+  queue started holding planned cards. Root cause not proven — see the note further down, and find
+  the *first* free rather than assuming.
+
+**Still unbuilt: M8.5 slice 3** — the opponent's *unsubmitted* queue on the wire, drawn on their
+side. Without it you can only see what has already been released, which is at most 0.4s of warning:
+not enough to read or answer, which is the point of the mode. It is a deliberate change to the
+information rules (DESIGN §1) and was decided as such.
+
 ### Start here: playtest the planning phase
 
 **M8's two remaining pieces are built (2026-08-12), and the playtest of them found something

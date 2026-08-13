@@ -39,23 +39,30 @@ because it bites anything that waits on a peer: **ENet never reports a hard drop
 (`ENetHost.Update` answers the transport's own `Disconnect` event with a bare `continue`), so
 absence has to be *measured* via `ConnectionStats.LastReceivedTime` rather than waited for.
 
-**Rematch and M8 are done and playtested (2026-08-12).** A Rematch button on the result screen
-replays the same seed without passing through the main menu — the transport is held open through
-run teardown, which works because `CleanUp` has *not* fired while that screen is up. And
-`1v1 Duel: Turn-Based` now plays turn-based: each side plans a round privately, ending your turn is
-the lock-in, and the host resolves the two buffers interleaved.
+**Rematch is done and playtested (2026-08-12).** A Rematch button on the result screen replays the
+same seed without passing through the main menu — the transport is held open through run teardown,
+which works because `CleanUp` has *not* fired while that screen is up.
 
-**The planning phase now shows itself (2026-08-12, unplayed):** energy is reserved as you plan, held
-cards sit in vanilla's play queue, and an icon over the end turn button says who has locked in. Both
-surfaces are the engine's own — a held play and a co-op play awaiting the host's ordering are the
-same thing. Note what this cost: `CanPlay` is read by sim code (`PlayCardAction`, `CardSelectCmd`,
-`WhisperingEarring`), so a *local* rule like a reservation may only answer while nothing is
-executing, or the two sims disagree about which cards exist.
+**Both duel modes were rebuilt on 2026-08-12 and most of it is unplayed.** Read HANDOFF's
+"Read this first" before touching either.
 
-**Remaining:** turn-based has an open *design* problem — draw cards are near-dead, because the
-round is planned from the opening hand (options and the leaning are in HANDOFF). Then M8.5,
-tick-paced blitz, which is the most promising idea the playtests produced. See HANDOFF for the
-current list and two open bugs.
+- **Real-time is paced** (`TickTurnModel`): first play instant, 0.4s cooldown after it, clicks in
+  between queued rather than dropped, and the host orders both players' plays with
+  `DuelPlayScheduler` — by each player's *position in their own queue*, so one duelist's backlog
+  cannot bury the other's first card. Ordering by wall-clock ticks was tried first and did nothing:
+  two players rarely act inside the same 0.4s, so bucketing by time is ordering by time.
+- **Turn-based is batched** (`LockInTurnModel`): locking in commits a *batch*, an empty batch ends
+  the turn, and a turn holds as many plan→resolve exchanges as the players want — which is what
+  makes draw cards work.
+- Both defer plays, so both implement `IPlanningTurnModel` and share the energy reservation, the
+  play-queue presentation and the queued-card highlight. **A turn model must never defer an action
+  the *sim* raised** — a card that enqueues a play while resolving is not a player clicking, and
+  holding it schedules the same effect to fire twice.
+- Initiative (M9) is live in both: first to the arena leads, alternating each turn.
+
+**Remaining:** M8.5 slice 3 — the opponent's unsubmitted queue on the wire, which is what makes the
+paced mode readable rather than merely slower. See HANDOFF for the playtest order and three
+unconfirmed observations.
 
 **The one idea that explains most of the code:** the duel never breaks card logic — it breaks
 every place the engine encodes "enemy" as a *side* rather than a *relationship*. Both duelists
