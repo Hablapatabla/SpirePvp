@@ -3,6 +3,7 @@ using MegaCrit.Sts2.Core.Entities.Creatures;
 using MegaCrit.Sts2.Core.Helpers;
 using MegaCrit.Sts2.Core.Nodes;
 using MegaCrit.Sts2.Core.Nodes.Rooms;
+using Godot;
 using MegaCrit.Sts2.Core.Nodes.Vfx;
 using MegaCrit.Sts2.Core.Entities.Players;
 using MegaCrit.Sts2.Core.Entities.RestSite;
@@ -167,23 +168,24 @@ public static class DuelArenaRest
     {
         HealRestSiteOption.PlayRestSiteHealSfx();
 
-        NCombatRoom? room = NCombatRoom.Instance;
-        if (room == null)
+        // **The arena room does not exist yet, and that is the point of resting here.** The heal
+        // runs on *arrival*, which is on the map, before the deck review and long before the
+        // `CombatRoom` is built — so the first version parented the cue to `NCombatRoom.Instance`
+        // and skipped every time, logging `no combat room node yet` on both clients while the heal
+        // itself worked. Reported 2026-08-13 as "health refilled at the correct time but no
+        // campfire bloom".
+        //
+        // `NRun.Instance` is the node that exists for the whole run, map included, so the cue has
+        // somewhere to hang whichever screen the player is on.
+        Node? parent = (Node?)NCombatRoom.Instance ?? NRun.Instance;
+        if (parent == null)
         {
-            Log.Info("[SpirePvp] arena rest: no combat room node yet, skipping the rest cue");
+            Log.Warn("[SpirePvp] arena rest: no run node to parent the rest cue to — heal is still applied");
             return;
         }
 
-        NDesaturateTransitionVfx? desaturate = NDesaturateTransitionVfx.Create();
-        if (desaturate != null)
-        {
-            room.AddChildSafely(desaturate);
-        }
-
-        NRestSmokeVfx? smoke = NRestSmokeVfx.Create();
-        if (smoke != null)
-        {
-            room.AddChildSafely(smoke);
-        }
+        parent.AddChildSafely(NDesaturateTransitionVfx.Create());
+        parent.AddChildSafely(NRestSmokeVfx.Create());
+        Log.Info($"[SpirePvp] arena rest: played the rest cue on {parent.GetType().Name}");
     }
 }
