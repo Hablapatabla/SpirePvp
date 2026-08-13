@@ -846,6 +846,38 @@ answer, but it *can* be given one the simulation already defines identically on 
 it safe was never the getter — it was `DuelAoeActor` having a deterministic actor to name, and
 falling back to vanilla's empty list when it has none.
 
+### `potion` from the client grants nothing, and it is not a display bug (2026-08-13)
+
+Reported: *"unable to grant myself potion on client… host got a potion once I ran the potion command
+on their side."* So issuing from the host works and issuing from the client silently does nothing —
+on **either** belt.
+
+**What the logs establish, and it rules out most of the obvious suspects.** `PotionConsoleCmd` is
+`IsNetworked = true`, and both machines executed it identically —
+`Executing DevConsole command (player 1001): potion FIRE_POTION` appears in both logs, with **no
+error on either** and checksums agreeing through the following action. A failure that is deterministic
+on both peers is not a UI problem, not `LocalContext`, and not the potion-greying added the same day:
+it is a state-level refusal that both simulations made the same way.
+
+**Vanilla has exactly one silent route to that.** `PotionConsoleCmd.Process` calls
+`PotionCmd.TryToProcure(potion, issuingPlayer)`, which either refuses via
+`Hook.ShouldProcurePotion` or calls `Player.AddPotionInternal`. There:
+
+```csharp
+if (slotIndex < 0) slotIndex = _potionSlots.IndexOf(null);
+if (slotIndex >= 0) { ... }   // the Log.Warn lives inside here
+```
+
+With no empty slot, `IndexOf` returns -1, the branch carrying the warning is skipped entirely, and it
+returns `TooFull` **without logging anything**. That is the only path in the chain that fails in
+silence, so player 1001 having no free slot — a full belt, or a belt with no slots at all — is the
+answer unless `ShouldProcurePotion` is refusing.
+
+**Not patched, and there is precedent.** It is a dev command with a working alternative (issue it from
+the host, which grants to the host), and `kill` is already documented as not working in a duel rather
+than patched around. If it is ever worth chasing, the cheap next step is a one-line log of the
+`PotionProcureResult.failureReason`, which separates `TooFull` from `NotAllowed` in a single run.
+
 ### CLOSED: the badge teardown guard is reachable and stays (2026-08-13)
 
 Listed as "may be unreachable — find the route or drop it as unreachable", on the reasoning that
