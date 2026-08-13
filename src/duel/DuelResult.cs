@@ -152,6 +152,7 @@ public static class DuelResult
         // Before `ShowGameOverScreen` below: the arrow hangs off a creature's node in the combat
         // scene underneath, so it has to go while that scene is still the thing being torn down.
         Turns.LockInPlanView.ClearInitiative();
+        Turns.DuelIncoming.Clear();
 
         // Before OnEnded, and that ordering is the whole trick. The result screen wants to
         // compare both players' numbers, but the run teardown that follows disposes the net

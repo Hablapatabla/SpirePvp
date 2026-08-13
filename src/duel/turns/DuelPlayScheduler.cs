@@ -2,7 +2,9 @@ using Godot;
 using MegaCrit.Sts2.Core.GameActions;
 using MegaCrit.Sts2.Core.Helpers;
 using MegaCrit.Sts2.Core.Logging;
+using MegaCrit.Sts2.Core.Models;
 using MegaCrit.Sts2.Core.Runs;
+using SpirePvp.Net;
 
 namespace SpirePvp.Duel.Turns;
 
@@ -198,6 +200,8 @@ public static class DuelPlayScheduler
         double heldMs = (playAt - now).TotalMilliseconds;
         Log.Info($"[SpirePvp] queue: {ownerId}'s play #{index} pending at +{heldMs:F0}ms "
                  + $"({_pending.Count} waiting, board {(busy ? "BUSY" : "idle")})");
+
+        PublishPending();
         Pump();
     }
 
@@ -287,6 +291,37 @@ public static class DuelPlayScheduler
         {
             _pumping = false;
         }
+    }
+
+    /// <summary>
+    /// Puts the pool on the wire so each player can see what the other has committed (M8.5 slice 3).
+    ///
+    /// **The pool is the right thing to publish, and it is only whole here.** These are plays that
+    /// have been clicked and cannot be recalled, but have not yet been ordered — the window this mode
+    /// paces, and the one stretch in which a player could actually answer. `DuelIncoming` owns what
+    /// is done with it; this only has to say when it changed.
+    ///
+    /// Actions that are not card plays — an end turn queued behind its own player's cards — are left
+    /// out rather than captioned. They carry no threat to read.
+    /// </summary>
+    private static void PublishPending()
+    {
+        List<SerializablePendingPlay> plays = new List<SerializablePendingPlay>(_pending.Count);
+        foreach (Pending pending in _pending)
+        {
+            if (pending.Action is not PlayCardAction play)
+            {
+                continue;
+            }
+
+            CardModel? card = play.NetCombatCard.ToCardModelOrNull();
+            if (card != null)
+            {
+                plays.Add(new SerializablePendingPlay { owner = pending.Owner, cardName = card.Title });
+            }
+        }
+
+        DuelIncoming.Publish(plays);
     }
 
     /// <summary>
@@ -551,6 +586,10 @@ public static class DuelPlayScheduler
 
         Log.Info($"[SpirePvp] queue: releasing {best.Owner}'s play #{best.Index} "
                  + $"[{reason}] after {waitedMs:F0}ms — {beaten} ({_pending.Count} still waiting)");
+
+        // **Before the enqueue, not after.** `EnqueueAction` runs the action to completion
+        // synchronously, so anything after it publishes a pool the player has already watched drain.
+        PublishPending();
 
         run.ActionQueueSynchronizer.EnqueueAction(best.Action, best.Owner);
     }

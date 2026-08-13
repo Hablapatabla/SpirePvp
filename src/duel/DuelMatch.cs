@@ -153,6 +153,7 @@ public static class DuelMatch
         DuelTelemetry.Reset();
         DuelAoeActor.Reset();
         Turns.DuelTurnModel.Reset();
+        Turns.DuelIncoming.Disarm();
         Turns.DuelPace.Reset();
         Turns.DuelPlayScheduler.Reset();
         Turns.LockInPlanView.ClearInitiative();
@@ -261,6 +262,7 @@ public static class DuelMatch
         DuelRematch.Arm();
         Turns.DuelTurnModel.Arm();
         Turns.DuelPace.Arm();
+        Turns.DuelIncoming.Arm();
 
         // Started at run creation because the *race* bank is already counting (DESIGN §9): it
         // is the deadline for reaching the arena. During the race both clocks simply run down —

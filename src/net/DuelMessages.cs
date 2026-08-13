@@ -516,3 +516,75 @@ public record struct DuelLockInMessage : INetMessage
 
     public void Deserialize(PacketReader reader) => playCount = reader.ReadInt();
 }
+
+/// <summary>
+/// One play the host has booked but not yet released — an element of
+/// <see cref="DuelPendingPlaysMessage"/>.
+///
+/// **The card travels as its display name rather than as a model id**, and that is a deliberate
+/// narrowing. Nothing on the receiving side looks this up, constructs a card from it, or lets it
+/// touch the simulation: it is drawn as text over the opponent and thrown away on the next update.
+/// A model id would invite exactly the lookup that turns a presentation message into a second,
+/// quietly divergent source of truth about what is in play.
+/// </summary>
+public struct SerializablePendingPlay : IPacketSerializable
+{
+    public ulong owner;
+
+    public string cardName;
+
+    public void Serialize(PacketWriter writer)
+    {
+        writer.WriteULong(owner);
+        writer.WriteString(cardName ?? string.Empty);
+    }
+
+    public void Deserialize(PacketReader reader)
+    {
+        owner = reader.ReadULong();
+        cardName = reader.ReadString();
+    }
+}
+
+/// <summary>
+/// Host → all: everything currently waiting in `DuelPlayScheduler`, so each player can see what the
+/// other has committed but not yet had resolved (M8.5 slice 3).
+///
+/// **This is the piece that makes paced real-time worth pacing.** Without it you only ever see a
+/// play once it has been *released*, which is at most the length of one beat of warning — not enough
+/// to read, and answering is the entire point of the mode. The plays exist, ordered, in the host's
+/// pool for as long as a burst takes to drain; this puts that pool on the wire.
+///
+/// **A deliberate change to the information rules** (DESIGN §1), decided as such rather than
+/// arrived at: you may now see that a card is coming before it lands. It reveals only what has been
+/// irrevocably committed — a play in the pool has been clicked and cannot be taken back — so it
+/// exposes no intention the opponent could still change their mind about.
+///
+/// **Full state on every change, never a delta.** The pool is small and the rule this project keeps
+/// paying for is that a message which only fires on *change* cannot carry initial state. Sending the
+/// whole pool means a receiver that misses nothing needs no catch-up path and no arrival hook, and a
+/// late or reordered update simply overwrites with the truth.
+///
+/// `ShouldBuffer` is false for the same reason `ClockSyncMessage` sets it: this is a snapshot of a
+/// live thing, worthless once the moment has passed, and buffering it past a run teardown is how the
+/// "no message handlers are registered" residue gets made.
+///
+/// Appended last, like every message since `DuelDrawOfferMessage`: ids are positional.
+/// </summary>
+public record struct DuelPendingPlaysMessage : INetMessage
+{
+    public bool ShouldBroadcast => true;
+
+    public NetTransferMode Mode => NetTransferMode.Reliable;
+
+    public LogLevel LogLevel => LogLevel.VeryDebug;
+
+    public bool ShouldBuffer => false;
+
+    public List<SerializablePendingPlay> plays;
+
+    public void Serialize(PacketWriter writer) =>
+        writer.WriteList<SerializablePendingPlay>(plays ?? new List<SerializablePendingPlay>());
+
+    public void Deserialize(PacketReader reader) => plays = reader.ReadList<SerializablePendingPlay>();
+}
