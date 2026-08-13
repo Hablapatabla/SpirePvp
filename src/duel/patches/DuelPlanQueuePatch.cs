@@ -1,4 +1,6 @@
+using Godot;
 using HarmonyLib;
+using MegaCrit.Sts2.Core.Context;
 using MegaCrit.Sts2.Core.Entities.Multiplayer;
 using MegaCrit.Sts2.Core.GameActions;
 using MegaCrit.Sts2.Core.Models;
@@ -68,6 +70,47 @@ public static class DuelPlanQueuePatch
         {
             __instance.RemoveCardFromQueueForCancellation(node);
         }
+    }
+
+    /// <summary>
+    /// Fans the opponent's queued cards out to the *right* of the play area, leaving yours on the
+    /// left.
+    ///
+    /// Vanilla stacks every queued card into one strip, which is right for co-op — four teammates
+    /// queueing into a shared pile — and wrong for a duel, where the only thing you need at a glance
+    /// is whose card is whose. Requested 2026-08-12: "can we put the two card player queues on the
+    /// two sides of the screen instead of all together on the left". Side beats colour, because
+    /// side needs no legend.
+    ///
+    /// Vanilla's own offset is `Vector2.Left * 300 * num`, so mirroring is adding twice that to the
+    /// right: the fan keeps vanilla's spacing and curve exactly, on the other side of the play
+    /// position. Recomputing `num` here rather than reading it back out of the result is what keeps
+    /// the two in step if vanilla ever retunes the curve — a wrong constant would show up as a
+    /// slowly diverging pair of fans rather than as anything obviously broken.
+    ///
+    /// The index is shared between the two sides, so each fan skips positions when the players
+    /// alternate. That is cosmetic — the cards still sit at distinct offsets — and fixing it means
+    /// reaching into `_playQueue` to count per owner, which is a private nested type and not worth
+    /// it for even spacing.
+    /// </summary>
+    [HarmonyPatch(typeof(NCardPlayQueue), nameof(NCardPlayQueue.GetPositionForQueueIndex))]
+    [HarmonyPostfix]
+    public static void AfterQueuePosition(NCard card, int index, ref Vector2 __result)
+    {
+        if (!DuelSession.IsDuelActive || DuelTurnModel.Current is not LockInTurnModel)
+        {
+            return;
+        }
+
+        CardModel? model = card.Model;
+        if (model == null || LocalContext.IsMe(model.Owner))
+        {
+            return;
+        }
+
+        int slot = index + 1;
+        float spread = (float)slot / (slot + 2);
+        __result += Vector2.Right * 600f * spread;
     }
 
     /// <summary>

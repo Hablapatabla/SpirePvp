@@ -418,7 +418,7 @@ public static class DuelClockService
             return CombatManager.Instance.IsPlayerReadyToEndTurn(player);
         }
 
-        return DuelPace.IsResolving
+        return lockIn.ResolvingBatch
                || (LocalContext.IsMe(player) ? lockIn.LockedIn : lockIn.OpponentLockedIn);
     }
 

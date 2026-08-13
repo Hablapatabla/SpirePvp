@@ -99,9 +99,6 @@ public static class DuelPace
         _watching = false;
     }
 
-    /// <summary>Whether the round is currently being paced, for the clocks to read.</summary>
-    public static bool IsResolving => RunManager.Instance?.ActionExecutor.IsRunning == true;
-
     /// <summary>
     /// Watches a just-flushed batch until it has finished resolving, then reopens planning.
     ///

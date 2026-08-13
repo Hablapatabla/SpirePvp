@@ -176,9 +176,9 @@ internal static class LockInPlanView
         {
             Polygon = new[]
             {
-                new Vector2(-26f, -46f),
-                new Vector2(26f, -46f),
-                new Vector2(0f, -12f),
+                new Vector2(-26f, -38f),
+                new Vector2(26f, -38f),
+                new Vector2(0f, -8f),
             },
             Color = StsColors.gold,
             ZIndex = 100,
@@ -190,17 +190,21 @@ internal static class LockInPlanView
 
         // A still triangle reads as scenery; a moving one reads as a pointer. Looped rather than
         // one-shot so it is still saying something a minute into a long planning phase.
+        //
+        // **One tween, two absolute steps.** The first version used two looped tweens with
+        // `AsRelative()` — one up, one down on a delay — which do not cancel: they loop on their
+        // own schedules and leave a net drift of 10px a cycle. Reported as the indicator sitting
+        // "almost at the top of the screen" and "disappearing randomly", which is one bug: it
+        // climbed off the screen and came back only when the next turn rebuilt it. Absolute targets
+        // cannot drift however the loops line up.
         if (arrow.IsInsideTree())
         {
-            arrow.CreateTween().SetLoops()
-                .TweenProperty(arrow, "position:y", -10f, 0.7)
-                .AsRelative()
+            float restY = arrow.Position.Y;
+            Tween bob = arrow.CreateTween().SetLoops();
+            bob.TweenProperty(arrow, "position:y", restY - 10f, 0.7)
                 .SetEase(Tween.EaseType.InOut)
                 .SetTrans(Tween.TransitionType.Sine);
-            arrow.CreateTween().SetLoops()
-                .TweenProperty(arrow, "position:y", 10f, 0.7)
-                .AsRelative()
-                .SetDelay(0.7)
+            bob.TweenProperty(arrow, "position:y", restY, 0.7)
                 .SetEase(Tween.EaseType.InOut)
                 .SetTrans(Tween.TransitionType.Sine);
         }

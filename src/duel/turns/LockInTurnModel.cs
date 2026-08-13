@@ -122,6 +122,25 @@ public sealed class LockInTurnModel : IDuelTurnModel
     /// </summary>
     private bool _turnRolling;
 
+    /// <summary>
+    /// Whether a committed batch is still playing out — the window where the hand is dead and both
+    /// clocks are stopped.
+    ///
+    /// **This replaced `DuelPace.IsResolving`, which asked whether the action queue was busy.** That
+    /// is a correlate, and it produced the report "cards showing unplayable when they are
+    /// playable": the queue also runs *during* a planning window. A card that pauses for a player
+    /// choice resumes after the drain that carried it has already finished, so the log shows
+    /// `batch resolved, planning reopens` and then, two lines later,
+    /// `Executing action: PlayCardAction CARD.SNAP` — a straggler resolving while its owner is
+    /// planning the next batch, greying their whole hand for as long as it took.
+    ///
+    /// The condition meant is "I have committed and the batch has not been handed back yet", which
+    /// is ours to know rather than something to infer from the engine. Set at the flush, cleared
+    /// when the batch is handed back. Same flag drives the clock, so the hand and the clock can
+    /// never disagree about whether you are on the move.
+    /// </summary>
+    public bool ResolvingBatch { get; private set; }
+
     /// <summary>How many plays we are holding, for the HUD and the logs.</summary>
     public int PendingCount => _local.Count;
 
@@ -522,6 +541,7 @@ public sealed class LockInTurnModel : IDuelTurnModel
         }
 
         _flushing = true;
+        ResolvingBatch = true;
 
         // The turn ends when *both* have declared themselves finished, and not before. Every other
         // flush resolves a batch and hands the turn back to whoever is still playing.
@@ -675,6 +695,8 @@ public sealed class LockInTurnModel : IDuelTurnModel
     /// </summary>
     public void OnBatchResolved()
     {
+        ResolvingBatch = false;
+
         if (_turnRolling)
         {
             _turnRolling = false;

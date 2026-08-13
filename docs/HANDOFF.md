@@ -79,7 +79,7 @@ abandons the rest, so one typo disables an arbitrary subset while the mod still 
 still logs "loaded". `SpirePvpInit` therefore applies each patch class independently and logs
 a count. **On every launch, confirm the log says `N patch classes applied cleanly`** — if it
 says `PATCH FAILED`, some of the mod is not running and in-game results mean nothing.
-**66 as of this handoff** (102 methods), confirmed against a live log 2026-08-12. The count is per *class*, not per patch: a class holding
+**66 as of this handoff** (103 methods), confirmed against a live log 2026-08-12. The count is per *class*, not per patch: a class holding
 several patch methods still counts once, so grouping patches by concern does not move it.
 
 **Harmony resolves `[HarmonyPatch(typeof(X))]` against methods declared on `X` only.** Naming
@@ -986,6 +986,27 @@ A player with no playable card and no potion has their turn closed for them, thr
 own `CallReleaseLogic` so it is the same event a press is. A potion stops it: drinking is exactly
 what you do once the energy is gone.
 
+### Three fixes from the first batched playtest (2026-08-12, unplayed)
+
+- **Cards showed unplayable when they were playable.** The dead-hand rule asked
+  `DuelPace.IsResolving` — "is the action queue busy" — which is a *correlate*. The queue is also
+  busy during a planning window: a card that pauses for a player choice resumes after the drain
+  that carried it has finished, so the log reads `batch resolved, planning reopens` and then, two
+  lines later, `Executing action: PlayCardAction CARD.SNAP`. That straggler greyed the player's
+  whole hand while they were planning the next batch. The condition meant is "I have committed and
+  the batch has not been handed back yet", which is ours to know rather than the engine's to be
+  asked: `LockInTurnModel.ResolvingBatch`, set at the flush and cleared when the batch comes back.
+  **The same flag now drives the clock**, so the hand and the clock cannot disagree about whether
+  you are on the move. *(Same trap as the clock's phase test and `DuelFlag` — that is four.)*
+- **The two play queues sit on opposite sides now**, yours left and theirs right. Vanilla stacks
+  every queued card into one strip, which is right for four co-op teammates and wrong for two
+  duelists. It mirrors vanilla's own `Vector2.Left * 300 * num` offset rather than inventing a
+  layout, so the fan keeps its spacing and curve.
+- **The initiative arrow drifted off the top of the screen.** Two looped tweens with `AsRelative()`,
+  one up and one down on a delay, do not cancel — they loop on their own schedules and leave a net
+  10px climb per cycle. "Way too high" and "disappeared randomly" were one bug: it climbed away and
+  came back only when the next turn rebuilt it. One tween, two absolute steps.
+
 **Still open, deliberately parked by Lucas:** turn-based "feels weird" in a way neither of us has
 pinned down yet — his words, "the interleaving of energy and planning is wonky in some way". Two
 things it is *not*: the energy orb is visible in a duel (so the older "energy counter missing" note
@@ -997,7 +1018,7 @@ guessing at it.
 **Everything from the 2026-08-12 session is built and playtested.** The loop, the desync fixes, the
 result screen, rematch — all confirmed in play on both clients, with the only errors in either log
 being vanilla's `Error deleting path …current_run_mp.save.backup`, which is noise and predates this
-work. Patch count is **66 classes / 102 methods**; confirm that line on every launch.
+work. Patch count is **66 classes / 103 methods**; confirm that line on every launch.
 
 Closed and confirmed this session, so nothing below needs re-testing:
 
