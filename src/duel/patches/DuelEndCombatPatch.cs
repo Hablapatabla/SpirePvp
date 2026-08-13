@@ -2,6 +2,7 @@ using HarmonyLib;
 using MegaCrit.Sts2.Core.Combat;
 using MegaCrit.Sts2.Core.Entities.Multiplayer;
 using MegaCrit.Sts2.Core.Logging;
+using MegaCrit.Sts2.Core.Nodes.HoverTips;
 using MegaCrit.Sts2.Core.Runs;
 
 namespace SpirePvp.Duel.Patches;
@@ -24,10 +25,42 @@ namespace SpirePvp.Duel.Patches;
 /// replaces the whole method with the minimum teardown needed to leave combat cleanly, then
 /// shows the result screen.
 ///
-/// Deliberately skipped and why:
-///   ReviveBeforeCombatEnd  — DuelNoRevivePatch already suppresses it; the loser stays down.
-///   SaveRun / progress / achievements — duel arenas are not part of run progression.
-///   OfferRoomEndRewards    — DuelEncounter.ShouldGiveRewards is already false.
+/// # The step-by-step audit (written 2026-08-13, against v0.110.1)
+///
+/// This patch skipped `EndCombatInternal` **wholesale**, which is the `RunManager.EnterRoom` trap at
+/// the other end of the combat: a vanilla teardown replaced in one line, inheriting every omission
+/// silently. `DuelArena` had to mirror `EnterMapPointInternal` step for step and six quiet omissions
+/// were found one at a time. So here is the same table for this method, in vanilla's order. **It is
+/// an audit, not a changelog: most rows are still skipped, and the two that are not are marked.**
+///
+/// | # | Vanilla step | Here |
+/// |---|---|---|
+/// | 1 | `turnState.IsInProgress = false` | **done** |
+/// | 2 | `PlayersTakingExtraTurn.Clear()` under `ReadyLock` | **added 2026-08-13.** Pure state, no presentation. Left set, an extra turn owed in a duel outlives the match — and `DuelRematch` keeps the process alive across runs, which is what turns "harmless at teardown" into a bug in the *next* match |
+/// | 3 | `SetPhaseForAllPlayers(None)` | **done** |
+/// | 4 | `PlayerActionsDisabled = false` | **done** |
+/// | 5 | `player.ReviveBeforeCombatEnd()` | skipped — `DuelNoRevivePatch` suppresses it; the loser stays down |
+/// | 6 | `Hook.AfterCombatEnd` | **skipped, and this is the largest known omission.** It is how relics and powers reset themselves (`LetterOpener` clears its counter, `Metronome` its state). It is `async`, so including it means this prefix returning a real task rather than `Task.CompletedTask` — a change to what the caller awaits — and its listeners are the models least likely to survive an arena with no map point behind it. Wants its own pass, with a playtest |
+/// | 7 | `History.Clear()` | skipped — the combat history feeds the replay writer, which is *also* not stopped here (row 9); clearing one half of a pair is worse than clearing neither |
+/// | 8 | `room.OnCombatEnded()` | skipped — it is one line, `GoldProportion = Encounter.CalculateGoldProportion(...)`, and a duel pays no gold |
+/// | 9 | `WriteReplay(stopRecording: true)` | skipped, deliberately and nervously. `DuelArena.EnterRoom` calls `RecordInitialState` on the way *in*, and a writer left recording is exactly the state that made a second `RecordInitialState` throw `must be called first`. Nothing has hit it because the run ends here — but rematch replays a run in the same process |
+/// | 10 | `player.AfterCombatEnd()` | **skipped, and it must stay skipped in this position.** It clears every card pile, removes all powers and drops block. The result screen goes up immediately afterwards and `RunManager.OnEnded` writes the run history it reads; wiping the piles first is how you get a result screen describing an empty deck |
+/// | 11 | `Hook.AfterCombatVictory` | skipped — nobody won a *room*; the duel pays out its own result |
+/// | 12 | `NHoverTipSet.Clear()` | **added 2026-08-13.** Inert, and it fixes a small real thing: a tip left hanging over the result screen, which nothing else takes down |
+/// | 13 | `CurrentMapPointHistoryEntry.Rooms.Last().TurnsTaken` | skipped. Note this is no longer *unsafe* — `DuelArena.RecordArenaInMapPointHistory` gives the arena a real entry now — it is simply meaningless: nothing reads a duel's turn count off the map history |
+/// | 14 | `WinTime` | skipped — that is the act boss, not us |
+/// | 15 | `room.MarkPreFinished()` | skipped — it marks a room the run will re-enter as already finished, and a duel's room is never re-entered |
+/// | 16–18 | `SaveRun`, `UpdateProgressAfterCombatWon`, achievements | skipped — duel arenas are not run progression, and the achievement check would credit "defeated all enemies" for beating a person |
+/// | 19 | `MultiplayerScalingModel?.OnCombatFinished()` | skipped — co-op scaling, and a duel is 1v1 |
+/// | 20 | `CombatWon?.Invoke(room)` | skipped — a duel has no room victory |
+/// | 21 | `ActionExecutor.Unpause()` | **done** |
+/// | 22 | `SetCombatState(NotInCombat)` | **done** |
+/// | 23 | `NRunMusicController.UpdateTrack()` | skipped — cosmetic, and the result screen changes the music anyway |
+/// | 24 | `CombatEnded?.Invoke(room)` | **skipped, and it is the prime suspect for "the killing blow hangs in mid-air".** `NPlayerHand`, `NCombatUi`, `NCreature`, `NTargetManager` and `NCombatRoom` all subscribe, and that is the engine's own signal to wind the combat presentation down. **It was not added tonight on purpose:** `NCardPlayQueue.AnimOut` hands locally-owned queued cards back to the hand, and three `NCard` double-frees per match are already on the books from that path — so raising an event that plausibly runs it a second time, with no way to play the result, would risk making a known bug worse to fix a cosmetic one. Whoever picks this up should find the *first* free before adding this line |
+///
+/// **The through-line, and it is the one `DuelArena` learned:** the reason to skip a step has to be
+/// a property of the duel, not "it did not seem to matter". Rows 6, 9 and 24 are the ones where
+/// that is still a guess.
 /// </summary>
 [HarmonyPatch(typeof(CombatManager), nameof(CombatManager.EndCombatInternal), typeof(CombatTurnState))]
 public static class DuelEndCombatPatch
@@ -51,11 +84,23 @@ public static class DuelEndCombatPatch
         Log.Warn("[SpirePvp] duel combat ending — skipping vanilla run progression");
 
         turnState.IsInProgress = false;
+
+        // Row 2 of the audit. Vanilla holds the same lock for the same clear; an extra turn owed
+        // when the match ended would otherwise still be owed in the next one, because rematch keeps
+        // this process alive across runs.
+        using (turnState.ReadyLock.EnterScope())
+        {
+            turnState.PlayersTakingExtraTurn.Clear();
+        }
+
         __instance.PlayerActionsDisabled = false;
         CombatManager.SetPhaseForAllPlayers(turnState.State, PlayerTurnPhase.None);
 
         RunManager.Instance.ActionExecutor.Unpause();
         RunManager.Instance.ActionQueueSynchronizer.SetCombatState(ActionSynchronizerCombatState.NotInCombat);
+
+        // Row 12. Nothing else takes a hover tip down on the way to the result screen.
+        NHoverTipSet.Clear();
 
         DuelResult.ShowFor(turnState.State);
 

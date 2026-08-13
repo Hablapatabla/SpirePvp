@@ -1307,6 +1307,42 @@ it is an event subscriber, so the count stays 69.
 for the other. Rare (separate combats, and it needs the same second), and the same crossing case
 `DuelDrawPrompt` already handles for offers — but it is not handled here.
 
+**Read statically 2026-08-13 and deliberately NOT built. Two corrections to that paragraph:**
+
+- **What it actually produces is two DEFEAT screens, not two victories.** `DuelResult.Declare`
+  returns immediately when `DuelSession.Phase == DuelPhase.Complete`, so each client declares its
+  own loss and then *ignores* the peer's message naming it the winner. Worth knowing before
+  reaching for a fix: the failure is a double loss, which is wrong but not incoherent.
+- **The near-simultaneous case is already right, and only the truly crossing one is not.** If B
+  dies 200ms before A, B's message reaches A first, A declares a win, `RunManager.OnEnded` sets
+  `IsGameOver`, and A's own death then hits `DuelRaceDeath`'s `state.IsGameOver` guard and stops
+  there. The broken window is exactly "both died before either message landed".
+
+**And the crossing-offer shape does not transfer, which is why this is a scope rather than a
+commit.** A draw offer is *outstanding* by nature — it sits on the wire waiting for an answer, so a
+crossing pair can be resolved on arrival. A death declaration is immediate and irreversible: the
+result screen is up and `RunManager.OnEnded` has run before the peer's message could arrive, and
+`Declare` is idempotent by design. There is nothing outstanding to reinterpret.
+
+So the two candidate fixes, neither free:
+
+1. **A grace window.** Broadcast the death, wait (a second or so, on the run timer's tick like
+   `DuelDisconnect`), then declare — converting to a draw if the peer's `RaceDeath` lands inside
+   the window. Correct, and it is the only shape that closes the true crossing. **Its cost falls on
+   the common case**: every ordinary race death would sit a second before its result screen, and
+   race death is itself unplayed, so this trades a rare wrong result for a change nobody has seen
+   in the path that actually happens.
+2. **Host arbitration.** The dying client reports rather than declares, and the host — which sees
+   its own death directly and the client's by message — decides. It narrows the crossing window
+   from a round trip to one leg but does not close it, and it gives up the argument
+   `DuelRaceDeath`'s comment makes for declaring locally.
+
+**It also wants a rules answer first:** whether both dying is a draw or a double loss. Every other
+no-winner ending in this mod is a draw (`RaceExpired`, `Desync`), which is the obvious reading, but
+it is a competitive rule and this file does not get to settle it. If it becomes a draw it needs a
+new `DuelEndReason` (appended, 8) and its own result lines — the existing draw branch would
+otherwise word it as the race clock expiring, which is a specific false claim.
+
 ### The AoE family is fixed (2026-08-13, UNPLAYED) — and the getter is patchable after all
 
 **Symptom, open since M2:** Bag of Marbles applies no Vulnerable in a duel, and the same for every
@@ -2070,10 +2106,25 @@ round, in M9.
 
 ### Two known gaps, neither blocking
 
-- **The killing blow hangs in mid-air behind the result screen.** Root-caused, not fixed:
-  `DuelEndCombatPatch` skips `CombatManager.EndCombatInternal` wholesale, so nothing winds the
-  combat down. It is the `RunManager.EnterRoom` trap at the other end of the combat and wants the
-  same treatment — read the method, reproduce the safe steps, comment each one. Its own pass.
+- **The killing blow hangs in mid-air behind the result screen.** Root-caused, **audited
+  2026-08-13, still not fixed.** `DuelEndCombatPatch` skips `CombatManager.EndCombatInternal`
+  wholesale — the `RunManager.EnterRoom` trap at the other end of the combat — and it now carries
+  the step-by-step table that treatment asks for: all 24 of vanilla's steps, each marked done,
+  skipped or added, with the reason. **Read it in the patch rather than here.**
+
+  Two things came out of the audit worth surfacing:
+  - **The prime suspect is `CombatEnded?.Invoke(room)`**, vanilla's last line and the signal
+    `NPlayerHand`, `NCombatUi`, `NCreature`, `NTargetManager` and `NCombatRoom` all subscribe to in
+    order to wind the presentation down. **It was deliberately not added**: `NCardPlayQueue.AnimOut`
+    hands queued cards back to the hand, three `NCard` double-frees per match are already on the
+    books from that path, and raising an event that plausibly runs it a second time — unplayably —
+    risks making a known bug worse to fix a cosmetic one. **Find the first free before adding that
+    line**; the two items are the same investigation.
+  - Two inert steps *were* added (`PlayersTakingExtraTurn.Clear()`, `NHoverTipSet.Clear()`), and two
+    more are named as real omissions rather than choices: `Hook.AfterCombatEnd` (how relics reset
+    themselves) and `WriteReplay(stopRecording: true)`. Both are latent only because the run ends
+    here — **and rematch keeps the process alive across runs**, which is what turns "harmless at
+    teardown" into a bug in the next match.
 - **The badge teardown guard is still unexercised**, and for a reason worth knowing: the Main Menu
   button does not appear until the badges have finished animating, so the window the guard covers
   cannot be reached by clicking it. Find the route (Continue? Escape?) before assuming the guard
