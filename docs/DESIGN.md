@@ -745,6 +745,64 @@ mechanic. Note `HittableEnemies` is **not** patchable — it has no acting-playe
   playable and can be compared by feel rather than argument; per-round planning timer for
   model B; decide whether one model ships or both do as a lobby option.
 
+## 7b. M10 — Draft mode ("Pokemon draft style"). Proposed 2026-08-13 by Lucas, unbuilt
+
+**A second game mode, not a variant of the first: no race at all, just a duel.** Both players are
+shown a pool of roughly 10-15 random cards and draft from it alternately; then they fight. Mirror
+matches to begin with (both duelists on the same character), which removes a whole class of question
+rather than answering it.
+
+**The compensation rule is Lucas's and it is the good part: whoever drafts first moves second.**
+First pick is a real advantage, so it buys the other player initiative in the duel. Note this is the
+same trade M9 already makes in the other direction — there, reaching the arena first *earns* the
+first move. Draft mode inverts it because the advantage being paid for is different.
+
+### Why this is a smaller milestone than it looks
+
+Almost everything it needs already exists and is playtested. It reuses `DuelEncounter`, the arena,
+both turn models, the duel clock, the result screen, badges, stats and rematch **unchanged**. What it
+does not need is the entire race half — M5, the mirrored RNG, `RaceCoordinator`, the race clock, the
+rendezvous, the map work, and every "the engine assumes the party is co-located" bug that phase has
+produced. A duel without a race is the mod's own core with its riskiest phase deleted.
+
+**Initiative needs a new source.** `IPlanningTurnModel.SetInitiative` is fed from `DuelStartMessage`
+with "who reached the arena first", which will not exist. The draft supplies it instead — the field
+and the plumbing are already there, so this is one line and a different input.
+
+### The one part that is genuinely new, and where the danger is
+
+**The draft is a shared ordered sequence of decisions, which is the shape this project has desynced
+on twice.** Read the stale-`_receivedChoices` and `_nextActionId` notes in HANDOFF before designing
+it: a card pick already travels as a `PlayerChoiceResult`, and the race's leftover picks are exactly
+what corrupted a duel on 2026-08-12. Rules that follow from that history:
+
+- **The host owns the pool and the turn order**, and clients request rather than decide. Two clients
+  deriving a pool from a shared seed independently is the pattern that keeps biting.
+- **Announce the pick, do not infer it.** Both players must see the same pool shrink in the same
+  order, and a pick the peer did not send is a pick that did not happen.
+- **Arm the draft's handlers at run start**, not when the draft screen opens. Five separate bugs in
+  this project have been a handler armed lazily and a peer that announced something first.
+
+### Open questions, none of them answered
+
+1. **Deck size and pool size** — "10-15 shown" is the pool; how many picks each, and is the pool
+   refreshed between picks or drafted to exhaustion?
+2. **Shared pool or one each?** A shared pool makes each pick a denial as well as a gain, which is
+   most of what makes drafting interesting; separate pools are simpler and fairer to explain.
+3. **What you start with**: basic Strikes and Defends as a floor, a starting relic, HP, energy. A
+   drafted deck with no floor can be unplayable in a way a random one cannot.
+4. **Are relics and potions drafted too**, or cards only?
+5. **Does the mirror restriction stay?** Same character both sides makes the pool obviously fair and
+   sidesteps the per-character filtering that made Neow's offers differ; different characters would
+   need a fairness answer first.
+6. **Lobby shape**: a third turn-model-like modifier, or its own entry beside Duel on the host menu?
+   M7's `DuelLobbyPanel` re-dresses `NCustomRunScreen` and would have to learn a mode with no race
+   clock at all.
+
+**Not scheduled.** Recorded now because it is a *next milestone* candidate and because the reuse
+argument above is the kind of thing that is obvious while the duel is fresh and expensive to
+re-derive later.
+
 ## 8. Dev workflow
 
 - **IDE**: Rider, open `D:\modding\sts2\SpirePvp\SpirePvp.csproj`. Attach the decompiled
