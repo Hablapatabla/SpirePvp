@@ -299,6 +299,21 @@ public static class DuelArena
             DuelLayout.MoveOpponentToEnemySide(state);
             DuelResult.Arm();
 
+            // **The arrow goes up with the scene, not with the hand.** `CombatManager.TurnStarted`
+            // is the alternation's event and it is the *last* line of turn setup — it fires after
+            // `RunAutoPrePlayPhase`, i.e. after the draw and its animation — so hanging the opening
+            // turn's arrow on it alone meant it appeared once the cards had landed. Reported
+            // 2026-08-12: it should render as soon as the scene does.
+            //
+            // Same family as every other "hook the arrival too" in this project: `TurnStarted` fires
+            // on a *change* of turn and cannot carry the state the first turn opens in. The creature
+            // nodes exist by now — `MoveOpponentToEnemySide` above has just been through them — so
+            // this is the earliest point the arrow has something to hang off.
+            if (Turns.DuelTurnModel.Current is Turns.IPlanningTurnModel model)
+            {
+                Turns.LockInPlanView.ShowInitiative(model.CurrentLeader);
+            }
+
             // The clocks are NOT started here. They are run-scoped (DESIGN §9) and were started
             // at run creation by DuelMatch, having already ticked down through the race —
             // restarting would hand both players a fresh bank at the very moment the race is
