@@ -1,6 +1,7 @@
 using Godot;
 using MegaCrit.Sts2.Core.Commands;
 using MegaCrit.Sts2.Core.GameActions;
+using MegaCrit.Sts2.Core.GameActions.Multiplayer;
 using MegaCrit.Sts2.Core.Helpers;
 using MegaCrit.Sts2.Core.Logging;
 using MegaCrit.Sts2.Core.Runs;
@@ -46,9 +47,23 @@ public static class DuelPace
     /// <summary>How long to wait for a flushed batch to start executing, in frames (~2s at 60fps).</summary>
     private const int StartFrames = 120;
 
+    /// <summary>
+    /// How often a beat re-asks whether the opponent has answered, in seconds.
+    ///
+    /// Small enough that the cut-off is not itself felt, large enough not to be a per-frame poll of
+    /// a list. It bounds the error on the cross-player gap, not the gap itself.
+    /// </summary>
+    private const float SliceSeconds = 0.05f;
+
     private static bool _armed;
 
     private static bool _watching;
+
+    /// <summary>Owners of plays enqueued and not yet executed. See <see cref="OnActionEnqueued"/>.</summary>
+    private static readonly List<ulong> _queuedPlays = new List<ulong>();
+
+    /// <summary>Owners of plays that have executed since the last sweep, retired from the list above.</summary>
+    private static readonly List<ulong> _executedPlays = new List<ulong>();
 
     /// <summary>
     /// Armed at run start with every other handler, and against the run's own executor — a new run
@@ -69,6 +84,15 @@ public static class DuelPace
         }
 
         executor.AfterActionExecuted += OnActionExecuted;
+
+        // Armed here with everything else rather than on first use, and against this run's own
+        // queue set — `RunManager` builds a new one per run alongside the executor above.
+        ActionQueueSet? queues = RunManager.Instance?.ActionQueueSet;
+        if (queues != null)
+        {
+            queues.ActionEnqueued += OnActionEnqueued;
+        }
+
         _armed = true;
     }
 
@@ -84,6 +108,14 @@ public static class DuelPace
             executor.Unpause();
         }
 
+        ActionQueueSet? queues = RunManager.Instance?.ActionQueueSet;
+        if (queues != null)
+        {
+            queues.ActionEnqueued -= OnActionEnqueued;
+        }
+
+        _queuedPlays.Clear();
+        _executedPlays.Clear();
         _armed = false;
         _watching = false;
     }
@@ -172,10 +204,53 @@ public static class DuelPace
             return;
         }
 
-        TaskHelper.RunSafely(Beat());
+        _executedPlays.Add(action.OwnerId);
+        TaskHelper.RunSafely(Beat(action.OwnerId));
     }
 
-    private static async Task Beat()
+    /// <summary>
+    /// Records a play as it is enqueued, so <see cref="Beat"/> can tell whose card is waiting.
+    ///
+    /// **The queue is the only place this is knowable, and only from the outside.** `GetReadyAction`
+    /// is the executor's own consumer and is not something to call from a mod for a look; the
+    /// enqueue event carries the same `GameAction`, and `GameAction.OwnerId` is on the base type.
+    ///
+    /// Entries are retired as their plays execute. **A cancelled play never executes and so leaks
+    /// one entry** — the executor skips it before firing either event, the same fact
+    /// `WatchBatch` is built around. The cost is bounded and one-directional: a stale foreign entry
+    /// can only *shorten* a beat, never extend one, and the list is cleared on run teardown.
+    /// </summary>
+    private static void OnActionEnqueued(GameAction action)
+    {
+        if (action is PlayCardAction or UsePotionAction)
+        {
+            _queuedPlays.Add(action.OwnerId);
+        }
+    }
+
+    /// <summary>Whether a play by anyone other than <paramref name="playedBy"/> is waiting.</summary>
+    private static bool ForeignPlayWaiting(ulong playedBy)
+    {
+        // Retire what has already executed, so only genuinely waiting plays are considered.
+        foreach (ulong owner in _executedPlays)
+        {
+            _queuedPlays.Remove(owner);
+        }
+
+        _executedPlays.Clear();
+
+        foreach (ulong owner in _queuedPlays)
+        {
+            if (owner != playedBy)
+            {
+                return true;
+            }
+        }
+
+        return false;
+    }
+
+    private static async Task Beat(ulong playedBy)
     {
         ActionExecutor? executor = RunManager.Instance?.ActionExecutor;
         float seconds = BeatSeconds();
@@ -184,12 +259,35 @@ public static class DuelPace
             return;
         }
 
+        float crossSeconds = Math.Min(CrossBeatSeconds(), seconds);
+
         executor.Pause();
         try
         {
+            // **Waited in slices so the opponent's answer can cut it short.** Their card is usually
+            // not queued yet when the beat begins — the host's scheduler releases it once the
+            // executor's drain completes, which is a moment *after* this pause is taken — so a
+            // decision made only at the top would take the full beat every time and the whole
+            // change would be invisible. Re-asking each slice is what makes it land.
+            //
             // Not `ignoreCombatEnd`: a killing blow should land and be over, rather than holding
             // the result screen behind a beat nobody is waiting to read.
-            await Cmd.Wait(seconds);
+            float waited = 0f;
+            while (waited < seconds)
+            {
+                if (waited >= crossSeconds && ForeignPlayWaiting(playedBy))
+                {
+                    // The one line that says this worked. Without it a cut beat and a full beat are
+                    // indistinguishable in the log, which is the state the whole report was stuck in.
+                    Log.Info($"[SpirePvp] pace: cut {playedBy}'s beat at {waited:F2}s of {seconds:F2}s "
+                             + "— the opponent has answered");
+                    break;
+                }
+
+                float slice = Math.Min(SliceSeconds, seconds - waited);
+                await Cmd.Wait(slice);
+                waited += slice;
+            }
         }
         catch (Exception e)
         {
@@ -214,4 +312,12 @@ public static class DuelPace
     /// </summary>
     private static float BeatSeconds() =>
         DuelTurnModel.Current is IPlanningTurnModel model ? model.BeatSeconds : 0f;
+
+    /// <summary>
+    /// The gap owed before the *other* duelist's card. See
+    /// <see cref="IPlanningTurnModel.CrossPlayerBeatSeconds"/> — the lock-in model returns its full
+    /// beat here, so a resolving round is paced exactly as it was.
+    /// </summary>
+    private static float CrossBeatSeconds() =>
+        DuelTurnModel.Current is IPlanningTurnModel model ? model.CrossPlayerBeatSeconds : 0f;
 }

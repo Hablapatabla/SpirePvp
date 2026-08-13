@@ -901,21 +901,64 @@ are 330ms+ apart with each one fully resolved before the next. Note this is the 
 HANDOFF already documents, but the conclusion is the opposite of last time: here the rig accounts for
 the evidence *and* for what the player described, which is the case where it is not an excuse.
 
-**So the only real levers are `BeatSeconds` (0.55s) and a contest window**, and both are Lucas's
-call, because both trade the reaction window the mode exists for:
+### THE REAL FAULT UNDER IT: the beat was per-stream where it had to be per-player
 
-- **Lower the dwell.** It is already named as the knob, and the warning attached to it stands: the
-  reaction window is the point of pacing, and 0.4s cooldown against 0.55s dwell already lets a player
-  submit slightly faster than the stream resolves.
-- **Do not release instantly on an idle board** — hold ~60–150ms so near-simultaneous plays actually
-  meet and initiative's tie-break becomes reachable at all. Costs that latency on every play, and
-  **would not have changed this report**, since the click in question was far more than 150ms late.
+FIXED 2026-08-13, **UNPLAYED**. Lucas, pushing back on the analysis above and right to:
+*"the dwell is supposed to be individual… Ironclad's card play should come out instantly for the
+first card play. I saw Silent's strike still in the air when I played Ironclad's defend and it still
+didn't resolve."*
 
-**What was added instead (2026-08-13, unplayed, no behaviour change):** the booking now records
-whether the board was `BUSY` or `idle`, and a release reports `after Nms — beat 1001#0` or
-`uncontested`. The old lines could not distinguish "waited" from "went straight through" — the
-`+Nms` on a booking is the *cooldown* offset, not a wait, and the game's log lines carry no
-timestamps at all. Any future report of this shape is now one grep.
+**He is describing a real fault, and the analysis above stopped one step short of it.** `DuelPace`
+takes its gap by calling `ActionExecutor.Pause()`, and there is exactly **one** `ActionExecutor` per
+run. So the beat was never "Silent's dwell" — it is a pause on the single shared action stream, and
+whatever card came next paid it regardless of whose it was. The opponent's reply was waiting out the
+reading gap that existed **so that they could read the card they had already read and answered.**
+
+It leaked further than that. `DuelPlayScheduler.PumpAsync` gates on `ActionExecutor.IsRunning`, and a
+*paused* executor still reads as running — `IsRunning` tracks the queue-drain task, which does not
+complete while `WaitForUnpause()` blocks at the top of the loop. So the **host's own** beat, taken
+from the host's own preference, gated the release of the client's card. That is precisely the failure
+`DuelPace`'s own comment says it avoided by pausing locally instead of having the host release per
+tick: *"would have made the host's personal preference decide the pace on both screens."* It did
+anyway, through the scheduler.
+
+**What cannot be fixed, and it bounds every option here:** the engine executes actions strictly one
+at a time, and that serial stream is the deterministic sim the checksums are taken over. The
+opponent's card can never overlap yours. "Instant" can only mean *next, with no added gap*.
+
+**The fix: the beat is now owner-aware.** `IPlanningTurnModel.CrossPlayerBeatSeconds` is the gap owed
+before a play belonging to the *other* duelist. `TickTurnModel` returns **0.2s** against its 0.55s
+own-beat (Lucas's choice over removing the cross gap entirely — two players trading with no gap at
+all puts the round back where `DuelPace` found it, unreadable). **`LockInTurnModel` returns its full
+beat and changes nothing**, which is the important half: a resolving round is interleaved by design,
+so almost every gap in it is a cross-player gap, and shortening those would restore the exact "six
+plays resolved and neither player could say what happened" report `DuelPace` was built to answer.
+
+**The beat waits in 0.05s slices and re-asks each one**, rather than deciding once at the top. That
+is not tidiness — the opponent's card is usually *not* queued when the beat begins, because the host
+releases it only once the executor's drain completes, which is a moment after the pause is taken. A
+decision made only at the start would take the full beat every time and the whole change would be
+invisible.
+
+Knowing whose card is waiting comes from `ActionQueueSet.ActionEnqueued` plus `GameAction.OwnerId`,
+which is on the base type. `GetReadyAction` is the executor's own consumer and is not something to
+call from a mod for a look. Armed in `DuelPace.Arm` with every other handler and released in
+`Reset` — same rule as everything else. A **cancelled** play never executes and leaks one entry; the
+cost is bounded and one-directional, since a stale foreign entry can only ever *shorten* a beat.
+
+**Initiative stays** (Lucas, 2026-08-13), though it has still never fired: the tie-break needs two
+plays inside 60ms and no log has ever contained a pair.
+
+**What to watch in the log:** `pace: cut <id>'s beat at 0.20s of 0.55s — the opponent has answered`.
+That line is the whole feature; if it never appears, the cut is not firing and the beat is still
+per-stream. The scheduler lines now also say whether the board was `BUSY` or `idle` at booking and
+report `after Nms — beat 1001#0` or `uncontested` on release, because the old lines could not
+distinguish "waited" from "went straight through" — the `+Nms` on a booking is the *cooldown* offset,
+not a wait, and the game's log lines carry no timestamps at all.
+
+**Still not done, and still worth doing:** the contest window — not releasing instantly on an idle
+board, so near-simultaneous plays can actually meet and the tie-break becomes reachable at all.
+Lucas wants it; it is explicitly **not** what this report was about and would not have changed it.
 
 
 

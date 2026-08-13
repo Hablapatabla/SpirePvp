@@ -133,6 +133,20 @@ public sealed class TickTurnModel : IPlanningTurnModel
     /// </summary>
     public float BeatSeconds => 0.55f;
 
+    /// <summary>
+    /// **0.2s — enough that a card still lands as its own event, short enough that it reads as an
+    /// answer.** Lucas, 2026-08-13, choosing this over removing the cross-player gap entirely: two
+    /// players trading flat out with no gap at all would put the round back where `DuelPace` found
+    /// it, unreadable. So your own burst keeps the full <see cref="BeatSeconds"/> between its cards,
+    /// and the opponent's reply only waits for your card to finish moving.
+    ///
+    /// Note what this does to the mode's arithmetic, because it is the good half of the change: an
+    /// exchange where both players are answering each other now resolves at roughly twice the rate
+    /// of one player monopolising the stream, which is the first time the mode has rewarded
+    /// answering at all.
+    /// </summary>
+    public float CrossPlayerBeatSeconds => 0.2f;
+
     private ulong _firstInitiative;
 
     /// <summary>

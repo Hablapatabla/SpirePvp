@@ -40,6 +40,30 @@ public interface IPlanningTurnModel : IDuelTurnModel
     float BeatSeconds { get; }
 
     /// <summary>
+    /// The gap before a play that belongs to the *other* duelist, in seconds.
+    ///
+    /// **The beat is a pause on the one shared `ActionExecutor`, so by construction it delays
+    /// whatever comes next regardless of whose card it is.** Reported 2026-08-13 and it is a real
+    /// fault rather than a preference: *"I saw Silent's strike still in the air when I played
+    /// Ironclad's defend and it still didn't resolve."* Their answer was waiting out the reading gap
+    /// that existed so that *they* could read the strike — charged to the player who had already
+    /// read it and replied. The dwell was per-stream where it needed to be per-player.
+    ///
+    /// It cannot be made concurrent: the engine executes actions strictly one at a time, and that
+    /// serial stream is the deterministic sim the checksums are taken over. So the opponent's card
+    /// can never overlap yours — the only question is how long after yours it lands, and this is
+    /// that number.
+    ///
+    /// **The two models want opposite answers, which is why this is on the model.** A paced
+    /// real-time duel is a live exchange, so an answer should land as soon as the card it answers
+    /// has finished moving. A lock-in round is a *replay* — it interleaves both players' cards by
+    /// design, host first, alternating — so shortening the cross-player gap there would drain the
+    /// round at nearly full speed again, which is the exact unreadability `DuelPace` was built to
+    /// fix. `LockInTurnModel` therefore returns its full beat here and changes nothing.
+    /// </summary>
+    float CrossPlayerBeatSeconds { get; }
+
+    /// <summary>
     /// The host's ruling on who takes the opening initiative, from `DuelStartMessage`.
     /// </summary>
     void SetInitiative(ulong netId);

@@ -228,6 +228,15 @@ public sealed class LockInTurnModel : IPlanningTurnModel
     /// </summary>
     public float BeatSeconds => 1.2f;
 
+    /// <summary>
+    /// **The same beat, deliberately.** A resolving round is interleaved by design — one of yours,
+    /// one of theirs, alternating — so almost every gap in it is a cross-player gap. Shortening
+    /// those would drain the round at nearly full speed and restore the exact "six plays resolved
+    /// and neither player could say what happened" report `DuelPace` exists to answer. Nothing here
+    /// is a live exchange: you are reading a round you already committed to.
+    /// </summary>
+    public float CrossPlayerBeatSeconds => BeatSeconds;
+
     /// <summary>Declared finished for the turn, which the button label reads to stop offering a lock-in.</summary>
     public bool Done => _localDone;
 
