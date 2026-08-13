@@ -47,7 +47,7 @@ namespace SpirePvp.Duel;
 /// action stream has to be applied from state both sims already agree on, or it is a guess.** Before
 /// the sync they do not agree — that is what the sync is *for*.
 ///
-**That divergence taught the actual rule, which is not about placement:** the pre-combat sync does
+/// **That divergence taught the actual rule, which is not about placement:** the pre-combat sync does
 /// **not** carry your own state to the peer — it fixes *your* copy of *them*. So a self-heal before
 /// it is invisible to the opponent's machine, forever, and the first checksum catches it.
 ///
