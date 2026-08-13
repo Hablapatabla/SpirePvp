@@ -784,7 +784,39 @@ Keep that split if you extend this.
 
 ## Immediate next step
 
-### START HERE — 2026-08-13 afternoon. Both turn models are playtested; the AoE fix is not.
+### START HERE — 2026-08-13 evening, pushed for playtesting
+
+**Playtested and confirmed today**, in order: the arena heal on the wire; real-time paced (position
+ordering, cross-player beat, contest window — *"felt great"*); turn-based end to end (*"working
+great"*, which closes the lock-in gate inversion); the AoE actor (*"worked great"*, zero divergences,
+zero unresolved reads, Bag of Marbles the relic actually tested); the opponent's relics in the deck
+review; and the combat teardown (*"looks clean on death now"*).
+
+**Unplayed, and this is what a playtest should cover:**
+
+| What | How you know |
+|---|---|
+| **Opponent's incoming plays** (M8.5 slice 3) | Burst two or three cards on one seat: their titles appear over your opponent on the other seat *before* they resolve, and drop off one at a time. Partly seen working already — but the client half was dead, see below |
+| **The loc-exception guard** | `grep -c LocException logs/client.log` → **0**. Nine of them killed the message on the client last run |
+| **A planned potion** | Click a potion in turn-based: its belt slot greys and refuses a second click, instead of looking untouched |
+| **The `.pck`** | If anything shows as a raw key (`SPIREPVP_INCOMING`), the pack did not load — it was re-exported and committed on 2026-08-13, so a fresh pull should be clean |
+
+**The slice 3 failure is worth reading before anything else**, because it is a shape this project will
+hit again: a missing loc key threw `LocException` **inside a net message handler**, so `NetMessageBus`
+logged it and dropped the whole message. The feature was not merely uncaptioned on the client, it was
+dead there — while the host, which had a freshly exported pack, was perfect. **Zero errors on one
+side and nine on the other is the signature of pack staleness**, because `client.ps1` never
+re-exports. The guard is the fix rather than the re-export, since a loc key and the code that reads
+it ship in different files and only one of them is rebuilt.
+
+**Patch count is 71 classes / 109 methods.**
+
+**Deliberately not taken, so nobody assumes it was missed:** row 6 of the teardown audit
+(`Hook.AfterCombatEnd`, the largest remaining omission — it is `async`, so including it changes what
+the caller awaits, and it wants its own pass), and the both-die corner in `DuelRaceDeath`, which
+needs a decision rather than code. Both are scoped below.
+
+### The earlier state, kept for the reasoning
 
 **Playtested and good today:** the arena heal on the wire, real-time paced (pacing, position
 ordering, cross-player beat, contest window — *"felt great"*), and turn-based end to end (*"working

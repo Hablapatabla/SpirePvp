@@ -50,17 +50,22 @@ public static class DuelModifierMinimumPatch
     public static void Postfix(NRunModifierTickbox tickbox, List<NRunModifierTickbox> ____modifierTickboxes)
     {
         // Only an untick can empty a row; a tick has just filled one.
-        if (tickbox.IsTicked)
+        //
+        // The modifier is nullable on the node, and a tickbox without one belongs to no group by
+        // definition — so it is checked once here rather than at each of the three comparisons below.
+        if (tickbox.IsTicked || tickbox.Modifier == null)
         {
             return;
         }
+
+        Type ticked = tickbox.Modifier.GetType();
 
         HashSet<ModifierModel>? group = null;
         foreach (HashSet<ModifierModel> candidate in DuelModifierExclusivityPatch.DuelGroups())
         {
             foreach (ModifierModel member in candidate)
             {
-                if (member.GetType() == tickbox.Modifier.GetType())
+                if (member.GetType() == ticked)
                 {
                     group = candidate;
                     break;
@@ -87,6 +92,11 @@ public static class DuelModifierMinimumPatch
                 continue;
             }
 
+            if (other.Modifier == null)
+            {
+                continue;
+            }
+
             foreach (ModifierModel member in group)
             {
                 if (member.GetType() == other.Modifier.GetType())
@@ -97,7 +107,7 @@ public static class DuelModifierMinimumPatch
         }
 
         tickbox.IsTicked = true;
-        Log.Info($"[SpirePvp] lobby: {tickbox.Modifier.GetType().Name} is the last chip in its row — "
+        Log.Info($"[SpirePvp] lobby: {ticked.Name} is the last chip in its row — "
                  + "kept ticked, a duel row is a choice and not an option");
     }
 }
