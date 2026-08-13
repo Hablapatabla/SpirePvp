@@ -1197,15 +1197,22 @@ number, clamped, because the scheduler reads it before the first `TurnStarted` t
 `CurrentLeader`, and ties are the common case (below), so an inverted opening turn hands a turn of
 tempo to the wrong player.
 
-**Open, and a design call rather than a bug: the per-player index almost never engages.** The
-scheduler resets `_nextIndex` whenever the pool drains, and the pool drains after nearly every
-release — because each player's own 0.4s cooldown means their plays arrive spaced rather than in a
-burst. Measured across a whole duel: **every booking in the log is `#0`**, both players, every turn.
-So "your first beats their second" is rarely what decides anything; initiative decides it, via the
-tie-break. The outcome may well be right — a player's backlog waits in their *own* cooldown queue
-rather than in the pool, which is the flooding the rule existed to prevent — but the mechanism doing
-the work is not the documented one. Decide what "an exchange" means before changing the reset rule;
-watch a log for a booking that is not `#0` first.
+**Open, and a design call rather than a bug: the per-player index rarely decides anything.** The
+scheduler resets `_nextIndex` whenever the pool drains, and the pool drains after most releases —
+each player's own 0.4s cooldown spaces their plays out, so they arrive one at a time rather than as
+a burst. Counted over two duels: **13 of 14 bookings were `#0`** in the clean run, and 8 of 12 in the
+run before it, where the host's bypassed plays kept the pool backed up long enough for the client to
+reach `#1` and `#2`. So the tie-break — initiative — is what orders most contested plays, and "your
+first beats their second" is the exception rather than the rule.
+
+**That may be the right outcome by the wrong mechanism**, which is the part to decide rather than
+patch. A player's backlog waits in their *own* cooldown queue and not in the pool, so the flooding
+the index rule was written against cannot really happen; the index only separates plays that landed
+inside one drain. Two candidates if it needs to change: **reset per turn** rather than per drain,
+which makes the index mean "how much of this turn's stream you have already used" and needs no
+constant, or **leave it and say so**, cutting the index rule back to what it actually does. Do not
+tune the reset window into a third arbitrary number — that was the first attempt's mistake in a new
+costume.
 
 Three things about it worth not re-deriving:
 
