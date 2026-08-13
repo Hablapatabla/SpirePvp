@@ -1,3 +1,4 @@
+using Godot;
 using HarmonyLib;
 using MegaCrit.Sts2.Core.Models;
 using MegaCrit.Sts2.Core.Nodes.Cards;
@@ -32,10 +33,21 @@ namespace SpirePvp.Duel.Patches;
 /// forgotten. What is still true is that the card's node is sitting in the play queue waiting to
 /// execute, which is exactly the state being marked.
 /// </summary>
-[HarmonyPatch(typeof(NCardGrid), nameof(NCardGrid.SetCards))]
+[HarmonyPatch]
 public static class DuelQueuedCardHighlightPatch
 {
-    public static void Postfix(NCardGrid __instance, IReadOnlyList<CardModel> cardsToDisplay)
+    /// <summary>
+    /// Purple, so a queued card does not read as one the game has called out for some other reason.
+    ///
+    /// Vanilla's ring is cyan or gold depending on why it was raised (`NCardHighlight.playableColor`
+    /// and `gold`), and both already mean something. A colour nothing else uses says "this one is
+    /// yours and it is spoken for" without a legend.
+    /// </summary>
+    private static readonly Color QueuedColor = new Color(0.78f, 0.35f, 0.98f, 0.98f);
+
+    [HarmonyPatch(typeof(NCardGrid), nameof(NCardGrid.SetCards))]
+    [HarmonyPostfix]
+    public static void AfterSetCards(NCardGrid __instance, IReadOnlyList<CardModel> cardsToDisplay)
     {
         if (!DuelSession.IsDuelActive || DuelTurnModel.Current is not IPlanningTurnModel)
         {
@@ -55,5 +67,51 @@ public static class DuelQueuedCardHighlightPatch
                 __instance.HighlightCard(card);
             }
         }
+    }
+
+    /// <summary>
+    /// Colours the ring as it appears, rather than when the grid is filled.
+    ///
+    /// **The grid raises highlights again on every relayout** — `AssignCardsToRow` re-reads
+    /// `_highlightedCards` and calls `AnimShow` — and card nodes are pooled and reassigned as you
+    /// scroll. A colour set once when the grid was built would therefore be missed by nodes that
+    /// did not exist yet, and stranded on nodes that later belong to a different card. Setting it
+    /// at the moment the ring is shown is the only point where the node and the card it is
+    /// currently displaying are both known.
+    ///
+    /// White for everything else, which is the default this node ships with: vanilla only overrides
+    /// the modulate on reward screens, so restoring it cannot erase a colour anything in a duel set.
+    /// </summary>
+    [HarmonyPatch(typeof(NCardHighlight), nameof(NCardHighlight.AnimShow))]
+    [HarmonyPostfix]
+    public static void AfterHighlightShown(NCardHighlight __instance)
+    {
+        if (!DuelSession.IsDuelActive || DuelTurnModel.Current is not IPlanningTurnModel)
+        {
+            return;
+        }
+
+        NCardPlayQueue? queue = NCardPlayQueue.Instance;
+        CardModel? card = OwningCard(__instance)?.Model;
+        if (queue == null || card == null)
+        {
+            return;
+        }
+
+        __instance.Modulate = queue.GetCardNode(card) != null ? QueuedColor : Colors.White;
+    }
+
+    /// <summary>The card this ring belongs to. `%Highlight` is a nested unique name, so walk up.</summary>
+    private static NCard? OwningCard(Node node)
+    {
+        for (Node? parent = node.GetParent(); parent != null; parent = parent.GetParent())
+        {
+            if (parent is NCard card)
+            {
+                return card;
+            }
+        }
+
+        return null;
     }
 }

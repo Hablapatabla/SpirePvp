@@ -108,6 +108,13 @@ public sealed class TickTurnModel : IPlanningTurnModel
     /// </summary>
     public bool HandIsClosed => false;
 
+    /// <summary>
+    /// Close to the cooldown, because this beat is a *reaction window* rather than a recap: it has
+    /// to be long enough to see a card land and answer it, and short enough that plays leaving
+    /// every 0.4s do not stack up behind their own animations.
+    /// </summary>
+    public float BeatSeconds => 0.45f;
+
     public bool ShouldDefer(GameAction action)
     {
         if (_releasing)

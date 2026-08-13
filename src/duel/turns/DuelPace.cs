@@ -43,17 +43,6 @@ namespace SpirePvp.Duel.Turns;
 /// </summary>
 public static class DuelPace
 {
-    /// <summary>
-    /// The gap after each play, in seconds, at Normal and at Fast.
-    ///
-    /// Tuning is a playtest question, not a design one (DESIGN §7). Fast is 0.6s because that is
-    /// the OSRS tick M8.5 takes as its reference for "long enough that a play is an event you can
-    /// respond to, short enough that the match still feels live".
-    /// </summary>
-    private const float NormalSeconds = 1.2f;
-
-    private const float FastSeconds = 0.6f;
-
     /// <summary>How long to wait for a flushed batch to start executing, in frames (~2s at 60fps).</summary>
     private const int StartFrames = 120;
 
@@ -163,10 +152,10 @@ public static class DuelPace
 
     private static void OnActionExecuted(GameAction action)
     {
-        // Blitz is deliberately untouched. Its plays already arrive one at a time as they are
-        // clicked, and a gap there would delay a live exchange rather than clarify a resolved one;
-        // pacing blitz is M8.5's own milestone and wants its own decision.
-        if (!DuelSession.IsDuelActive || DuelTurnModel.Current is not LockInTurnModel)
+        // Every model that holds plays wants a beat after each one; only the length differs, and
+        // the model owns that. Unpaced blitz (`BlitzTurnModel`) is the one that does not, and
+        // nothing selects it any more.
+        if (!DuelSession.IsDuelActive || DuelTurnModel.Current is not IPlanningTurnModel)
         {
             return;
         }
@@ -208,19 +197,16 @@ public static class DuelPace
     }
 
     /// <summary>
-    /// The gap for this client's Fast Mode.
+    /// The gap, from the model, and **not scaled by Fast Mode**.
     ///
-    /// Mapped here rather than through `Cmd.CustomScaledWait`, which is the obvious call and
-    /// **throws on `FastModeType.None`** — the enum's zero value, and so what an unset preference
-    /// reads as. Vanilla never hits it because its own calls sit behind screens that set the
-    /// preference first; a beat that runs once per card is not a place to find out. `CardPileCmd`
-    /// maps the enum by hand for its own timings, so this is the engine's own pattern anyway.
+    /// It used to be, at Lucas's request, and that was wrong twice over. Reported 2026-08-12: "card
+    /// plays are feeling quite instantaneous… I think it should be a feelable delay even in fast
+    /// mode" — a preference that can shrink the beat to nothing can delete the mechanic it exists
+    /// to provide. And in a real-time duel it is an *advantage*: whoever renders faster sees the
+    /// board settle sooner and can answer sooner, which is a match decided partly by a settings
+    /// screen. `DuelFastModePatch` now holds Fast Mode itself level for the duration of a duel, so
+    /// vanilla's own animation lengths are equal too; this number is simply the model's.
     /// </summary>
     private static float BeatSeconds() =>
-        SaveManager.Instance.PrefsSave.FastMode switch
-        {
-            FastModeType.Instant => 0f,
-            FastModeType.Fast => FastSeconds,
-            _ => NormalSeconds,
-        };
+        DuelTurnModel.Current is IPlanningTurnModel model ? model.BeatSeconds : 0f;
 }

@@ -30,6 +30,16 @@ public interface IPlanningTurnModel : IDuelTurnModel
     bool IsPlanned(CardModel card);
 
     /// <summary>
+    /// The readable gap left after each of this model's plays resolves, in seconds.
+    ///
+    /// **A model's pacing is part of what it is.** A lock-in batch is a sequence you read after the
+    /// fact, so it can afford a long beat; a paced real-time duel is a live exchange you are meant
+    /// to answer, so its beat has to sit near its own cooldown or the queue simply backs up behind
+    /// the animation.
+    /// </summary>
+    float BeatSeconds { get; }
+
+    /// <summary>
     /// Whether the hand is closed to new plays entirely, rather than merely short of energy.
     ///
     /// True for the lock-in model while a batch is committed or resolving. **Always false for a

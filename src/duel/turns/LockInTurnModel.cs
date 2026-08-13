@@ -222,6 +222,12 @@ public sealed class LockInTurnModel : IPlanningTurnModel
     /// </summary>
     public bool HandIsClosed => LockedIn || ResolvingBatch;
 
+    /// <summary>
+    /// Long, because a resolved batch is a story told after the decisions are made: six plays land
+    /// in a row and the only thing to do is read them.
+    /// </summary>
+    public float BeatSeconds => 1.2f;
+
     /// <summary>Declared finished for the turn, which the button label reads to stop offering a lock-in.</summary>
     public bool Done => _localDone;
 

@@ -11,5 +11,7 @@
   "SPIREPVP_DRAW_DECLINED.body": "Your opponent wants to play on.",
   "SPIREPVP_DRAW.ok": "OK",
   "SPIREPVP_LOCK_IN_BUTTON": "Lock In",
-  "SPIREPVP_DONE_BUTTON": "Waiting"
+  "SPIREPVP_DONE_BUTTON": "Waiting",
+  "SPIREPVP_INITIATIVE_YOU": "You move first",
+  "SPIREPVP_INITIATIVE_THEM": "They move first"
 }

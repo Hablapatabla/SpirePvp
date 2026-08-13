@@ -1,11 +1,13 @@
 using Godot;
 using MegaCrit.Sts2.Core.Combat;
+using MegaCrit.Sts2.Core.Context;
 using MegaCrit.Sts2.Core.Entities.Creatures;
 using MegaCrit.Sts2.Core.Entities.Players;
 using MegaCrit.Sts2.Core.Helpers;
 using MegaCrit.Sts2.Core.Logging;
 using MegaCrit.Sts2.Core.Nodes.Rooms;
 using MegaCrit.Sts2.Core.Runs;
+using MegaCrit.Sts2.addons.mega_text;
 using MegaCrit.Sts2.Core.Entities.Multiplayer;
 using MegaCrit.Sts2.Core.GameActions;
 using MegaCrit.Sts2.Core.Localization;
@@ -176,9 +178,9 @@ internal static class LockInPlanView
         {
             Polygon = new[]
             {
-                new Vector2(-26f, -38f),
-                new Vector2(26f, -38f),
-                new Vector2(0f, -8f),
+                new Vector2(-26f, -52f),
+                new Vector2(26f, -52f),
+                new Vector2(0f, -22f),
             },
             Color = StsColors.gold,
             ZIndex = 100,
@@ -187,6 +189,7 @@ internal static class LockInPlanView
         node.AddChildSafely(arrow);
         arrow.GlobalPosition = node.GetTopOfHitbox();
         _initiativeArrow = arrow;
+        AddInitiativeLabel(arrow, LocalContext.NetId == leaderNetId);
 
         // A still triangle reads as scenery; a moving one reads as a pointer. Looped rather than
         // one-shot so it is still saying something a minute into a long planning phase.
@@ -210,6 +213,35 @@ internal static class LockInPlanView
         }
 
         Log.Info($"[SpirePvp] initiative: {leaderNetId} strikes first this turn");
+    }
+
+    /// <summary>
+    /// Says which of you it means, above the arrow.
+    ///
+    /// **The label is a duplicate of the end turn button's**, not a `Label` built from nothing. A
+    /// bare Godot label renders in whatever the theme happens to supply and this game's text is
+    /// `MegaLabel` everywhere; duplicating a live one inherits its font, size, outline and theme
+    /// overrides for free, which is the same "borrow rather than build" the rest of this file runs
+    /// on. If there is no button to copy — a state that should not happen inside a duel — the arrow
+    /// simply appears without its caption rather than the indicator failing entirely.
+    /// </summary>
+    private static void AddInitiativeLabel(Node2D arrow, bool leaderIsLocal)
+    {
+        if (NCombatRoom.Instance?.Ui.EndTurnButton?._label is not MegaLabel template)
+        {
+            return;
+        }
+
+        if (template.Duplicate() is not MegaLabel label)
+        {
+            return;
+        }
+
+        string key = leaderIsLocal ? "SPIREPVP_INITIATIVE_YOU" : "SPIREPVP_INITIATIVE_THEM";
+        label.Position = new Vector2(-140f, -96f);
+        label.Size = new Vector2(280f, 40f);
+        arrow.AddChildSafely(label);
+        label.SetTextAutoSize(new LocString("gameplay_ui", key).GetFormattedText());
     }
 
     /// <summary>Drops the arrow. Called before redrawing it and on run teardown.</summary>

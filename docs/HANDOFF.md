@@ -79,7 +79,7 @@ abandons the rest, so one typo disables an arbitrary subset while the mod still 
 still logs "loaded". `SpirePvpInit` therefore applies each patch class independently and logs
 a count. **On every launch, confirm the log says `N patch classes applied cleanly`** — if it
 says `PATCH FAILED`, some of the mod is not running and in-game results mean nothing.
-**67 as of this handoff** (104 methods), confirmed against a live log 2026-08-12. The count is per *class*, not per patch: a class holding
+**68 as of this handoff** (106 methods), confirmed against a live log 2026-08-12. The count is per *class*, not per patch: a class holding
 several patch methods still counts once, so grouping patches by concern does not move it.
 
 **Harmony resolves `[HarmonyPatch(typeof(X))]` against methods declared on `X` only.** Naming
@@ -979,6 +979,24 @@ that changed, and its lobby entry already read "Real-Time"; its *description* is
 ("actions resolve in the order they are made, so speed decides trades") and wants a `.pck` change
 when slice 2 lands.
 
+**Speed is no longer a personal preference inside a duel** (`DuelFastModePatch`, 2026-08-12).
+Reported after playing slice 1: plays still felt instantaneous, "it should be a feelable delay even
+in fast mode", and — the better half of the observation — "maybe fast mode should be fixed across
+host and client? otherwise there's an advantage?". It is an advantage: vanilla sizes nearly every
+wait through Fast Mode, so a player on `Instant` sees the board settle while their opponent is still
+watching a card fly, which in a real-time duel is reaction time bought from a settings screen.
+
+Both clients now read `Normal` for the length of the duel. **The getter is patched, not the stored
+value** — writing the preference would mean writing it back through every route out of a duel, and
+a mod that leaves someone's settings changed is a bad mod. Our own beat stopped scaling with Fast
+Mode at the same time and takes its length from the turn model instead: 1.2s for a lock-in batch,
+which is a recap, and 0.45s for the paced mode, where it is a reaction window that has to sit near
+the cooldown or plays stack up behind their own animations.
+
+**Left open deliberately: the race.** The same argument applies to a *timed* race, and forcing a
+speed there changes how a whole act feels. It wants its own decision rather than being smuggled in
+with this one.
+
 **Two slices remain, and the mode is half a mode without them:**
 
 2. **Tick bucketing on the host.** Ordering is still arrival order today, so the host keeps its
@@ -1057,7 +1075,7 @@ guessing at it.
 **Everything from the 2026-08-12 session is built and playtested.** The loop, the desync fixes, the
 result screen, rematch — all confirmed in play on both clients, with the only errors in either log
 being vanilla's `Error deleting path …current_run_mp.save.backup`, which is noise and predates this
-work. Patch count is **67 classes / 104 methods**; confirm that line on every launch.
+work. Patch count is **68 classes / 106 methods**; confirm that line on every launch.
 
 Closed and confirmed this session, so nothing below needs re-testing:
 
