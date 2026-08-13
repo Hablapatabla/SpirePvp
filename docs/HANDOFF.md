@@ -1029,7 +1029,24 @@ information: the model's own submission cooldown, then the scheduler's busy-gate
 earliest-clock pick was always due by construction, whereas a lowest-position pick has to be told, or
 a player's not-yet-due second card could be released ahead of its own cooldown.
 
-#### The contest window, which turned out to be the rest of it after all (2026-08-13, UNPLAYED)
+#### CONFIRMED IN PLAY 2026-08-13 — "felt great this time"
+
+The four fixes below are **playtested together and good**. From the confirming log: contests now form
+(`2 waiting`), `releasing 1001's play #0 [position #0] after 16ms — beat 1#2` and again `after
+117ms`, `pace: cut` firing five times on each side, and **zero errors and zero divergences on either
+client**. The release waits that were 763–901ms are now 16–167ms.
+
+**Real-time paced (`TickTurnModel`) is therefore playtested end to end** — pacing, ordering, the
+cross-player beat and the contest window. Treat it as working; the four items below are the record of
+why, not open threads.
+
+**Turn-based is untouched by all of it**, which was checked rather than assumed and matters because
+the two modes share `DuelPace` and the scheduler: `DuelLockInPatch` routes to `DuelPlayScheduler`
+only when the model is `TickTurnModel`, and `LockInTurnModel.CrossPlayerBeatSeconds` returns its full
+beat, so the sliced beat resolves identically for it. Turn-based remains unplayed for its **own**
+reasons (the lock-in gate inversion), not because of this work.
+
+#### The contest window, which turned out to be the rest of it after all
 
 Position ordering was played immediately and the report was *"third turn actually felt good this
 time, but I still think turns 1 and 2 should've let the client get its defend out — am I
