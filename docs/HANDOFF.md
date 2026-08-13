@@ -846,37 +846,40 @@ answer, but it *can* be given one the simulation already defines identically on 
 it safe was never the getter — it was `DuelAoeActor` having a deterministic actor to name, and
 falling back to vanilla's empty list when it has none.
 
-### `potion` from the client grants nothing, and it is not a display bug (2026-08-13)
+### FOUND AND FIXED: a client's console command was held in the round buffer (2026-08-13)
 
-Reported: *"unable to grant myself potion on client… host got a potion once I ran the potion command
-on their side."* So issuing from the host works and issuing from the client silently does nothing —
-on **either** belt.
+Reported in two halves that turned out to be one bug: *"unable to grant myself potion on client"*,
+then *"the fire potion appeared in the client AFTER both sides clicked end turn. Also the turn didn't
+end even after both sides clicked."*
 
-**What the logs establish, and it rules out most of the obvious suspects.** `PotionConsoleCmd` is
-`IsNetworked = true`, and both machines executed it identically —
-`Executing DevConsole command (player 1001): potion FIRE_POTION` appears in both logs, with **no
-error on either** and checksums agreeing through the following action. A failure that is deterministic
-on both peers is not a UI problem, not `LocalContext`, and not the potion-greying added the same day:
-it is a state-level refusal that both simulations made the same way.
+**`ConsoleCmdGameAction.ActionType` is `CombatPlayPhaseOnly` whenever the command is issued in
+combat.** So a dev command is indistinguishable from a card play by type alone, and the host held it
+in the round buffer exactly like one. That is both symptoms at once: the potion landed only when the
+batch flushed, and the turn would not end because **a buffer holding a console command is never the
+empty batch that ends a turn**.
 
-**Vanilla has exactly one silent route to that.** `PotionConsoleCmd.Process` calls
-`PotionCmd.TryToProcure(potion, issuingPlayer)`, which either refuses via
-`Hook.ShouldProcurePotion` or calls `Player.AddPotionInternal`. There:
+**The guard already existed and was in one of the two places it was needed.**
+`DuelTurnModel.IsPlayerInitiated` is an allow-list — `PlayCardAction`, `UsePotionAction`,
+`DiscardPotionGameAction`, `EndPlayerTurnAction`, `UndoEndPlayerTurnAction` — and its comment already
+named `ConsoleCmdGameAction` as deliberately excluded, having been caught in the play queue once
+before. But it is applied in `DuelTurnModel.ShouldDefer`, which is the **local** path only. A client's
+play travels as a `RequestEnqueueActionMessage` and arrives at `DuelLockInPatch`, which asked only
+about `ActionType`.
 
-```csharp
-if (slotIndex < 0) slotIndex = _potionSlots.IndexOf(null);
-if (slotIndex >= 0) { ... }   // the Log.Warn lives inside here
-```
+**That asymmetry is exactly why the report looked like a client-only problem.** Issuing the command
+on the host worked — the host's own commands take the local path and are filtered there. Only a
+client's crossed the wire into the unguarded one. `DuelLockInPatch` now asks the same predicate.
 
-With no empty slot, `IndexOf` returns -1, the branch carrying the warning is skipped entirely, and it
-returns `TooFull` **without logging anything**. That is the only path in the chain that fails in
-silence, so player 1001 having no free slot — a full belt, or a belt with no slots at all — is the
-answer unless `ShouldProcurePotion` is refusing.
+**Fourth instance of one predicate living in two files and being fixed in one** (`DuelClockService`
+and its duplicate in `DuelFlag`, then the phase test, now this). The rule stands and is worth
+re-reading: *when you fix a predicate, grep for it.* The sweep this time was `CombatPlayPhaseOnly`
+across `src/` — the two model implementations are reachable only through the guarded local entry, so
+there were exactly two call sites and both are now covered.
 
-**Not patched, and there is precedent.** It is a dev command with a working alternative (issue it from
-the host, which grants to the host), and `kill` is already documented as not working in a duel rather
-than patched around. If it is ever worth chasing, the cheap next step is a one-line log of the
-`PotionProcureResult.failureReason`, which separates `TooFull` from `NotAllowed` in a single run.
+**It was never specific to potions.** Any console command issued from the client during a duel was
+being deferred — `damage`, `energy`, `card`, `power`. A previous note here concluded the potion was
+refused for want of a free belt slot; that was wrong, and it was wrong because it reasoned from the
+absence of a log line rather than from what the action *was*.
 
 ### CLOSED: the badge teardown guard is reachable and stays (2026-08-13)
 

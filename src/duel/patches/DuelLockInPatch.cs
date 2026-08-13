@@ -48,6 +48,24 @@ public static class DuelLockInPatch
             return true;
         }
 
+        // **The same allow-list the local path uses, and its absence here was a real bug.**
+        // `ActionType` is not enough on its own: `ConsoleCmdGameAction` reports
+        // `CombatPlayPhaseOnly` whenever it is issued in combat, so a dev command arriving from the
+        // client was held in the round buffer exactly like a card play. Reported 2026-08-13 — a
+        // `potion` typed on the client appeared only once *both* players had clicked end turn, and
+        // the turn then would not end at all, because a buffer holding a console command is never
+        // the empty batch that ends a turn.
+        //
+        // `DuelTurnModel.ShouldDefer` has always refused these, which is why issuing the same
+        // command on the **host** worked: the host's own commands take the local path and are
+        // filtered there. A client's travel over the wire and arrive here, where only the type was
+        // being asked. One predicate, two call sites, and the second was never given it — the
+        // trap this project has now hit four times (`DuelClockService`/`DuelFlag`, and twice since).
+        if (!DuelTurnModel.IsPlayerInitiated(action))
+        {
+            return true;
+        }
+
         // **The paced model books it a tick instead of ordering it by arrival.** Same reason the
         // lock-in model holds it: the host must not let the moment a packet landed decide when a
         // play resolves. See DuelPlayScheduler.

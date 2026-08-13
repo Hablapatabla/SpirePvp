@@ -243,7 +243,10 @@ public static class DuelTurnModel
     /// — a dev command has no business being paced, and one turned up in the play queue as
     /// `holding ConsoleCmdGameAction … potion POISON_POTION` before this.
     /// </summary>
-    private static bool IsPlayerInitiated(GameAction action) =>
+    /// **Internal rather than private because the host path needs it too.** A client's play
+    /// arrives as a `RequestEnqueueActionMessage` and never passes through `ShouldDefer`, so
+    /// `DuelLockInPatch` has to ask the same question — see the note there.
+    internal static bool IsPlayerInitiated(GameAction action) =>
         action is PlayCardAction
             or UsePotionAction
             or DiscardPotionGameAction
