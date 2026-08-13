@@ -1,4 +1,6 @@
 using MegaCrit.Sts2.Core.Combat;
+using MegaCrit.Sts2.Core.Entities.Creatures;
+using MegaCrit.Sts2.Core.Models;
 using MegaCrit.Sts2.Core.GameActions;
 using MegaCrit.Sts2.Core.Logging;
 using MegaCrit.Sts2.Core.Context;
@@ -94,10 +96,38 @@ public static class DuelTurnModel
         }
 
         (Current as TickTurnModel)?.OnTurnStarted();
+        LogPowers(state);
 
         if (Current is IPlanningTurnModel model)
         {
             LockInPlanView.ShowInitiative(model.CurrentLeader);
+        }
+    }
+
+    /// <summary>
+    /// Both duelists' powers and durations, once per turn.
+    ///
+    /// **Nothing in this game logs a power's duration, so status-timing questions have been
+    /// unanswerable from a log.** Asked 2026-08-12 — did Vulnerable and Weak tick down at turn end?
+    /// — and neither the code reading nor the logs could settle it, because the only evidence was a
+    /// number on screen that nobody had written down. One line per turn per client makes the next
+    /// such question a diff instead of a discussion, and HANDOFF has been carrying an open note to
+    /// "audit `AfterSideTurnStart` powers when one shows up" since poison needed its own patch.
+    /// </summary>
+    private static void LogPowers(CombatState state)
+    {
+        foreach (Creature creature in state.Creatures)
+        {
+            List<string> powers = new List<string>();
+            foreach (PowerModel power in creature.Powers)
+            {
+                powers.Add($"{power.Id.Entry}:{power.Amount}");
+            }
+
+            if (powers.Count > 0)
+            {
+                Log.Info($"[SpirePvp] powers at turn start — {creature.LogName}: {string.Join(", ", powers)}");
+            }
         }
     }
 

@@ -112,14 +112,22 @@ public sealed class TickTurnModel : IPlanningTurnModel
     public bool HandIsClosed => false;
 
     /// <summary>
-    /// **Zero, because the tick is the rhythm.** `DuelTickScheduler` releases one tick's plays at a
-    /// time from the host, so both clients already see a gap between ticks and see it identically.
-    /// An executor beat on top would pace the stream a second time, and worse, it would pace it
-    /// *globally*: one gap shared between two players halves each player's cadence, which is the
-    /// thing slice 2 exists to stop. The gap belongs between a player's own consecutive cards, and
-    /// the per-player tick is exactly that.
+    /// A dwell after each play, so a card that resolves is something you saw resolve.
+    ///
+    /// **This was zero for one build and that was wrong**, on the theory that the scheduler's tick
+    /// already provided the rhythm. It does not: the tick paces *submission into the queue*, so a
+    /// lone card whose tick is already due is enqueued and resolved in the same frame. Reported
+    /// immediately — "card plays feel instantaneous again now" — and the reasoning behind the zero
+    /// was the mistake, not the number. A gap between ticks is only visible when there is a queue;
+    /// the gap after a card has to exist whether or not anything follows it.
+    ///
+    /// The cost is real and worth knowing: one executor, one gap, so two players both firing at
+    /// their full 0.4s cadence generate cards faster than the stream resolves them and the
+    /// resolution falls behind the clicking. That is the queue doing its job rather than a fault —
+    /// it is what "can be queued" means — but if it ever feels like lag rather than like a backlog,
+    /// this number and `DuelTickScheduler.TickMs` are the two knobs.
     /// </summary>
-    public float BeatSeconds => 0f;
+    public float BeatSeconds => 0.4f;
 
     private ulong _firstInitiative;
     private int _turnsSeen;
