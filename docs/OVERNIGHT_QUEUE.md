@@ -114,6 +114,95 @@ was wrong; this project's docs are written that way on purpose.
 
 ---
 
+# Second tier — take these too, in this order, if the priorities above run out
+
+The first seven are ordered by value. These are ordered by **how well they suit an unattended
+session**: the first few are "read a vanilla method and mirror it", which is exactly the kind of work
+that verifies by compiling and by reasoning rather than by playing.
+
+## 8. The killing blow hangs in mid-air behind the result screen
+
+Root-caused already, never fixed. `DuelEndCombatPatch` skips `CombatManager.EndCombatInternal`
+**wholesale**, so nothing winds the combat down and the final card is left hanging.
+
+**This is the `RunManager.EnterRoom` trap at the other end of the combat, and it wants the same
+treatment that worked there:** read `EndCombatInternal` in the decompile, reproduce the steps that are
+safe for a duel, and **comment each one with why it is included or skipped**. `DuelArena` is the
+worked example of that method — copy its shape, including the comments that name each omission.
+`DuelArena` has produced six quiet omissions so far, so assume this method has some too and be
+explicit about every line you choose not to reproduce.
+
+## 9. M8.5 slice 3 — the opponent's unsubmitted queue on the wire
+
+**The last piece of the paced real-time mode, and the one that makes it worth having.** Today you can
+only see what has already been released — at most 0.4s of warning, which is not enough to read or
+answer, and answering is the entire point of pacing. Their *planned* plays are not broadcast at all.
+
+This is a deliberate change to the information rules (DESIGN §1) and **was already decided**, so it
+does not need Lucas. Shape: `TickTurnModel` holds `_queued` (in-flight plays); those need to reach the
+peer and be drawn on their side of the split play queue (`LockInPlanView` already draws yours left and
+theirs right). Note the two rules it must obey: a message that only fires on *change* cannot carry
+initial state, and message ids are **positional** — add new types at the end.
+
+## 10. The planned potion looks like nothing happened
+
+Small and self-contained. `UsePotionAction` is `CombatPlayPhaseOnly`, so it is deferred like a card,
+but vanilla's play queue is a *card strip* and has nowhere to put it — so drinking a potion in a
+planning model reads as a dead click. Same gap as the card highlight, smaller.
+
+## 11. Return to lobby (medium — research is done, ordering is not)
+
+Parked at Lucas's request with the mechanism **confirmed viable**: `StartRunLobby`'s constructor
+iterates `ConnectedPeers` and adopts already-connected peers, and `HandleClientLobbyJoinRequestMessage`
+answers with a `ClientLobbyJoinResponseMessage` exactly as for a fresh join — so vanilla's join
+handshake works over a connection that is already up.
+
+What is left is **ordering**: host tears down (disconnect suppressed, as `DuelRematch` does) and opens
+`NCustomRunScreen` via `InitializeMultiplayerAsHost`; then the client tears down, re-sends the join
+request, and builds its own screen from the response via `InitializeMultiplayerAsClient`. **Genuinely
+unresearched: opening `NCustomRunScreen` programmatically** (screen-stack mechanics) — research that
+first and write down what you find even if you build nothing.
+
+## 12. Random as a character choice (small feature, full scope already written)
+
+Scoped in `docs/PLAYTEST_LIST.md`. Read that scope rather than inventing one.
+
+## 13. The three `NCard` double-frees at duel teardown
+
+Measured at **3 per match**, and 0 before the play queue started holding planned cards — so the queue
+is implicated, but the root cause is **not proven**. HANDOFF's instruction is the one to follow:
+**find the *first* free rather than assuming.** A static read of who disposes a queued card node —
+`LockInPlanView`, `DuelPlanQueuePatch`, and vanilla's own `NCardPlayQueue` teardown — plus the
+teardown order, should identify it without a playtest. If you cannot prove it, write down the three
+candidates and what would distinguish them.
+
+## 14. The badge teardown guard is unexercised
+
+`DuelBadges`' teardown guard covers a window that **may be unreachable**: the Main Menu button does not
+appear until the badges have finished animating, so the window cannot be reached by clicking it.
+HANDOFF's instruction: **find the route (Continue? Escape? controller?) before assuming the guard
+works, or drop it as unreachable.** A static read of `NGameOverScreen`'s input handling answers it.
+
+## 15. True rejoin (milestone — scope only)
+
+Scoped in `docs/PLAYTEST_LIST.md`. Vanilla's rejoin is half-built and **the missing half is the UI**;
+the run-state rule is already decided. Too big to land unattended — read it, confirm the scope against
+the decompile, and write what the UI half actually requires. Do not start building it.
+
+## 16. The client's run timer (the last open telemetry question)
+
+Reported as "client doesn't show the clock, host does". Established already: both sides logged an
+untimed match, `show_run_timer` is `false` in both dev profiles, and the widget is vanilla's
+`NRunTimer` — which vanilla shows on the map screen regardless of the preference
+(`ToggleTimer(NCapstoneContainer.InUse || NMapScreen.Instance.Visible)`).
+
+The probe now reports per phase. **If a log with two sides is available, diff their `telemetry: run
+timer` lines and answer it.** If not, a static read of what could make `NMapScreen.Instance.Visible`
+differ between host and client is the next best thing. It is cosmetic and it is vanilla's widget —
+do not spend long, and do not "fix" it by forcing visibility.
+
+---
+
 ## Explicitly NOT for an unattended session
 
 - **Anything needing a playtest to validate.** The turn models, the scheduler ordering, the arena
