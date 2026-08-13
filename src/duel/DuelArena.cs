@@ -262,14 +262,26 @@ public static class DuelArena
             await runManager.CombatStateSynchronizer.WaitForSync();
             Log.Warn("[SpirePvp] duel: state sync complete");
 
-            // **Authoritative, and back here on purpose.** Healing on arrival and sending the value
-            // is the version that shows the right number on the deck review, and on 2026-08-13 the
-            // send silently did not take, so both machines held a stale opponent and checksum 0
-            // diverged. Until that is understood, the heal is reconciled here — after the sync,
-            // both duelists, on both clients — which is the placement that provably agrees. The
-            // arrival heal still runs and is still shown; this only makes the two machines settle
-            // on the same numbers before a card is played.
-            DuelArenaRest.ReconcileAfterSync(runManager.State);
+            // **The post-sync reconcile is gone, and removing it is the fix for a desync it caused.**
+            //
+            // It was a safety net from earlier on 2026-08-13, when the heal was applied locally but
+            // its value never reached the peer (the fields were missing from
+            // `DuelArrivedMessage`'s serializer), so both machines held a stale opponent. Re-healing
+            // both duelists after the sync made them agree while that was true, and this document
+            // claimed that once the send was fixed it would "become a no-op rather than a second
+            // mechanism to remove". **That claim was wrong**, and the first Steam match found it.
+            //
+            // It skips anyone in `_healed`, but `_healed` only ever contains the *local* duelist —
+            // nothing on this machine heals the opponent, so their id is never in it. So once the
+            // send worked and `ApplyOpponentHp` wrote their already-healed HP, the reconcile added
+            // 30% to it a second time. Measured: the two dumps differed in exactly two lines, both
+            // HP, and the client's copy of the host read `80/80` where the host read `70/80` —
+            // 70 + 24, capped.
+            //
+            // Nothing replaces it, on purpose. The opponent's HP now arrives as a fact they sent, so
+            // if a heal ever fails to run, both machines are wrong in the *same* way and agree —
+            // which is a visible bug rather than a voided match. Correctness by agreement is what
+            // this phase needs; a second mechanism guessing at the same number is what broke it.
 
 
             if (runManager.CombatReplayWriter.IsEnabled)
