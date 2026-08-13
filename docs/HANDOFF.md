@@ -1022,6 +1022,29 @@ arrival order, for the play most likely to decide an exchange. And **the executo
 this model** (`BeatSeconds => 0`): the tick *is* the rhythm, and a global beat on top paces the
 stream twice while halving each player's cadence, which is the thing slice 2 exists to stop.
 
+**A turn model must never defer an action the sim raised** (fixed 2026-08-12). Found in a live log,
+one line under the card that caused it:
+
+```
+Player 1 playing card FALLING_STAR (targeting PlayerId 1001)
+turn model: holding PlayCardAction card: CARD.FALLING_STAR … until lock-in
+```
+
+A card that enqueues a play while resolving is not a player deciding to play a card, and holding it
+puts an effect the engine has already committed to into a queue that releases it later *as if it
+had been clicked*. `DuelTurnModel.ShouldDefer` now bails when
+`ActionExecutor.CurrentlyRunningAction` is non-null — the same condition `DuelPlanEnergyPatch` uses
+to stay out of the sim's way, and the same principle: if an action is executing, what is being
+enqueued belongs to it rather than to the person holding the mouse. Applies to both models.
+
+**Powers do tick down; the report that they do not is not supported by the log.** Asked twice, and
+the per-turn power dump settles it: `VULNERABLE_POWER:2` at one turn start, `1` at the next, absent
+by the third. The amounts also match their sources exactly — Bash applies Vulnerable **2**, which is
+where a "Falling Star applies 1" mismatch came from, and the client's `WEAK_POWER:1,
+VULNERABLE_POWER:1` is Falling Star's own pair. If it still reads wrong on screen, suspect the
+*display* rather than the model: `NPowerContainer` refreshes off `PowerRemoved`, and a duration
+ticking from 2 to 1 removes nothing.
+
 **One slice remains:**
 
 3. Ordering is still arrival order today, so the host keeps its

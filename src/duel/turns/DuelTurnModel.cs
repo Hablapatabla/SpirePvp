@@ -147,9 +147,40 @@ public static class DuelTurnModel
 
     private static bool _armed;
 
-    /// <summary>Convenience for the one patch that asks per action.</summary>
-    public static bool ShouldDefer(GameAction action) =>
-        DuelSession.IsDuelActive && Current.ShouldDefer(action);
+    /// <summary>
+    /// Whether to hold this action back. The one patch that asks, asks here.
+    ///
+    /// **Only a player's own click may be deferred — never something the sim raised.** A card that
+    /// enqueues a play as part of resolving is not a player deciding to play a card, and holding it
+    /// puts an effect the engine has already committed to into a queue that releases it later, as
+    /// if it had been clicked. Found 2026-08-12 in a live log, one line under the card that caused
+    /// it:
+    ///
+    ///     Player 1 playing card FALLING_STAR (targeting PlayerId 1001)
+    ///     turn model: holding PlayCardAction card: CARD.FALLING_STAR … until lock-in
+    ///
+    /// — the card's own effect, captured by the cooldown queue mid-execution and scheduled to go
+    /// off again on its own.
+    ///
+    /// `ActionExecutor.CurrentlyRunningAction` is the condition, and it is the same one
+    /// `DuelPlanEnergyPatch` uses to stay out of the sim's way: if an action is executing, whatever
+    /// is being enqueued belongs to *it*, not to the person holding the mouse. It applies to both
+    /// models, because both defer and neither has any business rescheduling the engine's own work.
+    /// </summary>
+    public static bool ShouldDefer(GameAction action)
+    {
+        if (!DuelSession.IsDuelActive)
+        {
+            return false;
+        }
+
+        if (RunManager.Instance?.ActionExecutor.CurrentlyRunningAction != null)
+        {
+            return false;
+        }
+
+        return Current.ShouldDefer(action);
+    }
 
     private static IDuelTurnModel Build(IRunState? runState)
     {
