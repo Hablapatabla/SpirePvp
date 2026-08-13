@@ -1,4 +1,8 @@
 using MegaCrit.Sts2.Core.Entities.Creatures;
+using MegaCrit.Sts2.Core.Helpers;
+using MegaCrit.Sts2.Core.Nodes;
+using MegaCrit.Sts2.Core.Nodes.Rooms;
+using MegaCrit.Sts2.Core.Nodes.Vfx;
 using MegaCrit.Sts2.Core.Entities.Players;
 using MegaCrit.Sts2.Core.Entities.RestSite;
 using MegaCrit.Sts2.Core.Logging;
@@ -87,6 +91,47 @@ public static class DuelArenaRest
 
             Log.Warn($"[SpirePvp] arena rest: healed {player.NetId} {before} -> "
                      + $"{creature.CurrentHp} / {creature.MaxHp} before the duel");
+        }
+
+        PlayRestCue();
+    }
+
+    /// <summary>
+    /// Vanilla's own rest-site cue, so the heal reads as a rest rather than as free HP appearing.
+    ///
+    /// **Borrowed, not built** — the same reasoning as the initiative label and the play queue. These
+    /// are the exact three things `HealRestSiteOption.DoLocalPostSelectVfx` plays when you rest at a
+    /// campfire, so a player already knows what it means, and it costs no art and no `.pck` change.
+    ///
+    /// **Purely local, and that is what makes it safe here.** It is presentation: it changes nothing
+    /// either sim reads, so unlike the heal itself it has no ordering or agreement requirement. It
+    /// deliberately does *not* await the 1.5-2.5s wait vanilla uses at a real rest site — that wait
+    /// exists to pace a screen the player is sitting on, and here it would hold the arena's fade-in.
+    ///
+    /// Parented to the combat room rather than `NRestSiteRoom.Instance`, which is null in an arena;
+    /// if there is no room node yet the cue is simply skipped rather than the heal failing.
+    /// </summary>
+    private static void PlayRestCue()
+    {
+        HealRestSiteOption.PlayRestSiteHealSfx();
+
+        NCombatRoom? room = NCombatRoom.Instance;
+        if (room == null)
+        {
+            Log.Info("[SpirePvp] arena rest: no combat room node yet, skipping the rest cue");
+            return;
+        }
+
+        NDesaturateTransitionVfx? desaturate = NDesaturateTransitionVfx.Create();
+        if (desaturate != null)
+        {
+            room.AddChildSafely(desaturate);
+        }
+
+        NRestSmokeVfx? smoke = NRestSmokeVfx.Create();
+        if (smoke != null)
+        {
+            room.AddChildSafely(smoke);
         }
     }
 }
