@@ -40,6 +40,21 @@ public interface IPlanningTurnModel : IDuelTurnModel
     float BeatSeconds { get; }
 
     /// <summary>
+    /// The host's ruling on who takes the opening initiative, from `DuelStartMessage`.
+    /// </summary>
+    void SetInitiative(ulong netId);
+
+    /// <summary>
+    /// Who strikes first this turn: whoever reached the arena first, alternating each turn (M9).
+    ///
+    /// **Both models need it, for different jobs.** The lock-in model orders its interleaved batch
+    /// by it; the paced model breaks ties inside a tick with it, which is what stops the host's
+    /// shorter path to its own queue from deciding trades. Same rule, so the race's reward means the
+    /// same thing in both modes.
+    /// </summary>
+    ulong CurrentLeader { get; }
+
+    /// <summary>
     /// Whether the hand is closed to new plays entirely, rather than merely short of energy.
     ///
     /// True for the lock-in model while a batch is committed or resolving. **Always false for a

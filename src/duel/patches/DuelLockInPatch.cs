@@ -37,13 +37,27 @@ public static class DuelLockInPatch
     public static bool BeforeHandleRequestEnqueue(
         ActionQueueSynchronizer __instance, RequestEnqueueActionMessage message, ulong senderId)
     {
-        if (Model is not LockInTurnModel model || !DuelSession.IsDuelActive)
+        if (!DuelSession.IsDuelActive || DuelTurnModel.Current is not IPlanningTurnModel)
         {
             return true;
         }
 
         GameAction action = __instance.NetActionToGameAction(message.action, senderId);
         if (action.ActionType != GameActionType.CombatPlayPhaseOnly)
+        {
+            return true;
+        }
+
+        // **The paced model books it a tick instead of ordering it by arrival.** Same reason the
+        // lock-in model holds it: the host must not let the moment a packet landed decide when a
+        // play resolves. See DuelTickScheduler.
+        if (DuelTurnModel.Current is TickTurnModel)
+        {
+            DuelTickScheduler.Submit(action, senderId);
+            return false;
+        }
+
+        if (Model is not LockInTurnModel model)
         {
             return true;
         }

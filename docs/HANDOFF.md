@@ -997,15 +997,40 @@ the cooldown or plays stack up behind their own animations.
 speed there changes how a whole act feels. It wants its own decision rather than being smuggled in
 with this one.
 
-**Two slices remain, and the mode is half a mode without them:**
+**Slice 2 is in (2026-08-12, unplayed): each duelist has their own cadence.** Reported from the
+first paced playtest — two Defends queued a clear second before the opponent's Strike still did not
+land first — and the engine explains it exactly. `ActionQueueSet` does keep one queue per player,
+and then `GetReadyAction` flattens them by taking the globally lowest action id, which the host
+hands out **in arrival order**. The per-player structure collapses into "whoever clicked first".
 
-2. **Tick bucketing on the host.** Ordering is still arrival order today, so the host keeps its
+`DuelTickScheduler` now books every play a tick taken from *its own player's* next free slot, so a
+player firing three cards in half a second occupies three consecutive ticks of their own and cannot
+push the other player's cards later. **Ties inside a tick go to initiative** (M9), which is the part
+that matters: bucketing alone removes only the sub-tick slice of the host's advantage, since the
+host's own requests never cross the network, and ordering a shared bucket by arrival hands the whole
+problem back.
+
+**The seam that looks right and is a desync: `ActionQueue.isPaused`.** `GetReadyAction` skips a
+paused queue and takes the other player's action instead, so the engine really can run two queues
+independently — but pausing changes *which action executes next*, which is sim-visible. A client
+pacing its own queue on its own wall clock would diverge from the host within a card. Per-player
+cadence has to be decided once, by the host, and expressed in the ids it assigns.
+
+Two consequences worth knowing before touching it: **the host's own plays go through the scheduler
+too**, including the instant first one — reaching `RequestEnqueue` directly would enqueue it in
+arrival order, for the play most likely to decide an exchange. And **the executor beat is off for
+this model** (`BeatSeconds => 0`): the tick *is* the rhythm, and a global beat on top paces the
+stream twice while halving each player's cadence, which is the thing slice 2 exists to stop.
+
+**One slice remains:**
+
+3. Ordering is still arrival order today, so the host keeps its
    inherent half-RTT edge. Bucketing alone does not fix that — it removes the *sub-tick* part and
    leaves the question of what orders two plays inside one bucket. **Order within a bucket by
    initiative** (the M9 rule that now exists) and the edge is gone rather than shortened. Slice 2
    also wants in-flight plays tracked through to execution, which closes the reservation window
    noted on `TickTurnModel.ReservedEnergy`.
-3. **The opponent's queue on the wire**, drawn on their side. Their unsubmitted plays are not
+**The opponent's queue on the wire**, drawn on their side. Their unsubmitted plays are not
    broadcast today, so you can only see what has already been released — at most 0.4s of warning,
    which is not enough to read or answer. This is a deliberate change to the information rules
    (DESIGN §1) and was decided as such.

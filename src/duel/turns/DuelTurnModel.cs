@@ -93,17 +93,17 @@ public static class DuelTurnModel
             return;
         }
 
-        if (Current is LockInTurnModel lockIn)
-        {
-            LockInPlanView.ShowInitiative(lockIn.CurrentLeader());
-        }
-
         (Current as TickTurnModel)?.OnTurnStarted();
+
+        if (Current is IPlanningTurnModel model)
+        {
+            LockInPlanView.ShowInitiative(model.CurrentLeader);
+        }
     }
 
     /// <summary>The host's ruling on who takes the opening initiative, from `DuelStartMessage`.</summary>
     public static void SetInitiative(ulong netId) =>
-        (Current as LockInTurnModel)?.SetInitiative(netId);
+        (Current as IPlanningTurnModel)?.SetInitiative(netId);
 
     private static void OnLockIn(DuelLockInMessage message, ulong senderId)
     {

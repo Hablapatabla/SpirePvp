@@ -1,10 +1,13 @@
 using Godot;
+using MegaCrit.Sts2.Core.Context;
 using MegaCrit.Sts2.Core.Entities.Cards;
 using MegaCrit.Sts2.Core.Entities.Multiplayer;
 using MegaCrit.Sts2.Core.GameActions;
 using MegaCrit.Sts2.Core.Helpers;
 using MegaCrit.Sts2.Core.Logging;
+using MegaCrit.Sts2.Core.Entities.Players;
 using MegaCrit.Sts2.Core.Models;
+using MegaCrit.Sts2.Core.Multiplayer.Game;
 using MegaCrit.Sts2.Core.Runs;
 
 namespace SpirePvp.Duel.Turns;
@@ -109,11 +112,66 @@ public sealed class TickTurnModel : IPlanningTurnModel
     public bool HandIsClosed => false;
 
     /// <summary>
-    /// Close to the cooldown, because this beat is a *reaction window* rather than a recap: it has
-    /// to be long enough to see a card land and answer it, and short enough that plays leaving
-    /// every 0.4s do not stack up behind their own animations.
+    /// **Zero, because the tick is the rhythm.** `DuelTickScheduler` releases one tick's plays at a
+    /// time from the host, so both clients already see a gap between ticks and see it identically.
+    /// An executor beat on top would pace the stream a second time, and worse, it would pace it
+    /// *globally*: one gap shared between two players halves each player's cadence, which is the
+    /// thing slice 2 exists to stop. The gap belongs between a player's own consecutive cards, and
+    /// the per-player tick is exactly that.
     /// </summary>
-    public float BeatSeconds => 0.45f;
+    public float BeatSeconds => 0f;
+
+    private ulong _firstInitiative;
+    private int _turnsSeen;
+
+    public void SetInitiative(ulong netId)
+    {
+        _firstInitiative = netId;
+        Log.Warn($"[SpirePvp] paced: opening initiative to {netId} (reached the arena first)");
+    }
+
+    /// <summary>
+    /// Whoever reached the arena first, alternating each turn — the same M9 rule the lock-in model
+    /// uses, doing a different job here: breaking ties inside a tick.
+    /// </summary>
+    public ulong CurrentLeader
+    {
+        get
+        {
+            IRunState? state = RunManager.Instance?.State;
+            if (state == null)
+            {
+                return 0;
+            }
+
+            ulong opening = _firstInitiative;
+            if (opening == 0)
+            {
+                foreach (Player player in state.Players)
+                {
+                    if (opening == 0 || player.NetId < opening)
+                    {
+                        opening = player.NetId;
+                    }
+                }
+            }
+
+            if (_turnsSeen % 2 == 0)
+            {
+                return opening;
+            }
+
+            foreach (Player player in state.Players)
+            {
+                if (player.NetId != opening)
+                {
+                    return player.NetId;
+                }
+            }
+
+            return opening;
+        }
+    }
 
     public bool ShouldDefer(GameAction action)
     {
@@ -144,6 +202,18 @@ public sealed class TickTurnModel : IPlanningTurnModel
         if (_queued.Count == 0 && DateTime.UtcNow >= _nextRelease)
         {
             _nextRelease = DateTime.UtcNow.AddMilliseconds(CooldownMs);
+
+            // **Even the instant play goes through the scheduler on the host.** Letting it reach
+            // `RequestEnqueue` would enqueue it there and then, in arrival order, which is the
+            // advantage slice 2 removes — and it would do it for the one play most likely to
+            // decide an exchange. Booking it costs nothing: its tick is the current one, which is
+            // already due, so it is released on the next frame rather than after a wait.
+            if (RunManager.Instance?.NetService.Type == NetGameType.Host)
+            {
+                DuelTickScheduler.Submit(action, LocalContext.NetId ?? 0UL);
+                return true;
+            }
+
             return false;
         }
 
@@ -158,6 +228,8 @@ public sealed class TickTurnModel : IPlanningTurnModel
     /// <summary>Clears the queue at a turn boundary, where energy refills and nothing may carry over.</summary>
     public void OnTurnStarted()
     {
+        _turnsSeen++;
+
         if (_queued.Count > 0)
         {
             Log.Warn($"[SpirePvp] paced: dropping {_queued.Count} play(s) still queued at turn start");
@@ -236,14 +308,25 @@ public sealed class TickTurnModel : IPlanningTurnModel
             return;
         }
 
-        _releasing = true;
-        try
+        // **The host books its own plays into the tick scheduler rather than enqueueing them.**
+        // Going straight to the queue would give the host's cards ids in arrival order — the very
+        // advantage slice 2 removes — so both players' plays take the same route, and the only
+        // difference is that a client's travels first.
+        if (run.NetService.Type == NetGameType.Host)
         {
-            run.ActionQueueSynchronizer.RequestEnqueue(action);
+            DuelTickScheduler.Submit(action, LocalContext.NetId ?? 0UL);
         }
-        finally
+        else
         {
-            _releasing = false;
+            _releasing = true;
+            try
+            {
+                run.ActionQueueSynchronizer.RequestEnqueue(action);
+            }
+            finally
+            {
+                _releasing = false;
+            }
         }
 
         Log.Info($"[SpirePvp] paced: released {action} ({_queued.Count} still waiting)");

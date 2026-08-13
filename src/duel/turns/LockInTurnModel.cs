@@ -312,10 +312,13 @@ public sealed class LockInTurnModel : IPlanningTurnModel
     }
 
     /// <summary>Who leads the current turn, for the indicator over their head.</summary>
-    public ulong CurrentLeader()
+    public ulong CurrentLeader
     {
-        IRunState? state = RunManager.Instance?.State;
-        return state == null ? 0 : StartsTheRound(state);
+        get
+        {
+            IRunState? state = RunManager.Instance?.State;
+            return state == null ? 0 : StartsTheRound(state);
+        }
     }
 
     public bool ShouldDefer(GameAction action)
