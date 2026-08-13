@@ -125,7 +125,8 @@ public sealed class TickTurnModel : IPlanningTurnModel
     /// their full 0.4s cadence generate cards faster than the stream resolves them and the
     /// resolution falls behind the clicking. That is the queue doing its job rather than a fault —
     /// it is what "can be queued" means — but if it ever feels like lag rather than like a backlog,
-    /// this number and `DuelTickScheduler.TickMs` are the two knobs.
+    /// this number is the knob: the scheduler releases one card per drain, so the dwell *is* the
+    /// resolution rate.
     /// </summary>
     public float BeatSeconds => 0.4f;
 
@@ -218,7 +219,7 @@ public sealed class TickTurnModel : IPlanningTurnModel
             // already due, so it is released on the next frame rather than after a wait.
             if (RunManager.Instance?.NetService.Type == NetGameType.Host)
             {
-                DuelTickScheduler.Submit(action, LocalContext.NetId ?? 0UL);
+                DuelPlayScheduler.Submit(action, LocalContext.NetId ?? 0UL);
                 return true;
             }
 
@@ -322,7 +323,7 @@ public sealed class TickTurnModel : IPlanningTurnModel
         // difference is that a client's travels first.
         if (run.NetService.Type == NetGameType.Host)
         {
-            DuelTickScheduler.Submit(action, LocalContext.NetId ?? 0UL);
+            DuelPlayScheduler.Submit(action, LocalContext.NetId ?? 0UL);
         }
         else
         {

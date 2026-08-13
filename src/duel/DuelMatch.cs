@@ -151,7 +151,7 @@ public static class DuelMatch
         DuelLayout.Reset();
         Turns.DuelTurnModel.Reset();
         Turns.DuelPace.Reset();
-        Turns.DuelTickScheduler.Reset();
+        Turns.DuelPlayScheduler.Reset();
         Turns.LockInPlanView.ClearInitiative();
         MaskedModifiers = null;
     }

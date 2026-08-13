@@ -50,10 +50,10 @@ public static class DuelLockInPatch
 
         // **The paced model books it a tick instead of ordering it by arrival.** Same reason the
         // lock-in model holds it: the host must not let the moment a packet landed decide when a
-        // play resolves. See DuelTickScheduler.
+        // play resolves. See DuelPlayScheduler.
         if (DuelTurnModel.Current is TickTurnModel)
         {
-            DuelTickScheduler.Submit(action, senderId);
+            DuelPlayScheduler.Submit(action, senderId);
             return false;
         }
 

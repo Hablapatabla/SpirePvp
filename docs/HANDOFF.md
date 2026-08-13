@@ -997,7 +997,24 @@ the cooldown or plays stack up behind their own animations.
 speed there changes how a whole act feels. It wants its own decision rather than being smuggled in
 with this one.
 
-**Slice 2 is in (2026-08-12, unplayed): each duelist has their own cadence.** Reported from the
+**Slice 2, second attempt (2026-08-12, unplayed): fair ordering, not wall-clock buckets.** The
+first attempt bucketed plays by 0.4s ticks and changed nothing observable, and the log said why —
+`booked … for 1 into tick 0/4/5` against `booked … for 1001 into tick 10/11`. **Two players rarely
+act inside the same 0.4s, so bucketing by time is ordering by time.**
+
+The case that settled it: one player had played three cards, the other then played their *first*, a
+Defend, and it "got stiffed" — the Strike "hovering in the air" while the Defend waited. Nothing was
+out of order by time. It was out of order by **fairness**: with one executor and a readable dwell
+after each play, three cards own the stream for over a second, so a first play arriving during them
+is not instant. It is fifth.
+
+`DuelPlayScheduler` now keeps **one card in flight at a time** — nothing is enqueued while the
+executor is working, so the choice of who goes next is made fresh instead of frozen into ids
+seconds earlier — and picks by **each player's own position in their own queue**. Your first beats
+their second; your second beats their third; ties go to initiative. Indices reset once the pool
+drains and the board is still, so each exchange starts even.
+
+**The old note, kept because the reasoning still holds:** Reported from the
 first paced playtest — two Defends queued a clear second before the opponent's Strike still did not
 land first — and the engine explains it exactly. `ActionQueueSet` does keep one queue per player,
 and then `GetReadyAction` flattens them by taking the globally lowest action id, which the host
