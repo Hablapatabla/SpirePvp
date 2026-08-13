@@ -686,6 +686,29 @@ mechanic. Note `HittableEnemies` is **not** patchable — it has no acting-playe
      a message sent as each card is queued.
   3. **Resolution is quantised to a tick.**
 
+  **The engine already keeps a queue per player, and then flattens them by submission time.**
+  Found 2026-08-12 after the first paced playtest, where the report was that two Defends queued a
+  clear second before the opponent's Strike still did not block it: "it seemed as though they were
+  semi queued based on time of play as opposed to each player having their own queue".
+
+  `ActionQueueSet` really does hold one `ActionQueue` per player — the log says
+  `Enqueueing action … to player queue owned by 1001` — and `GetReadyAction` walks them all and
+  picks `gameAction2.Id < gameAction.Id`, the globally lowest action id. Ids are handed out by the
+  host in arrival order, so the per-player structure collapses into one stream ordered by *when you
+  clicked*, which is the thing this mode was supposed to stop doing.
+
+  **`ActionQueue.isPaused` is the seam, and it must not be used locally.** `GetReadyAction` skips a
+  paused queue's play-phase actions and takes the other player's action instead, so the engine can
+  genuinely run the two independently. But pausing a queue changes *which action executes next*,
+  which is sim-visible: a client pausing on its own wall clock would diverge from the host within a
+  card. Per-player cadence therefore has to be decided once, by the host, and expressed in the ids
+  it assigns — which is exactly what bucketing is.
+
+  **And the global beat compounds it.** `DuelPace` leaves its gap between *any* two cards, so two
+  players sharing one stream each get half their own cadence. The beat belongs between consecutive
+  cards of the **same** player; between two different players' cards it should be short or nothing,
+  because those are the exchanges the mode exists to make readable.
+
   **What quantising actually requires, which is easy to get half-right:** bucketing the two players'
   requests by tick removes the *sub-tick* part of the latency edge, and then leaves a real question —
   what orders two plays that land in the same bucket? Arrival order inside the bucket puts the whole
