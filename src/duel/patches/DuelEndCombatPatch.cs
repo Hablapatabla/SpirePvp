@@ -6,6 +6,7 @@ using MegaCrit.Sts2.Core.Logging;
 using MegaCrit.Sts2.Core.Nodes.Combat;
 using MegaCrit.Sts2.Core.Nodes.HoverTips;
 using MegaCrit.Sts2.Core.Nodes.Rooms;
+using MegaCrit.Sts2.Core.Rooms;
 using MegaCrit.Sts2.Core.Runs;
 
 namespace SpirePvp.Duel.Patches;
@@ -34,7 +35,7 @@ namespace SpirePvp.Duel.Patches;
 /// the other end of the combat: a vanilla teardown replaced in one line, inheriting every omission
 /// silently. `DuelArena` had to mirror `EnterMapPointInternal` step for step and six quiet omissions
 /// were found one at a time. So here is the same table for this method, in vanilla's order. **It is
-/// an audit, not a changelog: most rows are still skipped, and the two that are not are marked.**
+/// an audit, not a changelog: most rows are still skipped, and the three that are not are marked.**
 ///
 /// | # | Vanilla step | Here |
 /// |---|---|---|
@@ -59,7 +60,7 @@ namespace SpirePvp.Duel.Patches;
 /// | 21 | `ActionExecutor.Unpause()` | **done** |
 /// | 22 | `SetCombatState(NotInCombat)` | **done** |
 /// | 23 | `NRunMusicController.UpdateTrack()` | skipped — cosmetic, and the result screen changes the music anyway |
-/// | 24 | `CombatEnded?.Invoke(room)` | **skipped, and it is the prime suspect for "the killing blow hangs in mid-air".** `NPlayerHand`, `NCombatUi`, `NCreature`, `NTargetManager` and `NCombatRoom` all subscribe, and that is the engine's own signal to wind the combat presentation down. **It was not added tonight on purpose:** `NCardPlayQueue.AnimOut` hands locally-owned queued cards back to the hand, and three `NCard` double-frees per match are already on the books from that path — so raising an event that plausibly runs it a second time, with no way to play the result, would risk making a known bug worse to fix a cosmetic one. Whoever picks this up should find the *first* free before adding this line |
+/// | 24 | `CombatEnded?.Invoke(room)` | **added 2026-08-13.** The engine's own signal to wind the combat presentation down, and two reports were the same missing line: the play area still visible dimly behind the result screen, and faint corner brackets left framing a duelist. It stayed skipped while `NCardPlayQueue.AnimOut` would have re-created the `NCard` double-frees; `DrainPlayQueue` now empties the queue first, which is the only order that works — see both methods |
 ///
 /// **The through-line, and it is the one `DuelArena` learned:** the reason to skip a step has to be
 /// a property of the duel, not "it did not seem to matter". Rows 6, 9 and 24 are the ones where
@@ -105,13 +106,18 @@ public static class DuelEndCombatPatch
         // Row 12. Nothing else takes a hover tip down on the way to the result screen.
         NHoverTipSet.Clear();
 
-        // Row 24, the half of it that is safe — and the fix for the three `NCard` double-frees.
-        // See KillPendingQueueTweens.
-        KillPendingQueueTweens();
+        // Row 24, in the only order that works. **The drain must come first**: `AnimOut` ends with
+        // `_playQueue.Clear()`, so a tween-killer run afterwards iterates an empty queue and kills
+        // nothing while the tweens it just created stay live — which is precisely how raising this
+        // event would otherwise reintroduce the `NCard` double-frees. See DrainPlayQueue.
+        DrainPlayQueue();
 
-        // Row 24's *presentation* half, which is what a player actually sees is missing. See
-        // FadeCombatPresentation.
-        FadeCombatPresentation();
+        if (!RaiseCombatEnded())
+        {
+            // The event could not be raised, so nothing wound the presentation down. Fall back to
+            // the one line that matters most to a player — see FadeCombatPresentation.
+            FadeCombatPresentation();
+        }
 
         DuelResult.ShowFor(turnState.State);
 
@@ -225,7 +231,28 @@ public static class DuelEndCombatPatch
         fade.TweenProperty(playContainer, "modulate", Colors.Transparent, 0.25);
     }
 
-    private static void KillPendingQueueTweens()
+    /// <summary>
+    /// Empties the play queue *before* vanilla's wind-down can, which is what makes row 24 safe.
+    ///
+    /// **Killing the tweens is not enough on its own, and the ordering is the whole point.**
+    /// `NCardPlayQueue.AnimOut` — reached from `NCombatUi.OnCombatEnded`, i.e. from the event
+    /// <see cref="RaiseCombatEnded"/> raises — starts `TweenCardForCancellation` for every play not
+    /// owned locally, that being every one of the opponent's queued cards. That is the exact 0.5s
+    /// fade ending in `QueueFreeSafely` whose callback outlived the result screen and produced three
+    /// `NCard` double-frees per match. And `AnimOut` finishes with `_playQueue.Clear()`, so a killer
+    /// run *after* it iterates nothing while the tweens it created stay live. Before it, they do not
+    /// exist yet.
+    ///
+    /// So the queue is emptied here, leaving `AnimOut` a no-op: it iterates an empty list, starts no
+    /// tweens and re-parents nothing, while every other subscriber to the event still gets to run.
+    ///
+    /// **The card nodes are deliberately not freed.** Something already frees them with the rest of
+    /// the scene — that is what the double-free was a *second* free of — so freeing them here would
+    /// re-create the same bug from the other end. They are left parented, and
+    /// `NCombatUi.PostCombatCleanUp` fades the container they sit in on its way to the result
+    /// screen.
+    /// </summary>
+    private static void DrainPlayQueue()
     {
         NCardPlayQueue? queue = NCardPlayQueue.Instance;
         if (queue == null)
@@ -243,10 +270,78 @@ public static class DuelEndCombatPatch
             }
         }
 
-        if (killed > 0)
+        int drained = queue._playQueue.Count;
+        queue._playQueue.Clear();
+
+        if (drained > 0)
         {
-            Log.Warn($"[SpirePvp] duel teardown: killed {killed} pending play-queue tween(s) so a "
-                     + "cancellation fade cannot free a card node the result screen has already taken");
+            Log.Warn($"[SpirePvp] duel teardown: drained {drained} queued play(s), killing {killed} "
+                     + "tween(s), so no cancellation fade can free a card node the result screen has "
+                     + "already taken");
+        }
+    }
+
+    /// <summary>
+    /// Row 24 of the audit: raise `CombatManager.CombatEnded`, which is the engine's own signal to
+    /// wind the combat presentation down.
+    ///
+    /// **This is what was missing, and two reports were the same bug.** 2026-08-13: *"can still see
+    /// the card and background of the match dimly in the death screen"* and the faint corner
+    /// brackets left framing a duelist on the result screen. `NCombatUi`, `NCreature`, `NPlayerHand`,
+    /// `NTargetManager` and `NCombatRoom` all subscribe — it is how the hand animates out, how
+    /// intents and orbs are hidden, and how `PostCombatCleanUp` fades the play container. A duel
+    /// never raised it, and the room is not exited while the result screen is up, so the whole combat
+    /// scene simply sat there underneath.
+    ///
+    /// It was left skipped until now for a good reason that has since been paid off: the wind-down
+    /// runs `NCardPlayQueue.AnimOut`, which would have re-created the `NCard` double-frees. See
+    /// <see cref="DrainPlayQueue"/>, which must run first.
+    ///
+    /// **Every subscriber was checked, because two of the eight are not presentation.**
+    /// `NetCombatCardDb.OnCombatEnded` drops its pile `ContentsChanged` subscriptions and
+    /// unsubscribes itself — cleanup, and an argument *for* raising this rather than against: not
+    /// raising it leaves those subscriptions alive on a run whose combat is over, which is the
+    /// static-state-outliving-a-run trap this project keeps paying for, and `DuelRematch` keeps the
+    /// process alive across matches. `RewardSynchronizer.OnCombatEnded` flushes buffered reward
+    /// messages, which is empty here by construction: race combats are ordinary combats, this patch
+    /// does not fire for them (its guard is the duel phase), so vanilla has already raised this event
+    /// and drained that buffer at the end of every fight on the way to the arena.
+    ///
+    /// The other six — `NCombatUi`, `NCreature`, `NPlayerHand`, `NTargetManager`,
+    /// `NMultiplayerPlayerState` and `NCombatRoom`'s controller-navigation restriction — are all
+    /// presentation, and are the point.
+    ///
+    /// **Returns false rather than throwing if the event cannot be raised.** It is a C# event, so
+    /// only its declaring type may invoke it normally; this goes through the compiler-generated
+    /// backing field. If a game update renames or restructures that, the correct behaviour is the
+    /// one this mod already had — no wind-down — rather than an exception inside a teardown that is
+    /// also the path a *result screen* is on.
+    /// </summary>
+    private static bool RaiseCombatEnded()
+    {
+        try
+        {
+            if (RunManager.Instance?.State?.CurrentRoom is not CombatRoom room)
+            {
+                return false;
+            }
+
+            // Vanilla's own two call sites do `this.CombatEnded?.Invoke(room)`; from outside the
+            // declaring type the delegate has to come off the field.
+            if (AccessTools.Field(typeof(CombatManager), nameof(CombatManager.CombatEnded))
+                    ?.GetValue(CombatManager.Instance) is not Action<CombatRoom> handlers)
+            {
+                return false;
+            }
+
+            handlers(room);
+            Log.Warn("[SpirePvp] duel teardown: raised CombatEnded — combat presentation wound down");
+            return true;
+        }
+        catch (Exception e)
+        {
+            Log.Error($"[SpirePvp] duel teardown: could not raise CombatEnded — {e.Message}");
+            return false;
         }
     }
 }
