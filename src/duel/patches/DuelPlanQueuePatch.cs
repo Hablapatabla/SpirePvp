@@ -97,7 +97,7 @@ public static class DuelPlanQueuePatch
     [HarmonyPostfix]
     public static void AfterQueuePosition(NCard card, int index, ref Vector2 __result)
     {
-        if (!DuelSession.IsDuelActive || DuelTurnModel.Current is not LockInTurnModel)
+        if (!DuelSession.IsDuelActive || DuelTurnModel.Current is not IPlanningTurnModel)
         {
             return;
         }
@@ -121,7 +121,7 @@ public static class DuelPlanQueuePatch
     /// </summary>
     private static NCard? PlannedNodeIn(NCardPlayQueue queue, GameAction action)
     {
-        if (!DuelSession.IsDuelActive || DuelTurnModel.Current is not LockInTurnModel)
+        if (!DuelSession.IsDuelActive || DuelTurnModel.Current is not IPlanningTurnModel)
         {
             return null;
         }

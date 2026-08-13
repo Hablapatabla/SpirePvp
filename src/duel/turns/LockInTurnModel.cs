@@ -72,7 +72,7 @@ namespace SpirePvp.Duel.Turns;
 /// five-round playtest. It stops being survivable the moment anything *reads* the buffer, and
 /// `ReservedEnergy` reads it: a client would have been charged round 1's cards for the whole match.
 /// </summary>
-public sealed class LockInTurnModel : IDuelTurnModel
+public sealed class LockInTurnModel : IPlanningTurnModel
 {
     public string Name => "turn-based (lock-in)";
 
@@ -213,6 +213,14 @@ public sealed class LockInTurnModel : IDuelTurnModel
     /// in exactly the sense those care about.
     /// </summary>
     public bool LockedIn => _localLockedIn || _localDone;
+
+    /// <summary>
+    /// Committed, or watching a committed batch play out — either way this hand is shut.
+    ///
+    /// The paced model answers false to the same question, which is the whole difference between
+    /// the two: there, queueing never stops.
+    /// </summary>
+    public bool HandIsClosed => LockedIn || ResolvingBatch;
 
     /// <summary>Declared finished for the turn, which the button label reads to stop offering a lock-in.</summary>
     public bool Done => _localDone;

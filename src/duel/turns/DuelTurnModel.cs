@@ -88,10 +88,17 @@ public static class DuelTurnModel
 
     private static void OnTurnStarted(CombatState state)
     {
-        if (state.CurrentSide == CombatSide.Player && Current is LockInTurnModel lockIn)
+        if (state.CurrentSide != CombatSide.Player)
+        {
+            return;
+        }
+
+        if (Current is LockInTurnModel lockIn)
         {
             LockInPlanView.ShowInitiative(lockIn.CurrentLeader());
         }
+
+        (Current as TickTurnModel)?.OnTurnStarted();
     }
 
     /// <summary>The host's ruling on who takes the opening initiative, from `DuelStartMessage`.</summary>
@@ -116,12 +123,13 @@ public static class DuelTurnModel
 
     private static IDuelTurnModel Build(IRunState? runState)
     {
-        // Turn-based is not built yet, so a run configured for it still plays blitz — which is the
-        // state DESIGN §7 recorded and accepted, and this is where that ends when the lock-in model
-        // lands. Logged rather than silent, because "I picked turn-based and got blitz" is
-        // otherwise indistinguishable from the modifier not being read at all.
+        // **Real-time means paced now** (M8.5). `BlitzTurnModel` — submit as you click, no cooldown,
+        // no queue — is no longer selectable and is kept only as the seam's trivial case: it is the
+        // accurate statement of what "never defer" looks like, and the thing a new model is diffed
+        // against. Deciding it here rather than behind a third modifier was Lucas's call: the paced
+        // version *is* what the real-time mode should be, so it takes the same lobby entry.
         return DuelMatch.IsTurnBased(runState)
             ? new LockInTurnModel()
-            : (IDuelTurnModel)new BlitzTurnModel();
+            : (IDuelTurnModel)new TickTurnModel();
     }
 }

@@ -37,7 +37,7 @@ public static class DuelQueuedCardHighlightPatch
 {
     public static void Postfix(NCardGrid __instance, IReadOnlyList<CardModel> cardsToDisplay)
     {
-        if (!DuelSession.IsDuelActive || DuelTurnModel.Current is not LockInTurnModel)
+        if (!DuelSession.IsDuelActive || DuelTurnModel.Current is not IPlanningTurnModel)
         {
             return;
         }

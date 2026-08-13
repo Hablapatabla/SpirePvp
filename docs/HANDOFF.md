@@ -965,6 +965,38 @@ what was planned, while the queue still holds the node.
 
 Still open: whether discarding a queued card should cancel its play *loudly* rather than silently.
 
+### M8.5 slice 1 is in (2026-08-12, unplayed): real-time is paced now
+
+**`1v1 Duel: Real-Time` no longer means unpaced blitz.** `TickTurnModel` replaces
+`BlitzTurnModel` in that slot: your first play goes instantly, everything after it leaves on a
+**0.4s cooldown**, and what you click in between is *queued* rather than lost — drawn in the play
+queue exactly as a planned card is in turn-based. `BlitzTurnModel` stays in the tree as the seam's
+trivial case ("never defer") but nothing selects it.
+
+**Watch the naming.** *Blitz* and *Rapid* in the Duel lobby are **clock presets** — chess terms for
+bank size — and are untouched by any of this. The turn model called `DuelBlitz` in code is the one
+that changed, and its lobby entry already read "Real-Time"; its *description* is now wrong
+("actions resolve in the order they are made, so speed decides trades") and wants a `.pck` change
+when slice 2 lands.
+
+**Two slices remain, and the mode is half a mode without them:**
+
+2. **Tick bucketing on the host.** Ordering is still arrival order today, so the host keeps its
+   inherent half-RTT edge. Bucketing alone does not fix that — it removes the *sub-tick* part and
+   leaves the question of what orders two plays inside one bucket. **Order within a bucket by
+   initiative** (the M9 rule that now exists) and the edge is gone rather than shortened. Slice 2
+   also wants in-flight plays tracked through to execution, which closes the reservation window
+   noted on `TickTurnModel.ReservedEnergy`.
+3. **The opponent's queue on the wire**, drawn on their side. Their unsubmitted plays are not
+   broadcast today, so you can only see what has already been released — at most 0.4s of warning,
+   which is not enough to read or answer. This is a deliberate change to the information rules
+   (DESIGN §1) and was decided as such.
+
+The three patches that serve a deferring model now ask for `IPlanningTurnModel` rather than for
+`LockInTurnModel` — energy reservation, the play queue, and the queued-card highlight are owed by
+any model that holds plays, and a second such model is exactly when that stops being an
+implementation detail.
+
 ### M9's initiative is in (2026-08-12, unplayed)
 
 **Whoever reached the arena first leads, and it alternates every turn after** — Lucas's rule,

@@ -69,7 +69,7 @@ public static class DuelPlanEnergyPatch
             return;
         }
 
-        if (DuelTurnModel.Current is not LockInTurnModel model)
+        if (DuelTurnModel.Current is not IPlanningTurnModel model)
         {
             return;
         }
@@ -95,7 +95,7 @@ public static class DuelPlanEnergyPatch
             return;
         }
 
-        if (model.LockedIn || model.ResolvingBatch)
+        if (model.HandIsClosed)
         {
             // Locked in means locked in. Without this the hand stays live while you wait for the
             // opponent, and anything played then bypasses the batch entirely: on the host it goes

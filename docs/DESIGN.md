@@ -670,6 +670,40 @@ mechanic. Note `HittableEnemies` is **not** patchable — it has no acting-playe
   already pass through that path, so this may be less a feature to build than one to stop
   suppressing.
 
+  **Three decisions taken 2026-08-12, which settle its shape:**
+
+  1. **It replaces the real-time turn model rather than joining it.** `1v1 Duel: Real-Time` starts
+     meaning this, and `BlitzTurnModel` stops being reachable. **Note the name collision before
+     touching anything: "Blitz" and "Rapid" in the Duel lobby are *clock presets*** — chess terms
+     for how much time each bank gets — and are unaffected by any of this. The turn model that
+     happens to be called `DuelBlitz` in code is the one being replaced, and its lobby text already
+     reads "Real-Time"; only its *description* is now wrong ("actions resolve in the order they are
+     made, so speed decides trades"), which is a `.pck` change.
+  2. **The opponent's whole queue is visible, including plays their cooldown has not released yet.**
+     That is a deliberate change to the information rules (§1), and it is the point of the mode:
+     seeing only what is already resolving shows you their next card at most 0.4s early, which is
+     not enough to read or answer. Their unsubmitted queue is not on the wire today, so this needs
+     a message sent as each card is queued.
+  3. **Resolution is quantised to a tick.**
+
+  **What quantising actually requires, which is easy to get half-right:** bucketing the two players'
+  requests by tick removes the *sub-tick* part of the latency edge, and then leaves a real question —
+  what orders two plays that land in the same bucket? Arrival order inside the bucket puts the whole
+  problem straight back, because the host's own requests never cross the network. **Order within a
+  bucket by initiative** — the M9 rule that already exists, whoever reached the arena first,
+  alternating each turn — and the half-RTT advantage is gone rather than merely shortened. This also
+  gives the initiative rule a second job, which is a point in its favour: the race's reward is the
+  same in both modes.
+
+  Build it in three slices, each playable on its own:
+
+  1. **The cooldown and the local queue.** Instant first play, ~0.4s before the next, plays queued
+     in between and drawn in the play queue as the lock-in model already draws planned cards. Needs
+     no message and no host change.
+  2. **Tick bucketing on the host**, with initiative breaking ties inside a bucket.
+  3. **The opponent's queue on the wire**, drawn on their side of the screen — the split
+     `DuelPlanQueuePatch` already does for the lock-in model.
+
   Open questions for whoever builds it:
   - **Cooldown is a submit-rate limit; the pacing built for the lock-in model is a resolve-rate
     limit.** They are different mechanisms and this milestone needs both — `DuelPace` slows the
