@@ -253,6 +253,24 @@ and not in the general partition case `DuelDisconnect.Declare` documents. The ho
 see it at all: `RunLobby.OnDisconnectedFromClientAsHost` has the `NetErrorInfo`, logs it, and then
 raises `RemotePlayerDisconnected` carrying only the player id.
 
+**Play ordering cannot be playtested solo, and it looks like a bug when you try.** Found
+2026-08-12, after three sessions of "it feels like the client is waiting behind the host". It is —
+because one person driving two windows plays the host's cards, alt-tabs, and *then* plays the
+client's. Both logs record it outright: `MuteInBackground: FocusOut` / `FocusIn` alternating all
+duel, and plays landing in bursts per seat (host at `:57 :57 :58`, client at `:59 :00`).
+
+The consequence is sharper than "the test is unrealistic". **`DuelPlayScheduler` had a pool depth of
+exactly 1 at every single booking across a whole duel**, and `[lowest index]` on every release — so
+the index rule, the tie-break and initiative's effect on ordering were all **inert for the entire
+session**. A contested ordering needs two plays pending at the same moment, and one mouse cannot
+produce one. Anything you conclude about fairness from a solo session is a conclusion about nothing.
+
+Two things follow. **Judge the dwell (`TickTurnModel.BeatSeconds`) on how a single card reads, never
+on how the two seats interleave** — solo, the second seat always waits behind the first seat's whole
+burst, and a longer dwell makes that worse in a way it would not be in a real match. And **the
+scheduler's own log lines are the check**: `pending (N waiting)` with N ≥ 2, or a release whose
+reason is `[tie …]`, is the evidence that a real ordering happened. Neither has ever appeared.
+
 **Test on the same path, not divergent ones.** The two runs share a seed and therefore a map,
 and `RunLocationTargetedMessageBuffer` gates on **location, not identity** — so two players
 standing on the same coord deliver every message to each other. Divergent-path testing hides an
