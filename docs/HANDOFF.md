@@ -740,6 +740,49 @@ Keep that split if you extend this.
 
 ## Immediate next step
 
+### START HERE — state as of 2026-08-13 midday, after a morning of two-client playtests
+
+**Confirmed working in play today** (so do not re-test these): the initiative arrow no longer leaks
+onto the map; the race timer shows on both clients with clocks on (which also retires the old "client
+doesn't show the clock" report — it was vanilla's `NRunTimer`, and the mod's clock had simply never
+been switched on in any run); **dying in the race now ends the match**; the arena heal fires **on
+arrival, before the deck review**, at the right time; and the campfire cue plays.
+
+**THE ONE OPEN THREAD, and it voids matches: the arena heal's send does not take.**
+
+Twice now, `State divergence detected! … Context: After player turn start` on **checksum ID 0** —
+the duel's first, before a card is played. Both times: each client healed its **own** duelist (host
+`56 -> 70`, client `52 -> 66`) and **neither logged applying the opponent's value**, so both machines
+went into the duel holding a stale opponent.
+
+The arrival handler definitely ran on both — each logged `opponent N arrived with M cards`, which
+prints *after* the HP call — so `DuelRendezvous.ApplyOpponentHp` took an early return and said
+nothing. **It now logs both early returns, with the player count**, so a single line in the next log
+names which of three it is:
+
+1. the `hp`/`maxHp` fields added to `DuelArrivedMessage` are not crossing the wire,
+2. `RunManager.Instance.State` is null on receipt, or
+3. the sender is not found among `State.Players`.
+
+**The rule this cost two runs to learn, and it is not written anywhere else:** the pre-combat state
+sync does **not** carry your own state to the peer — it fixes *your* copy of *them*. So any local
+self-mutation before it is invisible on the opponent's machine forever, and the duel's first checksum
+is what catches it. This is why the heal has to be *sent*, exactly as the decklist is.
+
+**A safety net is in place so matches are playable meanwhile:** `DuelArenaRest.ReconcileAfterSync`
+runs after `WaitForSync`, over both duelists, on both machines — the placement that provably agrees.
+It is **idempotent** (it assigns the target a rest reaches rather than adding 30% again, and skips a
+duelist this machine already healed on arrival), so it settles the two sides without double-healing.
+If the send is fixed it becomes a no-op rather than a second mechanism to remove.
+
+**Still unplayed and queued behind that:** the timeline ordering in `DuelPlayScheduler` (`PlayAt`
+plus the cooldown moved into the scheduler), the alternating tie-break, the 0.55s dwell — and the
+whole `overnight/2026-08-13` branch, which is **unmerged** and carries the AoE/`HittableEnemies`
+work. Read `docs/OVERNIGHT_REPORT.md` before merging it: that change patches a getter this document
+had called unpatchable since M1, with an argument, and it has never run.
+
+
+
 ### Read this first (written 2026-08-12, for whoever picks this up cold)
 
 **A duel now has two modes and both were rebuilt on 2026-08-12. Almost everything below this
