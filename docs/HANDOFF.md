@@ -760,6 +760,35 @@ heading is built and *not yet played*, so treat "it works" as a claim, not a fac
 which add no patches (`DuelTurnModel.ShouldDefer`'s guard, and the scheduler rewrite/rename).
 **Those two have never been run in game at all** — they compile and nothing more.
 
+### Dying in the race now loses the match (2026-08-12, unplayed)
+
+Reported: *"I died to the boss and it didn't end the run, giving the opponent the victory."* The
+cause was a **route**, not a mechanic — `DuelResult.Arm()` is called from `DuelArena`, i.e. on arena
+entry, so for the whole of the race nothing was watching a duelist die, and the match carried on
+with a corpse in it.
+
+**Vanilla is right not to end it.** `CreatureCmd.Kill` gates the game-over screen on *every* player
+being dead; in a race the opponent is alive in their own combat, so the party has not wiped. The
+co-located-party assumption again, this time producing a bug in the *ending* rather than in a room.
+
+`DuelRaceDeath` hooks `CombatManager.CombatEnded` **from run start**, and declares locally then
+broadcasts, mirroring `DuelResign`. Two things about it worth not re-deriving:
+
+- **It declares locally on purpose.** Your death in a race is a fact only you can see — the runs are
+  decoupled and no state sync covers a room the opponent is not standing in — so it must be *sent*.
+  That is not a breach of host authority: that rule exists so two sims cannot reach different
+  conclusions from *shared* state, and here there is none to disagree about.
+- **`CombatEnded`, never a poll on `IsDead`.** Revival effects run inside combat, so a probe on the
+  flag would declare a loss for a player about to stand back up.
+
+`DuelEndReason.RaceDeath` is its own reason with its own result lines, because the loser never
+fought their opponent and should not be told they lost a duel they never had. Adds no patch class —
+it is an event subscriber, so the count stays 69.
+
+**Untested corner:** both players dying at nearly the same moment would have each broadcast a win
+for the other. Rare (separate combats, and it needs the same second), and the same crossing case
+`DuelDrawPrompt` already handles for offers — but it is not handled here.
+
 ### Telemetry added 2026-08-12, and what each line answers
 
 `DuelTelemetry` and `DuelAoeProbePatch` **log and change nothing** — added at Lucas's request so the
