@@ -108,6 +108,33 @@ public static class DuelRematchPatch
                 (int)(Node.DuplicateFlags.Scripts | Node.DuplicateFlags.Groups));
             rematch.Name = RematchButtonName;
 
+            // **Drop the cloned hotkey icon, before the clone enters the tree.**
+            //
+            // `%`-prefixed lookups resolve against the *scene* that declares the unique name, and a
+            // duplicated subtree carries no such registration — so `NHotkeyIcon._Ready`'s
+            // `GetNode<TextureRect>("%ControllerIcon")` and `GetNode<Control>("%KeyboardIcon")` both
+            // fail on our copy. Measured 2026-08-13: four `Node not found` errors per session, two
+            // per result screen on each client, from exactly this.
+            //
+            // Removing it rather than repairing the lookups is the right shape twice over: those are
+            // hard `GetNode` calls, so the fields are left null and `UpdateInput` would NRE on the
+            // first one that touched them — a latent crash nothing happens to call today. And the
+            // Rematch button has **no hotkey bound**, so an icon on it could only ever show the main
+            // menu button's key and invite someone to press it.
+            //
+            // Before `AddChild` for the same reason the material duplicate is: `_Ready` runs on
+            // entering the tree, and after that the errors have already been logged.
+            //
+            // **Plain `QueueFree`, not `QueueFreeSafely`.** That helper hands an `IPoolable` node
+            // back to `NodePool`, and this one is a *duplicate* that never came from the pool —
+            // returning it would put a node in the pool that nothing took out, which is the same
+            // family as the `NCard` double-free fixed alongside this.
+            if (rematch.GetNodeOrNull("HotkeyIcon") is Node hotkeyIcon)
+            {
+                rematch.RemoveChild(hotkeyIcon);
+                hotkeyIcon.QueueFree();
+            }
+
             // **The hover glow lives in a ShaderMaterial, and a duplicate shares it by reference.**
             // `NReturnToMainMenuButton._Ready` caches `GetNode<TextureRect>("Image").Material` as
             // `_hsv`, and every hover tween writes that material's `s` and `v` parameters directly
