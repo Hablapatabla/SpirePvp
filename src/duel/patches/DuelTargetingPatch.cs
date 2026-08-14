@@ -6,6 +6,7 @@ using MegaCrit.Sts2.Core.Entities.Creatures;
 using MegaCrit.Sts2.Core.Entities.Players;
 using MegaCrit.Sts2.Core.Models;
 using MegaCrit.Sts2.Core.Nodes.Combat;
+using MegaCrit.Sts2.Core.Runs;
 
 namespace SpirePvp.Duel.Patches;
 
@@ -38,18 +39,64 @@ public static class DuelTargetingPatch
 {
     public static void Postfix(CardModel __instance, Creature? target, ref bool __result)
     {
-        // Vanilla already allowed it, or we aren't duelling.
-        if (__result || !DuelSession.IsDuelActive)
+        if (!DuelSession.IsDuelActive)
         {
             return;
         }
 
-        if (__instance.TargetType != TargetType.AnyEnemy)
+        // **Narrowing comes first, because it is the case where vanilla says yes.** Every patch in
+        // this file used to open with `if (__result) return;` — they only ever widened, admitting the
+        // opponent for `AnyEnemy`. The mirror image went unnoticed until 2026-08-13: a *friendly*
+        // target type in a duel resolves to the opponent, because they are a player on your own side.
+        if (NarrowedFriendlyTarget(__instance.TargetType, __instance.Owner, target) is bool narrowed)
+        {
+            __result = narrowed;
+            return;
+        }
+
+        // Vanilla already allowed it.
+        if (__result || __instance.TargetType != TargetType.AnyEnemy)
         {
             return;
         }
 
         __result = IsOpponentOf(__instance.Owner, target);
+    }
+
+    /// <summary>
+    /// The corrected answer for a target type that means "a friend", or null when the type means
+    /// something else and the caller should carry on.
+    ///
+    /// **A duel has no allies, and the engine has no way to know that.** Reported 2026-08-13: *"I was
+    /// able to use skill pot on the wrong person."* `PotionModel.IsValidTarget` answers
+    /// `TargetType.AnyPlayer` with a bare `return target.IsPlayer` — right in co-op, where handing a
+    /// teammate a Skill Potion is the entire point of the target type, and exactly wrong here, where
+    /// the other player is who you are trying to beat. The same reading of the same fact that makes
+    /// `Players.Count > 1` mean "co-op" throughout the engine (HANDOFF calls this the content-level
+    /// twin of the co-located-party assumption).
+    ///
+    /// - `AnyPlayer` — "any player, including yourself" — becomes **yourself, only**.
+    /// - `AnyAlly` — "any player *excluding* yourself" — has no valid target at all in a duel, which
+    ///   is the honest answer rather than a convenient one. The effect is unplayable, exactly as
+    ///   vanilla says of this type in singleplayer: "You should not see this."
+    ///
+    /// `AllAllies` is deliberately absent: it performs no target selection, so this is never asked
+    /// about it. It resolves through `CombatState`, and belongs with the AoE family in
+    /// `DuelAoeActor` rather than here.
+    /// </summary>
+    internal static bool? NarrowedFriendlyTarget(TargetType type, Player? owner, Creature? target)
+    {
+        switch (type)
+        {
+            case TargetType.AnyPlayer:
+                return owner != null && target != null && target == owner.Creature;
+
+            case TargetType.AnyAlly:
+                return false;
+
+            default:
+                return null;
+        }
     }
 
     /// <summary>
@@ -93,12 +140,21 @@ public static class DuelPotionTargetingPatch
 {
     public static void Postfix(PotionModel __instance, Creature? target, ref bool __result)
     {
-        if (__result || !DuelSession.IsDuelActive)
+        if (!DuelSession.IsDuelActive)
         {
             return;
         }
 
-        if (__instance.TargetType != TargetType.AnyEnemy)
+        // The half that matters most for potions: `AnyPlayer` is how a Skill Potion is handed to a
+        // teammate in co-op, and it let one be handed to the opponent here.
+        if (DuelTargetingPatch.NarrowedFriendlyTarget(__instance.TargetType, __instance.Owner, target)
+            is bool narrowed)
+        {
+            __result = narrowed;
+            return;
+        }
+
+        if (__result || __instance.TargetType != TargetType.AnyEnemy)
         {
             return;
         }
@@ -124,7 +180,24 @@ public static class DuelHoverTargetingPatch
 {
     public static void Postfix(NTargetManager __instance, Creature creature, ref bool __result)
     {
-        if (__result || !DuelSession.IsDuelActive)
+        if (!DuelSession.IsDuelActive)
+        {
+            return;
+        }
+
+        // The UI needs the narrowing too, and for the reason this file already documents about
+        // widening: targeting is validated more than once, independently, and fixing one is how you
+        // conclude wrongly that nothing happened. Here it is the hover that lets you *pick* the
+        // opponent for a friendly effect in the first place.
+        if (DuelTargetingPatch.NarrowedFriendlyTarget(
+                __instance._validTargetsType, LocalContext.GetMe(RunManager.Instance?.State?.Players
+                    ?? (IEnumerable<Player>)Array.Empty<Player>()), creature) is bool narrowed)
+        {
+            __result = narrowed;
+            return;
+        }
+
+        if (__result)
         {
             return;
         }
