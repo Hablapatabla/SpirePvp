@@ -16,8 +16,8 @@ namespace SpirePvp.Duel.Patches;
 /// shared. `NCustomRunModifiersList.GetAllModifiers` reads `GoodModifiers.Concat(BadModifiers)`,
 /// so patching here covers the UI and any other reader at once.
 ///
-/// The exclusivity sets are what make the tickboxes behave as radio buttons: exactly one turn
-/// model, one race clock and one duel clock — three groups, three decisions. That is vanilla's
+/// The exclusivity sets are what make the tickboxes behave as radio buttons: exactly one match
+/// format, one turn model, one race clock and one duel clock — four groups, four decisions. That is vanilla's
 /// own mechanism (`NCustomRunModifiersList` consults `MutuallyExclusiveModifiers` on every
 /// toggle), so we declare the groups rather than policing them.
 /// </summary>
@@ -28,28 +28,17 @@ public static class DuelModifierListPatch
     {
         List<ModifierModel> withDuel = new List<ModifierModel>(__result)
         {
-            // **Turn-based first, and this list is what orders the chips in the row.**
-            // `DuelLobbyPanel` promotes the tickboxes in the order vanilla built them, and vanilla
-            // builds them from this list — so the turn-model row reads left to right in the order
-            // written here. Turn-based leads because it is the default (`DuelHostFlow.DefaultPreset`)
-            // and the ticked chip sitting first is what makes the row read as "this one, or that
-            // one" rather than as a setting someone has changed. Swapped 2026-08-14 with the
-            // default, and the two must move together.
-            // **Match format is deliberately NOT registered yet — this is the switch that turns
-            // draft mode on, and it is the last line to flip, not the first.**
+            // **This list orders the chips inside every row.** `DuelLobbyPanel` promotes the
+            // tickboxes in the order vanilla built them, and vanilla builds them from here, so each
+            // row reads left to right in the order written below. In both rows the default is
+            // written first, which is what makes a row read as "this one, or that one" rather than
+            // as a setting someone has already changed.
             //
-            // The modifiers, the lobby row and the loc strings are all in place and build clean;
-            // what is missing is everything behind the chip (DESIGN §7b): suppressing Neow and the
-            // map, the host-owned draft itself, the three pick screens, and applying the loadout.
-            // Registering these two now would put a *selectable* Draft chip in the lobby that
-            // produces a run with no race, no draft and no way to the arena.
-            //
-            // Uncomment both lines together with the run-flow branch. They lead the list because
-            // they lead the lobby: the format decides which game is being played, where the turn
-            // model only decides how the duel inside it works.
-            //
-            // ModelDb.Modifier<MatchFormatRace>(),
-            // ModelDb.Modifier<MatchFormatDraft>(),
+            // Match format leads the whole list because it leads the lobby: the format decides
+            // which game is being played, where the turn model only decides how the duel inside it
+            // works. Order and default are one decision per row and have to move together.
+            ModelDb.Modifier<MatchFormatRace>(),
+            ModelDb.Modifier<MatchFormatDraft>(),
             ModelDb.Modifier<DuelTurnBased>(),
             ModelDb.Modifier<DuelBlitz>(),
             ModelDb.Modifier<RaceClockEight>(),
@@ -72,7 +61,7 @@ public static class DuelModifierListPatch
 public static class DuelModifierExclusivityPatch
 {
     /// <summary>
-    /// The three decisions — one source, because two readers need them.
+    /// The four decisions — one source, because two readers need them.
     ///
     /// The getter below turns these into vanilla's exclusivity sets (pick one, and the others
     /// untick). `DuelModifierMinimumPatch` reads the same groups to enforce the half vanilla does
@@ -84,15 +73,11 @@ public static class DuelModifierExclusivityPatch
     /// </summary>
     public static List<HashSet<ModifierModel>> DuelGroups() => new List<HashSet<ModifierModel>>
     {
-        // Uncomment with the registration above — an exclusivity set over two modifiers that are
-        // not in `GoodModifiers` would be a group vanilla never shows and
-        // `DuelModifierMinimumPatch` would still try to keep non-empty.
-        //
-        // new HashSet<ModifierModel>
-        // {
-        //     ModelDb.Modifier<MatchFormatRace>(),
-        //     ModelDb.Modifier<MatchFormatDraft>()
-        // },
+        new HashSet<ModifierModel>
+        {
+            ModelDb.Modifier<MatchFormatRace>(),
+            ModelDb.Modifier<MatchFormatDraft>()
+        },
         new HashSet<ModifierModel>
         {
             ModelDb.Modifier<DuelBlitz>(),

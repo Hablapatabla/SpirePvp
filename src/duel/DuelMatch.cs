@@ -71,6 +71,26 @@ public static class DuelMatch
     internal static bool IsPvpRunUnmasked(IRunState? runState) =>
         HasTurnModel(runState?.Modifiers ?? (IEnumerable<ModifierModel>)Array.Empty<ModifierModel>());
 
+    /// <summary>
+    /// True when this match is a draft rather than an Act 1 race (DESIGN §7b).
+    ///
+    /// **Read through <see cref="EffectiveModifiers"/> like every other agreed term**, so it gives
+    /// the same answer inside Neow's option generation, where `DuelNeowOptionsPatch` has blanked
+    /// the real list — which is precisely where this is asked, since a draft skips Neow.
+    /// </summary>
+    public static bool IsDraftMatch(IRunState? runState)
+    {
+        foreach (ModifierModel modifier in EffectiveModifiers(runState))
+        {
+            if (modifier is MatchFormatDraft)
+            {
+                return true;
+            }
+        }
+
+        return false;
+    }
+
     /// <summary>The agreed turn model; blitz unless the turn-based modifier is present.</summary>
     public static bool IsTurnBased(IRunState? runState)
     {
@@ -185,6 +205,8 @@ public static class DuelMatch
         Turns.DuelPace.Reset();
         Turns.DuelPlayScheduler.Reset();
         Turns.LockInPlanView.ClearInitiative();
+        DuelDraft.Disarm();
+        DuelDraft.Reset();
         MaskedModifiers = null;
     }
 
@@ -217,8 +239,18 @@ public static class DuelMatch
                  $"raceClock={RaceClockMinutes(runState)} min, duelClock={DuelClockMinutes(runState)} min, " +
                  $"seed '{runState.Rng.StringSeed}'");
 
-        DuelSession.ActivateRace();
-        RaceCoordinator.BeginRace();
+        // **A draft match has no race half at all**, so none of it is switched on: no race phase,
+        // no `RaceCoordinator`, and no race clock. Every patch gated on `DuelSession.IsRaceActive`
+        // is therefore inert for the whole run, which is the point — the race is the mod's riskiest
+        // phase and draft mode exists partly to delete it (DESIGN §7b).
+        //
+        // The arena node is still installed below: nobody walks to it, but `DuelArena` moves both
+        // clients to its coord, so it has to be a real map point with a real coord to move to.
+        if (!IsDraftMatch(runState))
+        {
+            DuelSession.ActivateRace();
+            RaceCoordinator.BeginRace();
+        }
 
         // Bank sizes only — the clocks cannot start yet, see OnRunLaunched.
         DuelClockService.Configure(RaceClockMinutes(runState), DuelClockMinutes(runState));
@@ -292,6 +324,12 @@ public static class DuelMatch
         Turns.DuelPace.Arm();
         Turns.DuelIncoming.Arm();
 
+        // Armed for every PvP run, not only draft ones. Arming is what makes a peer's first
+        // announcement audible, and "only when we need it" is the exact shape of the bug that has
+        // caught this project five times — here the host's opening pool broadcast is the first
+        // thing that happens, so a client that armed later would miss the message that starts it.
+        DuelDraft.Arm();
+
         // Started at run creation because the *race* bank is already counting (DESIGN §9): it
         // is the deadline for reaching the arena. During the race both clocks simply run down —
         // the players act continuously and simultaneously — and only in the duel does it become
@@ -323,5 +361,12 @@ public static class DuelMatch
         // to zero and no one ever lost on time. That is the same shape of failure as arming a
         // message handler too late: nothing throws, the feature is simply absent.
         DuelFlag.Arm();
+
+        // **Last, and after everything else is armed.** Beginning the draft broadcasts immediately,
+        // and the rest of this method is what makes the answers audible when they come back.
+        if (IsDraftMatch(runState))
+        {
+            DuelDraft.Begin(runState);
+        }
     }
 }

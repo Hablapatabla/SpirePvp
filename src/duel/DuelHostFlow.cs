@@ -73,8 +73,7 @@ public static class DuelHostFlow
     /// </summary>
     public static IReadOnlyList<ModifierModel> DefaultPreset => new List<ModifierModel>
     {
-        // Add `MatchFormatRace` here when the format group is registered — a default that names an
-        // unregistered modifier has no tickbox to match and ticks nothing, silently.
+        ModelDb.Modifier<MatchFormatRace>().ToMutable(),
         ModelDb.Modifier<DuelTurnBased>().ToMutable(),
         ModelDb.Modifier<RaceClockNone>().ToMutable(),
         ModelDb.Modifier<DuelClockNone>().ToMutable(),

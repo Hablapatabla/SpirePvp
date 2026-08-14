@@ -874,10 +874,34 @@ on 2026-08-14 before anything else was read:
 - **Nothing has been played on v0.111.0.** Confirm `83 patch classes applied cleanly (121 methods)`
   on first launch before trusting any in-game observation.
 
-#### The immediate next step: playtest the lock-in cancel, and the new lobby defaults
+#### The immediate next step: playtest the cards-only draft (2026-08-14, UNPLAYED)
 
-One turn-based duel covers all of it. Plan a card, lock in, cancel the lock-in — **the button must
-read "End Turn" afterwards, not "Lock In"**, and pressing it must be a deliberate choice to end the
+**Patch count moves to 85 classes** — `DuelDraftNeowPatch` and `DuelDraftScreenPatch`. Confirm the
+line on first launch as always.
+
+Host a Duel lobby and pick **Match: Draft** in the new first row. Both players get the same
+character (mirror), Neow is skipped, the run opens on the map screen and the draft goes up over it:
+**15 cards, 5 of each rarity, alternating picks, 7 each — the 15th is never taken, by design.**
+Whoever picks first **moves second** in the duel. Then the usual deck review and arena.
+
+What to watch, in the order it can go wrong:
+
+| What | How you know |
+|---|---|
+| The pool reaches the client | `draft: pool of 15 built` on the host, then `acknowledged the pool`. Repeated `no ack yet — repeating the pool` means the retry is doing its job; it should stop |
+| Both see the same pool shrink | The grid should lose exactly the card the other player took, and nothing else |
+| Turns alternate | Cards are unclickable on your opponent's turn (`DuelDraftScreenPatch`), clickable on yours |
+| Initiative is inverted | `draft: … picks first (and therefore moves second)`, then the arrow in the duel over the *other* player on turn 1 |
+| The deck is right | Starting deck **plus** 7 drafted cards — `draft: took 7 card(s) into the deck (N total)` |
+
+**Relics and potions are not drafted yet** — that is the next slice, and the loadout is otherwise
+the character's normal starter. Ending the run and starting a second draft in the same process is
+worth one try too, since that is what `Disarm`/`Reset` exist for.
+
+#### Also unplayed: the lock-in cancel and the lobby defaults
+
+Confirmed working by Lucas on 2026-08-14, but re-check if anything here regresses. Plan a card,
+lock in, cancel the lock-in — **the button must read "End Turn" afterwards, not "Lock In"**, and pressing it must be a deliberate choice to end the
 turn rather than a surprise. Then check the lobby opens on **Turn-Based** with **Fast** ticked, and
 that Turn-Based is the *first* chip in the row.
 

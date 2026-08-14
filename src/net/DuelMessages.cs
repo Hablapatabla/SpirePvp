@@ -621,3 +621,156 @@ public record struct DuelUnlockMessage : INetMessage
 
     public void Deserialize(PacketReader reader) => playCount = reader.ReadInt();
 }
+
+/// <summary>
+/// The whole draft, broadcast by the host after every pick (DESIGN §7b).
+///
+/// **Full state, not a delta, and that is the entire reason this is safe.** A draft is a shared
+/// ordered sequence of decisions across two clients, which is the shape this project has desynced
+/// on twice — the stale `_receivedChoices` list and the shared `_nextActionId`, both in HANDOFF.
+/// Every one of those bugs was an *increment* applied against a position the two peers disagreed
+/// about. A message that carries the complete pool, both pick lists and whose turn it is has no
+/// position to disagree about: a client that misses one, receives two out of order, or arrives late
+/// converges on the next broadcast, because the last message received is the truth and the earlier
+/// ones say nothing extra.
+///
+/// It costs nothing to do it this way. The pool is 15 cards and the draft is 14 picks, so the whole
+/// exchange is smaller than a single `DuelArrivedMessage` carrying a deck.
+///
+/// **The host is the only sender.** Clients request with <see cref="DraftPickMessage"/> and never
+/// decide — including the host's own pick, which goes through the same apply path locally and then
+/// broadcasts, so there is exactly one code path that mutates the draft.
+///
+/// Appended last: ids are positional.
+/// </summary>
+public record struct DraftStateMessage : INetMessage
+{
+    public bool ShouldBroadcast => true;
+
+    public NetTransferMode Mode => NetTransferMode.Reliable;
+
+    public LogLevel LogLevel => LogLevel.Info;
+
+    public bool ShouldBuffer => true;
+
+    /// <summary>The pool in fixed order. Indices into this list are what every pick names.</summary>
+    public List<SerializableCard> pool;
+
+    /// <summary>Pool indices taken by the host, in pick order.</summary>
+    public List<int> hostPicks;
+
+    /// <summary>Pool indices taken by the client, in pick order.</summary>
+    public List<int> clientPicks;
+
+    /// <summary>NetId of whoever may pick right now. Zero once the draft is over.</summary>
+    public ulong pickerId;
+
+    /// <summary>NetId of whoever picked first — the input initiative is derived from.</summary>
+    public ulong firstPickerId;
+
+    public bool complete;
+
+    public void Serialize(PacketWriter writer)
+    {
+        writer.WriteList<SerializableCard>(pool ?? new List<SerializableCard>());
+        WriteIndices(writer, hostPicks);
+        WriteIndices(writer, clientPicks);
+        writer.WriteULong(pickerId);
+        writer.WriteULong(firstPickerId);
+        writer.WriteBool(complete);
+    }
+
+    public void Deserialize(PacketReader reader)
+    {
+        pool = reader.ReadList<SerializableCard>();
+        hostPicks = ReadIndices(reader);
+        clientPicks = ReadIndices(reader);
+        pickerId = reader.ReadULong();
+        firstPickerId = reader.ReadULong();
+        complete = reader.ReadBool();
+    }
+
+    // `PacketWriter.WriteList<T>` is constrained to `IPacketSerializable, new()`, so a list of
+    // plain ints has to be written by hand. Length first, matching what WriteList does.
+    private static void WriteIndices(PacketWriter writer, List<int>? indices)
+    {
+        List<int> list = indices ?? new List<int>();
+        writer.WriteInt(list.Count);
+        foreach (int index in list)
+        {
+            writer.WriteInt(index);
+        }
+    }
+
+    private static List<int> ReadIndices(PacketReader reader)
+    {
+        int count = reader.ReadInt();
+        List<int> list = new List<int>(count);
+        for (int i = 0; i < count; i++)
+        {
+            list.Add(reader.ReadInt());
+        }
+
+        return list;
+    }
+}
+
+/// <summary>
+/// A client asking the host for a pool index. A request, never a decision.
+///
+/// The host validates it — whose turn it is, and whether the index is still free — and answers with
+/// a <see cref="DraftStateMessage"/>. A pick the host does not accept simply produces no new state,
+/// and the client's screen stays where it was rather than showing a card it did not get.
+///
+/// Appended last: ids are positional.
+/// </summary>
+public record struct DraftPickMessage : INetMessage
+{
+    public bool ShouldBroadcast => true;
+
+    public NetTransferMode Mode => NetTransferMode.Reliable;
+
+    public LogLevel LogLevel => LogLevel.Info;
+
+    public bool ShouldBuffer => true;
+
+    public int poolIndex;
+
+    public void Serialize(PacketWriter writer) => writer.WriteInt(poolIndex);
+
+    public void Deserialize(PacketReader reader) => poolIndex = reader.ReadInt();
+}
+
+/// <summary>
+/// A client confirming it has the draft state, which is what lets the host stop repeating itself.
+///
+/// **This exists because handlers are not buffered.** `NetMessageBus` drops a message with no
+/// registered handler and logs an error — it buffers only during its own loading window — so the
+/// host's opening pool broadcast is lost outright if the client has not reached `OnRunLaunched`
+/// yet. Every other announcement in this mod is separated from arming by a whole race, so the
+/// margin has always been enormous; a draft starts at run launch and has none.
+///
+/// So the host repeats the state until one of these comes back. That is only safe because
+/// <see cref="DraftStateMessage"/> is full state — a repeat is idempotent by construction, and a
+/// client that gets three copies is in the same place as one that got one.
+///
+/// Appended last: ids are positional.
+/// </summary>
+public record struct DraftAckMessage : INetMessage
+{
+    public bool ShouldBroadcast => true;
+
+    public NetTransferMode Mode => NetTransferMode.Reliable;
+
+    public LogLevel LogLevel => LogLevel.Info;
+
+    public bool ShouldBuffer => true;
+
+    public void Serialize(PacketWriter writer)
+    {
+    }
+
+    public void Deserialize(PacketReader reader)
+    {
+    }
+}

@@ -38,6 +38,10 @@ public static class DuelClockHudPatch
         // a "died during the race and nothing happened" report needs watching it.
         DuelTelemetry.TickDeathProbe();
 
+        // Same reasoning again: the host repeats an unacknowledged draft state, and this is the one
+        // hook guaranteed to be running at the moment a draft begins.
+        DuelDraft.Tick();
+
         string? text = DuelClockService.FormatForHud();
         if (text != null)
         {

@@ -44,7 +44,21 @@ public static class DuelRendezvous
     private static ulong _firstToArrive;
 
     /// <summary>The netId that reached the arena first, or 0 if nobody has arrived yet.</summary>
-    public static ulong FirstToArrive => _firstToArrive;
+    /// <summary>
+    /// Who takes the opening initiative — the input `DuelStartMessage` carries to both turn models.
+    ///
+    /// **A draft match earns it somewhere else, and inverts it.** In a race, reaching the arena
+    /// first is the achievement and it buys the first move (M9). In a draft there is no race to
+    /// win, and the advantage that needs paying for is the *first pick* — so whoever drafted first
+    /// moves second, which is Lucas's compensation rule and the reason the draft's own first-picker
+    /// is the right source here.
+    ///
+    /// Arena arrival order still exists in a draft (both players announce, as always) but means
+    /// nothing: the two clients finish their drafts within a frame of each other, so it would be
+    /// measuring network jitter.
+    /// </summary>
+    public static ulong FirstToArrive =>
+        DuelDraft.IsDraftRun ? DuelDraft.MovesFirstId : _firstToArrive;
     private static bool _armed;
 
     public static bool LocalArrived => _localArrived;
