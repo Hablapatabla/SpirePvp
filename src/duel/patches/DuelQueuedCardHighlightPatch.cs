@@ -1,5 +1,6 @@
 using Godot;
 using HarmonyLib;
+using MegaCrit.Sts2.Core.Logging;
 using MegaCrit.Sts2.Core.Models;
 using MegaCrit.Sts2.Core.Nodes.Cards;
 using MegaCrit.Sts2.Core.Nodes.Cards.Holders;
@@ -61,13 +62,18 @@ public static class DuelQueuedCardHighlightPatch
             return;
         }
 
+        int queued = 0;
         foreach (CardModel card in cardsToDisplay)
         {
             if (queue.GetCardNode(card) != null)
             {
                 __instance.HighlightCard(card);
+                queued++;
             }
         }
+
+        Log.Warn($"[SpirePvp] highlight: grid showed {cardsToDisplay.Count} card(s), {queued} of them "
+                 + $"queued (choice owner {DuelChoiceStallPatch.PlayerGatheringChoice()})");
     }
 
     /// <summary>
@@ -89,6 +95,9 @@ public static class DuelQueuedCardHighlightPatch
     /// glow states a card asks for — so this only overrides the cyan, and leaves red and gold
     /// alone. A card that is both queued and shouting for other reasons keeps the louder signal.
     /// </summary>
+    /// <summary>Rate-limits the diagnostic to one line per selection rather than per repaint.</summary>
+    private static bool _loggedThisSelection;
+
     [HarmonyPatch(typeof(NHandCardHolder), nameof(NHandCardHolder.UpdateCard))]
     [HarmonyPostfix]
     public static void AfterHandCardUpdated(NHandCardHolder __instance)
@@ -103,6 +112,25 @@ public static class DuelQueuedCardHighlightPatch
         if (node?.Model == null || queue == null)
         {
             return;
+        }
+
+        // **Instrumented because this has now been reasoned about wrongly twice.** The mark still
+        // does not appear, and the remaining candidates cannot be told apart from the outside: the
+        // selection may not route through a hand holder at all (`NCard.GetNodeForCard` prefers the
+        // *play queue's* node for a queued card, so there may be no `NHandCardHolder` for it), the
+        // queue may no longer hold the node by the time a selection opens, or the choice may not be
+        // registered as gathering at paint time. One line per selection says which.
+        ulong chooser = DuelChoiceStallPatch.PlayerGatheringChoice();
+        if (chooser != 0 && !_loggedThisSelection)
+        {
+            _loggedThisSelection = true;
+            Log.Warn($"[SpirePvp] highlight: hand holder repainted during a choice — card "
+                     + $"{node.Model.Id.Entry}, in play queue: {queue.GetCardNode(node.Model) != null}, "
+                     + $"chooser {chooser}");
+        }
+        else if (chooser == 0)
+        {
+            _loggedThisSelection = false;
         }
 
         if (queue.GetCardNode(node.Model) == null)
