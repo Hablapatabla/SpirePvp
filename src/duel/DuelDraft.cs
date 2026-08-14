@@ -10,6 +10,7 @@ using MegaCrit.Sts2.Core.Logging;
 using MegaCrit.Sts2.Core.Models;
 using MegaCrit.Sts2.Core.Multiplayer.Game;
 using MegaCrit.Sts2.Core.Nodes.Screens.CardSelection;
+using MegaCrit.Sts2.Core.Nodes.Screens.Map;
 using MegaCrit.Sts2.Core.Nodes.Screens.Overlays;
 using MegaCrit.Sts2.Core.Runs;
 using MegaCrit.Sts2.Core.CardSelection;
@@ -378,6 +379,26 @@ public static class DuelDraft
             return;
         }
 
+        // **The map has to be shut, and it is a rule rather than a z-order accident.**
+        // `NOverlayStack.ShowOverlays` reads
+        //
+        //     if (overlayScreen != null && !NMapScreen.Instance.IsOpen)
+        //
+        // so vanilla deliberately keeps every overlay hidden for as long as the map is open. The
+        // draft was pushed, alive and correct, and simply invisible behind it — and since a draft
+        // run has nowhere on that map to go, the player could not dismiss it either.
+        //
+        // Closing it is also what Lucas asked for on sight: a draft should look like the deck
+        // review, which is this same screen over the ordinary run backdrop rather than over a map.
+        // Re-checked every tick because the map is the room here, and anything that reopens it
+        // would otherwise swallow the draft again silently.
+        NMapScreen? map = NMapScreen.Instance;
+        if (map != null && map.IsOpen)
+        {
+            Log.Info("[SpirePvp] draft: closing the map — overlays stay hidden while it is open");
+            map.Close();
+        }
+
         bool alive = _screen != null
                      && GodotObject.IsInstanceValid(_screen)
                      && _screen.IsInsideTree();
@@ -402,6 +423,10 @@ public static class DuelDraft
 
         _screenDirty = false;
         ShowScreen();
+
+        // Push happens with the backstop in whatever state the map left it, so ask the stack to
+        // present the top screen properly now that the map is shut.
+        NOverlayStack.Instance?.ShowOverlays();
     }
 
     /// <summary>The client has the state, so stop repeating it.</summary>
