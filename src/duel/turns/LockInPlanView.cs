@@ -1,3 +1,4 @@
+using System.Linq;
 using Godot;
 using MegaCrit.Sts2.Core.Combat;
 using MegaCrit.Sts2.Core.Context;
@@ -179,13 +180,33 @@ internal static class LockInPlanView
             return;
         }
 
+        int seen = 0;
+        int restored = 0;
         foreach (NPotionHolder holder in holders)
         {
-            if (GodotObject.IsInstanceValid(holder) && holder.Potion != null)
+            if (!GodotObject.IsInstanceValid(holder))
+            {
+                continue;
+            }
+
+            seen++;
+            if (holder.Potion != null)
             {
                 holder.CancelPotionUseOrDiscard();
+                restored++;
             }
         }
+
+        // **Instrumented because this has been reasoned about twice and is still wrong.** A
+        // reclaimed potion stays greyed and unusable, and the candidates cannot be told apart from
+        // outside: the holder may not be in this list, `Potion` may read null for a slot that
+        // visibly holds one (so the restore is skipped), or `_disabledUntilPotionRemoved` may be set
+        // again after this runs. The counts separate the first two; a `restored` of 0 with `seen`
+        // non-zero means the `Potion != null` test is the wrong question.
+        Log.Warn($"[SpirePvp] potions: restore pass saw {seen} holder(s), "
+                 + $"restored {restored}, disabled flags now "
+                 + string.Join(",", holders.Where(GodotObject.IsInstanceValid)
+                     .Select(h => h._disabledUntilPotionRemoved ? "1" : "0")));
     }
 
     /// <summary>
