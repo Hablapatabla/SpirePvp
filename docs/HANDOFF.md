@@ -79,7 +79,7 @@ abandons the rest, so one typo disables an arbitrary subset while the mod still 
 still logs "loaded". `SpirePvpInit` therefore applies each patch class independently and logs
 a count. **On every launch, confirm the log says `N patch classes applied cleanly`** — if it
 says `PATCH FAILED`, some of the mod is not running and in-game results mean nothing.
-**73 as of this handoff** (111 methods). 69/107 was confirmed against a live log on 2026-08-12.
+**74 as of this handoff** (112 methods). 69/107 was confirmed against a live log on 2026-08-12.
 Since then `DuelModifierMinimumPatch` added one of each, and the AoE fix retired `DuelAoeProbePatch`
 and added `DuelAoeTargetingPatch` and `DuelHookListenerScopePatch` — so **71/109 is arithmetic and
 has not been seen in a log yet**. The count is per *class*, not per patch: a class holding
@@ -784,38 +784,41 @@ Keep that split if you extend this.
 
 ## Immediate next step
 
-### WANTED, and the two halves are in different states (2026-08-13)
+### FIXED: the energy display, both halves (2026-08-13, UNPLAYED)
 
-Lucas, after the Steam session: *"still would like a pass on making card energy costs red when you
-are out of energy instead of having to play the card to find out. And for your energy to go down once
-you've added to the queue instead of having to calc in your head."*
+*"The most clunky part of the duel"* — costs not turning red until you tried a card, and the orb
+reading full while your hand was already spoken for. Both are the same fact (a planned play has
+committed energy it has not spent), and **the shared cause was neither of the things that looked
+guilty.**
 
-Both are about the same fact — a planned play has *committed* energy it has not yet spent — but they
-need opposite kinds of work, so do not treat them as one task.
+**The red costs were never broken.** `DuelPlanEnergyPatch` has raised `EnergyCostTooHigh` against
+`Energy - ReservedEnergy` since 2026-08-12, and the route it depends on is real, verified against the
+decompile: `NCard` asks `CardCostHelper.GetEnergyCostColor`, which asks `CardModel.CanPlay`, which is
+what the patch postfixes. **Nothing ever asked it again.** A card re-evaluates its cost colour only
+when something repaints it, and that something is `NPlayerHand.OnCombatStateChanged` — a *combat
+state* event. Planning a play changes no combat state, because the energy is not spent until the play
+executes. So the answer was computed once, when the card was dealt, and never revisited.
 
-**1. Red costs: already built, so diagnose before rebuilding.** `DuelPlanEnergyPatch` postfixes
-`CardModel.CanPlay` and adds `UnplayableReason.EnergyCostTooHigh` when
-`PlayerCombatState.Energy - model.ReservedEnergy` will not cover the card — which is the same reason
-vanilla raises, so the cost is supposed to turn red through `CardCostHelper` rather than through a
-second mechanism of ours. It is reported as not happening, so the question is **why it is not firing**,
-not what to write. Three things to check in order, cheapest first: whether `CanPlay` is even consulted
-for the colour (the patch's own comment asserts the `CardCostHelper` route and that assertion has
-never been verified in play); whether `ReservedEnergy` is non-zero at the moment it is asked, given it
-sums `NetCombatCard.ToCardModelOrNull()` over the buffer; and whether the guard the patch carries —
-it answers only while `ActionExecutor.CurrentlyRunningAction` is null, which is what makes it
-desync-safe — is also silencing it during planning.
+The orb had the identical gap: `NEnergyCounter.RefreshLabel` runs on the same event.
 
-**2. The energy orb counting down: genuinely not built, and it needs a display patch.**
-`NEnergyCounter` renders straight from the model — `_label.SetTextAutoSize($"{playerCombatState.Energy}/{playerCombatState.MaxEnergy}")`,
-with the red text, the dark orb material and the `_layers` modulate all keyed on `Energy == 0`. A
-planned play does not touch `Energy` until it executes, so the orb reads full while the hand is
-already spoken for. The fix is to subtract the turn model's `ReservedEnergy` at that read.
+So `LockInPlanView.RefreshPlannedCosts` asks both to redraw whenever a play is planned and at each
+turn boundary, and `DuelPlannedEnergyDisplayPatch` recomputes the orb from
+`Energy - ReservedEnergy`.
 
-**Watch the `Energy == 0` branches when doing it.** The counter changes its colour, its outline, its
-material and its modulate on that exact test, so a subtraction that only rewrites the *label* will
-show `0/3` in cream on a lit orb — worse than the current honest-but-unhelpful display, because it
-looks like a rendering fault rather than a rule. Whatever is patched has to feed all five reads from
-the same number.
+**The orb is repainted, never re-energised.** The tempting fix is to lower `PlayerCombatState.Energy`
+while planning and put it back — that is sim state, it raises `EnergyChanged`, every affordability
+check in the engine reads it, and it is exactly the local mutation this project spent the day
+removing from the arena heal. Presentation does not move the number the simulation runs on.
+
+**All five reads, deliberately.** `RefreshLabel` keys the label text, font colour, outline colour,
+orb material and `_layers` modulate on `Energy == 0` independently. Rewriting only the text would
+render `0/3` in cream on a lit orb — a rendering fault rather than a rule, and worse than the honest
+display it replaced.
+
+**The general lesson, which is new and worth keeping:** a patch on a *pure question* — `CanPlay`,
+`GetEnergyCostColor` — only shows up when something asks the question. Adding an answer is half the
+work; the other half is finding what triggers the ask, and in a planning model the vanilla trigger is
+usually an event that planning deliberately does not raise.
 
 ### Playtesting over Steam, with a real second player — what differs from the dev rig
 
@@ -827,7 +830,7 @@ Checked 2026-08-13: `%APPDATA%\SlayTheSpire2\steam\<steamid64>\settings.save` ha
 `SpirePvp: is_enabled = false` — switched off so an unmodded friend could be played with, which is the
 right thing to do and the wrong state to start a duel in. A disabled mod logs
 `Skipping loading mod SpirePvp` and **loads nothing at all while looking entirely normal**. Turn it
-back on from the Mods screen first, and confirm `73 patch classes applied cleanly (111 methods)` in
+back on from the Mods screen first, and confirm `74 patch classes applied cleanly (112 methods)` in
 the log before trusting anything in the session.
 
 **2. Both players' mod lists must match, or the join is refused outright.** `JoinFlow` compares
@@ -878,7 +881,7 @@ side and nine on the other is the signature of pack staleness**, because `client
 re-exports. The guard is the fix rather than the re-export, since a loc key and the code that reads
 it ship in different files and only one of them is rebuilt.
 
-**Patch count is 73 classes / 111 methods.**
+**Patch count is 74 classes / 112 methods.**
 
 **Deliberately not taken, so nobody assumes it was missed:** row 6 of the teardown audit
 (`Hook.AfterCombatEnd`, the largest remaining omission — it is `async`, so including it changes what
@@ -1432,7 +1435,7 @@ heading is built and *not yet played*, so treat "it works" as a claim, not a fac
 - Initiative (M9) is live in both: whoever reached the arena first leads, alternating each turn,
   shown as an arrow over that duelist with "You move first" / "They move first" above it.
 
-**Patch count: 73 classes / 111 methods.** 69/107 was verified against a live log before the last
+**Patch count: 74 classes / 112 methods.** 69/107 was verified against a live log before the last
 two 2026-08-12 commits, which add no patches (`DuelTurnModel.ShouldDefer`'s guard, and the scheduler
 rewrite/rename). `DuelModifierMinimumPatch` and the AoE fix take it to 71/109 on paper. **None of
 those have been run in game at all.**
@@ -2310,7 +2313,7 @@ guessing at it.
 **Everything from the 2026-08-12 session is built and playtested.** The loop, the desync fixes, the
 result screen, rematch — all confirmed in play on both clients, with the only errors in either log
 being vanilla's `Error deleting path …current_run_mp.save.backup`, which is noise and predates this
-work. Patch count was **69 classes / 107 methods** at the time of that note (73/111 now); confirm
+work. Patch count was **69 classes / 107 methods** at the time of that note (74/112 now); confirm
 that line on every launch.
 
 Closed and confirmed this session, so nothing below needs re-testing:

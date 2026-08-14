@@ -107,6 +107,10 @@ public static class DuelTurnModel
         // the duel: the belt's own restore only runs when a potion is actually drunk. Both
         // models clear their in-flight lists at a turn boundary, so this belongs with them.
         LockInPlanView.RestorePlannedPotions();
+
+        // The reservation is cleared at a turn boundary, so the costs and the orb have to be
+        // asked again or they keep showing last turn's commitments.
+        LockInPlanView.RefreshPlannedCosts();
         LogPowers(state);
 
         // **Only in the duel.** This is armed for the whole run, and `CombatManager.TurnStarted`

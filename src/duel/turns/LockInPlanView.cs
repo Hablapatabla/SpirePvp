@@ -14,6 +14,7 @@ using MegaCrit.Sts2.Core.Localization;
 using MegaCrit.Sts2.Core.Models;
 using MegaCrit.Sts2.Core.Nodes;
 using MegaCrit.Sts2.Core.Nodes.Cards;
+using MegaCrit.Sts2.Core.Nodes.Cards.Holders;
 using MegaCrit.Sts2.Core.Nodes.Potions;
 using MegaCrit.Sts2.Core.Nodes.Combat;
 
@@ -74,6 +75,48 @@ internal static class LockInPlanView
         // A null holder is not a failure: vanilla's own path passes whatever GetCardHolder finds
         // and builds a node when there is none.
         queue.OnLocalCardPlayed(play, NPlayerHand.Instance?.GetCardHolder(card), card);
+
+        // Nothing else will ask the hand to re-evaluate what you can now afford.
+        RefreshPlannedCosts();
+    }
+
+    /// <summary>
+    /// Repaints the hand's cost colours and the energy orb, because planning changes neither the
+    /// combat state nor the energy — and those are the only things vanilla repaints on.
+    ///
+    /// **This is why the red costs never appeared, and the patch that draws them was innocent.**
+    /// `DuelPlanEnergyPatch` has raised `EnergyCostTooHigh` against `Energy - ReservedEnergy` since
+    /// 2026-08-12, and the route it counts on is real: `NCard` asks
+    /// `CardCostHelper.GetEnergyCostColor`, which asks `CardModel.CanPlay`, which is what the patch
+    /// postfixes. But a card only *re-asks* when something repaints it, and the repaint is
+    /// `NPlayerHand.OnCombatStateChanged` — a combat-state event. **Planning a play changes no
+    /// combat state**, because the energy is not spent until it executes, so nothing ever asked
+    /// again and the colour stayed whatever it was when the card was dealt.
+    ///
+    /// The same gap hides the orb: `NEnergyCounter.RefreshLabel` runs on the same event, so
+    /// `DuelPlannedEnergyDisplayPatch` would also never be consulted while planning.
+    ///
+    /// Presentation only — it asks nodes to redraw and changes nothing either simulation reads.
+    /// </summary>
+    public static void RefreshPlannedCosts()
+    {
+        NPlayerHand? hand = NPlayerHand.Instance;
+        if (hand != null)
+        {
+            foreach (NHandCardHolder holder in hand.Holders)
+            {
+                if (GodotObject.IsInstanceValid(holder))
+                {
+                    holder.UpdateCard();
+                }
+            }
+        }
+
+        NEnergyCounter? energy = NCombatRoom.Instance?.Ui?._energyCounter;
+        if (energy != null && GodotObject.IsInstanceValid(energy))
+        {
+            energy.RefreshLabel();
+        }
     }
 
     /// <summary>
@@ -99,6 +142,7 @@ internal static class LockInPlanView
     {
         NPotionHolder? holder = HolderFor(action.PotionIndex);
         holder?.DisableUntilPotionRemoved();
+        RefreshPlannedCosts();
     }
 
     /// <summary>
