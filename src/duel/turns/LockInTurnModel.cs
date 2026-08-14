@@ -79,6 +79,22 @@ public sealed class LockInTurnModel : IPlanningTurnModel
     /// <summary>Our own plays, in the order we chose them, waiting for lock-in.</summary>
     private readonly List<GameAction> _local = new List<GameAction>();
 
+    /// <summary>
+    /// Our plays that have been handed over but have not yet executed.
+    ///
+    /// **This exists so the energy orb does not jump.** Reported 2026-08-14: *"once the lock in is
+    /// locked in and the cards are playing out, the energy jumps back up and then works back
+    /// down."* It did, and the reason is that the reservation was dropped the moment the batch was
+    /// flushed — while the energy itself is not spent until each play *executes*, a second or more
+    /// later. So the display went planned-value, full, then ticked down.
+    ///
+    /// The invariant the orb wants is **displayed = energy minus what is committed and not yet
+    /// spent**, and that has to hold across the flush. A play moves from `_local` to here rather
+    /// than disappearing, and leaves here as it starts executing — at which point the engine spends
+    /// its energy, so the two changes cancel and the number does not move.
+    /// </summary>
+    private readonly List<GameAction> _inFlight = new List<GameAction>();
+
     /// <summary>The opponent's plays, held by the host until both sides are in.</summary>
     private readonly List<GameAction> _remote = new List<GameAction>();
 
@@ -176,9 +192,61 @@ public sealed class LockInTurnModel : IPlanningTurnModel
                 }
             }
 
+            // Committed but not yet spent — see _inFlight.
+            foreach (GameAction action in _inFlight)
+            {
+                CardModel? card = PlannedCard(action);
+                if (card != null)
+                {
+                    total += Math.Max(0, card.EnergyCost.GetWithModifiers(CostModifiers.All));
+                }
+            }
+
             return total;
         }
     }
+
+    /// <summary>
+    /// A committed play is about to execute, so it stops being "reserved" at the same moment the
+    /// engine spends its energy.
+    ///
+    /// **Before execution, deliberately.** Hooked to `BeforeActionExecuted` rather than after: the
+    /// energy is spent *during* execution, so releasing the reservation afterwards would leave one
+    /// repaint in between showing the cost subtracted twice — a dip, which is the same jump this
+    /// exists to remove, just smaller and in the other direction.
+    ///
+    /// Matched on the card model rather than on identity, for the reason `TickTurnModel` documents:
+    /// a client's play is submitted as a request and comes back as the host's ordered copy, so the
+    /// object that executes is not the object that was planned.
+    /// </summary>
+    public void OnActionStarting(GameAction action)
+    {
+        CardModel? starting = PlannedCard(action);
+        if (starting == null)
+        {
+            return;
+        }
+
+        for (int i = 0; i < _inFlight.Count; i++)
+        {
+            if (ReferenceEquals(PlannedCard(_inFlight[i]), starting))
+            {
+                _inFlight.RemoveAt(i);
+                return;
+            }
+        }
+    }
+
+    /// <summary>
+    /// Drops any committed play still counted as in flight, at a turn boundary.
+    ///
+    /// **The backstop for a cancelled play**, which never executes and so never leaves `_inFlight`
+    /// on its own — the executor skips a cancelled action before firing `BeforeActionExecuted`, the
+    /// same fact `DuelPace.WatchBatch` is built around. Without this a card whose target died would
+    /// hold its energy reserved against the orb for the rest of the duel. Energy refills at the turn
+    /// boundary anyway, so nothing committed can still be owed across it.
+    /// </summary>
+    public void ClearInFlight() => _inFlight.Clear();
 
     /// <summary>The card a buffered play will resolve, or null for anything that is not a card.</summary>
     private static CardModel? PlannedCard(GameAction action) =>
@@ -706,6 +774,8 @@ public sealed class LockInTurnModel : IPlanningTurnModel
     /// </summary>
     public void BeginNextBatch(bool endsTurn)
     {
+        // Handed over, not forgotten: these are still charged against the orb until they execute.
+        _inFlight.AddRange(_local);
         _local.Clear();
         _remote.Clear();
         _localLockedIn = false;

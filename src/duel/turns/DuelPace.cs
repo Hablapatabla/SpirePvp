@@ -86,6 +86,11 @@ public static class DuelPace
 
         executor.AfterActionExecuted += OnActionExecuted;
 
+        // **Before, not after, and the difference is one repaint.** The engine spends a play's
+        // energy *during* its execution, so the lock-in model has to stop reserving it at the same
+        // moment — release it afterwards and there is a frame showing the cost subtracted twice.
+        executor.BeforeActionExecuted += OnActionStarting;
+
         // Armed here with everything else rather than on first use, and against this run's own
         // queue set — `RunManager` builds a new one per run alongside the executor above.
         ActionQueueSet? queues = RunManager.Instance?.ActionQueueSet;
@@ -103,6 +108,7 @@ public static class DuelPace
         if (executor != null)
         {
             executor.AfterActionExecuted -= OnActionExecuted;
+            executor.BeforeActionExecuted -= OnActionStarting;
 
             // Unconditional: a run torn down mid-beat would otherwise leave the next run's queue
             // paused, and a queue that never runs is indistinguishable from a hung game.
@@ -181,6 +187,21 @@ public static class DuelPace
         }
 
         (DuelTurnModel.Current as LockInTurnModel)?.OnBatchResolved();
+    }
+
+    /// <summary>
+    /// Hands a starting play to the lock-in model, which stops counting it as committed energy at
+    /// the moment the engine starts spending it. See LockInTurnModel.OnActionStarting.
+    /// </summary>
+    private static void OnActionStarting(GameAction action)
+    {
+        if (!DuelSession.IsDuelActive)
+        {
+            return;
+        }
+
+        (DuelTurnModel.Current as LockInTurnModel)?.OnActionStarting(action);
+        LockInPlanView.RefreshPlannedCosts();
     }
 
     private static void OnActionExecuted(GameAction action)

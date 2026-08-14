@@ -96,6 +96,7 @@ public static class DuelTurnModel
         }
 
         (Current as TickTurnModel)?.OnTurnStarted();
+        (Current as LockInTurnModel)?.ClearInFlight();
 
         // The tie alternation is per turn, so initiative's first strike is the leader's in every
         // turn rather than in every other one. Host-only in effect — a client's scheduler never
