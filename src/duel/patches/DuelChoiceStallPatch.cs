@@ -221,6 +221,24 @@ public static class DuelChoiceKeepsPlacePatch
 /// card highlight is built on. So a play whose card really was exhausted by the choice still dies,
 /// on its own merits, one card at a time. What is dropped here is only the blanket.
 ///
+/// # A committed card is no longer offered as a target, and that is the better rule
+///
+/// A consequence rather than a goal, kept deliberately after Lucas saw it (2026-08-14): *"the queued
+/// defend did not come back down to the hand as an option to exhaust. I wonder if this is actually
+/// better design? If a card is locked in, then it's being played. It's almost like a take-back."*
+///
+/// Exactly that. The cancellation was what returned those cards to the hand in the first place — a
+/// cancelled play releases its node — so suppressing it leaves them in the play queue, where a
+/// selection cannot reach them. **The resulting rule is the coherent one:** a locked-in card is
+/// mid-play, and letting a later card in the same batch exhaust it would let you retroactively
+/// withdraw a commitment the opponent has already been shown. That is a take-back, and this mode has
+/// exactly one sanctioned one — `LockInTurnModel.Unlock`, which is bounded by the opponent not
+/// having committed.
+///
+/// It also shrinks `DuelQueuedCardHighlightPatch`'s job rather than removing it: the purple mark was
+/// added to make an invisible choice visible, and for exhaust selections there is now no choice to
+/// make. It still earns its place wherever a committed card *can* legitimately appear in a list.
+///
 /// # Why this cannot desync
 ///
 /// It removes a flag from an options value both peers compute identically — the card passes it, and

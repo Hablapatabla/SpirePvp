@@ -369,6 +369,15 @@ internal static class LockInPlanView
         node.AddChildSafely(arrow);
         arrow.GlobalPosition = node.GetTopOfHitbox();
         _initiativeArrow = arrow;
+
+        // **Armed here, not at run start, and that is why the first attempt did nothing.**
+        // `NOverlayStack.Instance` is `NRun.Instance?.GlobalUi.Overlays`, and `DuelTurnModel.Arm`
+        // runs from `OnRunCreated` — before the run scene exists — so the subscription was skipped
+        // silently and "You move first" went on painting over every menu. This runs in combat, where
+        // the stack certainly exists. Also set the arrow's visibility once up front: a menu may
+        // already be open when a turn starts.
+        ArmOverlayWatch();
+        arrow.Visible = (NOverlayStack.Instance?.ScreenCount ?? 0) == 0;
         AddInitiativeLabel(arrow, LocalContext.NetId == leaderNetId);
 
         // A still triangle reads as scenery; a moving one reads as a pointer. Looped rather than
