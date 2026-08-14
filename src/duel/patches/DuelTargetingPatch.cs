@@ -230,3 +230,32 @@ internal static class DuelTargetSets
         return result;
     }
 }
+
+/// <summary>
+/// A duel has no allies, so no potion is throwable at one.
+///
+/// **This is the other half of the friendly-targeting narrowing, and its absence stranded a
+/// potion.** Reported 2026-08-14: a Skill Potion reclaimed by cancelling a lock-in could not be used
+/// — throw and discard both dead. `PotionModel.CanThrowAtAlly` is
+/// `TargetType == AnyPlayer &amp;&amp; Owner.RunState.Players.Count &gt; 1`, which is the engine's usual
+/// reading of "more than one player means co-op" — the content-level twin of the co-located-party
+/// assumption. So in a duel it answered *true*, `NPotionPopup` labelled its button **throw** rather
+/// than **drink**, and the flow demanded a target. `DuelPotionTargetingPatch` had just narrowed
+/// `AnyPlayer` to the owner alone, so the throw had nowhere to go and the popup was a dead end.
+///
+/// Answering false here puts it back on the only coherent footing: the potion is drunk, by you, with
+/// no target selection — which is what `AnyPlayer` means when you are the only player it may name.
+/// Fixing the target set without fixing this left the two disagreeing, which is the shape of the
+/// bug rather than an accident of it.
+/// </summary>
+[HarmonyPatch(typeof(PotionModel), nameof(PotionModel.CanThrowAtAlly))]
+public static class DuelPotionThrowPatch
+{
+    public static void Postfix(ref bool __result)
+    {
+        if (DuelSession.IsDuelActive)
+        {
+            __result = false;
+        }
+    }
+}

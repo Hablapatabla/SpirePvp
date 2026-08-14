@@ -46,15 +46,15 @@ public static class DuelLobbyPanel
     /// <summary>The three decisions a match is made of, in the order they are made.</summary>
     private static readonly (string LocKey, System.Type Group)[] Groups =
     {
-        // **Before the turn model, and that ordering is load-bearing.** The turn-model row matches
-        // `DuelModifierBase`, which every duel modifier inherits — including this one — so listed
-        // after it the speed chip was swallowed into the turn-model row. Reported 2026-08-14 with a
-        // screenshot of it sitting beside Real-Time and Turn-Based. First match wins, so the
-        // narrower group has to be asked first.
-        ("SPIREPVP_LOBBY.duelSpeed", typeof(DuelSpeedModifier)),
         ("SPIREPVP_LOBBY.turnModel", typeof(DuelModifierBase)),
         ("SPIREPVP_LOBBY.raceClock", typeof(RaceClockModifier)),
-        ("SPIREPVP_LOBBY.duelClock", typeof(DuelClockModifier))
+        ("SPIREPVP_LOBBY.duelClock", typeof(DuelClockModifier)),
+
+        // Last, and above "Other modifiers" — Lucas's placement (2026-08-14). It is the only row
+        // that is a toggle rather than a decision, so it reads better after the three that are.
+        // Position is free here *because* the turn-model row excludes it below; ordering used to
+        // carry that job and no longer does.
+        ("SPIREPVP_LOBBY.duelSpeed", typeof(DuelSpeedModifier))
     };
 
     /// <summary>
@@ -112,10 +112,14 @@ public static class DuelLobbyPanel
         {
             List<NRunModifierTickbox> members = tickboxes
                 .Where(t => t.Modifier != null && group.IsInstanceOfType(t.Modifier))
-                // Nested groups: every clock is also a DuelModifierBase, so the turn-model group
-                // has to exclude them or it would swallow all three rows into the first.
+                // Nested groups: every clock — and the speed toggle — is also a DuelModifierBase,
+                // so the turn-model group has to exclude them or it would swallow every row into
+                // the first. The speed chip was reported sitting beside Real-Time and Turn-Based on
+                // 2026-08-14 for exactly this reason; excluding it here is what lets the row sit
+                // wherever it reads best rather than wherever the type hierarchy forces it.
                 .Where(t => group != typeof(DuelModifierBase)
-                            || t.Modifier is not ClockModifierBase)
+                            || (t.Modifier is not ClockModifierBase
+                                && t.Modifier is not DuelSpeedModifier))
                 .ToList();
 
             if (members.Count == 0)
