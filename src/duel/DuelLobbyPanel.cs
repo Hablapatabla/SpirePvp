@@ -58,6 +58,72 @@ public static class DuelLobbyPanel
     };
 
     /// <summary>
+    /// Takes the duel panel back down and returns the tickboxes to vanilla's list.
+    ///
+    /// **The screen is reused, and until 2026-08-14 nothing undid this.** `NMainMenuSubmenuStack`
+    /// caches one `NCustomRunScreen` and hands the same node to Custom and to Duel — which is what
+    /// makes `SetTitle` set the title *both* ways. But the panel itself was only ever built: open a
+    /// duel lobby, back out, open plain Custom, and you were still looking at the duel's rows.
+    /// Lucas, 2026-08-14: *"the average person with this mod shouldn't have literally any chance of
+    /// anything in their game breaking outside the duel button, lobby, and run itself."* Right, and
+    /// a mod that re-dresses a vanilla screen owes it a way back.
+    ///
+    /// Reparenting rather than rebuilding, because that is what `Apply` did: the tickboxes are
+    /// vanilla's own nodes, moved into our rows and moved back here, so the list ends up holding
+    /// exactly what it started with.
+    ///
+    /// **Known incomplete:** `CompactForRow` shortens a tickbox's label for display in a row, and
+    /// this does not restore the original text — the strings are not kept anywhere. A Custom lobby
+    /// entered after a duel will show correct, working, slightly-abbreviated modifier names until
+    /// the screen is rebuilt. Worth closing by stashing the original text on the tickbox when it is
+    /// compacted; recorded rather than silently left.
+    /// </summary>
+    public static void Remove(NCustomRunScreen screen)
+    {
+        NCustomRunModifiersList? list = screen._modifiersList;
+        Control? container = list?._container;
+        if (list == null || container == null)
+        {
+            return;
+        }
+
+        if (container.GetNodeOrNull(PanelName) is not Control panel)
+        {
+            return;
+        }
+
+        // Vanilla's nodes go home first, or freeing the panel takes them with it.
+        int returned = 0;
+        foreach (NRunModifierTickbox tickbox in list._modifierTickboxes)
+        {
+            if (!GodotObject.IsInstanceValid(tickbox) || !IsUnder(tickbox, panel))
+            {
+                continue;
+            }
+
+            tickbox.GetParent()?.RemoveChild(tickbox);
+            container.AddChildSafely(tickbox);
+            returned++;
+        }
+
+        panel.QueueFree();
+        Log.Info($"[SpirePvp] duel lobby: panel removed, {returned} tickbox(es) returned to Custom");
+    }
+
+    private static bool IsUnder(Node node, Node ancestor)
+    {
+        for (Node? p = node.GetParent(); p != null; p = p.GetParent())
+        {
+            if (p == ancestor)
+            {
+                return true;
+            }
+        }
+
+        return false;
+    }
+
+    /// <summary>
     /// Rebuilds the panel for <paramref name="screen"/>. Safe to call repeatedly — the lobby
     /// refreshes on every modifier change, and on the client that is how the panel first appears.
     /// </summary>

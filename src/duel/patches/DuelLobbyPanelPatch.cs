@@ -110,6 +110,9 @@ public static class DuelLobbyPanelPatch
 
         if (!isDuel)
         {
+            // The submenu stack hands the same screen node to Custom and to Duel, so leaving the
+            // panel up meant a plain Custom lobby opened after a duel was still wearing it.
+            DuelLobbyPanel.Remove(__instance);
             return;
         }
 
