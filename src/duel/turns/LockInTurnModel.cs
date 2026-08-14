@@ -652,7 +652,13 @@ public sealed class LockInTurnModel : IPlanningTurnModel
 
         LockInPlanView.RefreshLockInIcons();
         LockInPlanView.RefreshEndTurnButton();
-        LockInPlanView.ShowLockInLabel();
+
+        // **The batch is empty now, so the button no longer means "Lock In".** An empty batch is
+        // how you declare yourself finished for the turn, so re-asserting the *Lock In* label here
+        // made the button say one thing and do the other: the press after a cancel ended the turn
+        // with a full hand, and since `CanUnlock` requires `_local.Count > 0`, that state could not
+        // be withdrawn either. Reported 2026-08-14 as the lock-in getting stuck after a cancel.
+        LockInPlanView.ShowEndTurnLabel();
         LockInPlanView.RefreshPlannedCosts();
     }
 

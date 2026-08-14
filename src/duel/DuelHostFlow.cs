@@ -36,7 +36,7 @@ public static class DuelHostFlow
     public static bool Requested { get; set; }
 
     /// <summary>
-    /// What a freshly opened Duel lobby starts on: real-time, and **no clocks**.
+    /// What a freshly opened Duel lobby starts on: **turn-based, fast animations, and no clocks**.
     ///
     /// Untimed rather than the blitz preset DESIGN §5b names, because a default is what someone
     /// plays before they have an opinion, and a clock is the one setting that can end a match
@@ -45,8 +45,16 @@ public static class DuelHostFlow
     /// right there for anyone who wants one. Blitz remains the recommended time control; it is
     /// simply no longer imposed.
     ///
-    /// Real-time rather than turn-based because turn-based is M8 and currently plays as blitz
-    /// anyway — offering it as the default would be offering something that does not exist yet.
+    /// **Turn-based rather than real-time, changed 2026-08-14** (Lucas). The old reasoning here was
+    /// that turn-based was M8 and "currently plays as blitz anyway" — that stopped being true when
+    /// the lock-in model shipped and was playtested end to end, so the default was pointing at the
+    /// less finished of the two. `DuelModifierListPatch` puts the same chip first in the row; the
+    /// order and the default are one decision and have to move together.
+    ///
+    /// **Fast animations on by default.** Unticked means `Normal`, which is vanilla's pacing for a
+    /// solo run; a duel has two people waiting on every animation, so the shorter one is the better
+    /// default and the chip is there to opt back out. Note it is `Fast` and never `Instant` — see
+    /// `DuelSpeedFast` for why `Instant` is not offered at all.
     ///
     /// **`ToMutable()` is not optional.** `ModelDb.Modifier&lt;T&gt;()` hands back the canonical
     /// instance, and `ModifierModel.IsEquivalent` — which is how `SetTickedModifiers` decides
@@ -65,9 +73,10 @@ public static class DuelHostFlow
     /// </summary>
     public static IReadOnlyList<ModifierModel> DefaultPreset => new List<ModifierModel>
     {
-        ModelDb.Modifier<DuelBlitz>().ToMutable(),
+        ModelDb.Modifier<DuelTurnBased>().ToMutable(),
         ModelDb.Modifier<RaceClockNone>().ToMutable(),
-        ModelDb.Modifier<DuelClockNone>().ToMutable()
+        ModelDb.Modifier<DuelClockNone>().ToMutable(),
+        ModelDb.Modifier<DuelSpeedFast>().ToMutable()
     };
 
     /// <summary>

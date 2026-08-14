@@ -28,8 +28,15 @@ public static class DuelModifierListPatch
     {
         List<ModifierModel> withDuel = new List<ModifierModel>(__result)
         {
-            ModelDb.Modifier<DuelBlitz>(),
+            // **Turn-based first, and this list is what orders the chips in the row.**
+            // `DuelLobbyPanel` promotes the tickboxes in the order vanilla built them, and vanilla
+            // builds them from this list — so the turn-model row reads left to right in the order
+            // written here. Turn-based leads because it is the default (`DuelHostFlow.DefaultPreset`)
+            // and the ticked chip sitting first is what makes the row read as "this one, or that
+            // one" rather than as a setting someone has changed. Swapped 2026-08-14 with the
+            // default, and the two must move together.
             ModelDb.Modifier<DuelTurnBased>(),
+            ModelDb.Modifier<DuelBlitz>(),
             ModelDb.Modifier<RaceClockEight>(),
             ModelDb.Modifier<RaceClockTen>(),
             ModelDb.Modifier<RaceClockTwelve>(),

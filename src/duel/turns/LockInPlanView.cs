@@ -295,6 +295,42 @@ internal static class LockInPlanView
         SetLabel(Label("SPIREPVP_CANCEL_LOCK_IN", "Cancel Lock In"));
 
     /// <summary>
+    /// Puts vanilla's own End Turn text back, for a planning window that now holds no plays.
+    ///
+    /// **Withdrawing a lock-in empties the batch, so the button stops meaning "Lock In".** With
+    /// nothing planned the next press submits an empty batch, which is how you declare yourself
+    /// finished for the turn — and <see cref="LockInTurnModel.Unlock"/> used to re-assert the
+    /// *Lock In* label on the way out, so the button said one thing and did the other. Reported
+    /// 2026-08-14 as the lock-in getting stuck after a cancel: pressing the button a second time
+    /// ended the turn with a full hand, and `CanUnlock` requires `_local.Count > 0`, so the cancel
+    /// affordance was gone too and there was no way back.
+    ///
+    /// This restores the rule the labels exist to teach — *Lock In* while you hold cards, *End
+    /// Turn* while you hold none — rather than adding a fourth state to it.
+    ///
+    /// Read off the button's own `_endTurnLoc`, so it is vanilla's string with vanilla's turn
+    /// number substitution and needs no key of ours in the `.pck`. Falls back to leaving the label
+    /// alone if the button is not there, which is the same thing <see cref="SetLabel"/> does.
+    /// </summary>
+    public static void ShowEndTurnLabel()
+    {
+        NEndTurnButton? button = NCombatRoom.Instance?.Ui.EndTurnButton;
+        Player? me = LocalContext.GetMe(CombatManager.Instance.DebugOnlyGetState()?.Players
+                                        ?? (IEnumerable<Player>)Array.Empty<Player>());
+        if (button == null)
+        {
+            return;
+        }
+
+        if (me?.PlayerCombatState != null)
+        {
+            NEndTurnButton._endTurnLoc.Add("turnNumber", me.PlayerCombatState.TurnNumber);
+        }
+
+        SetLabel(NEndTurnButton._endTurnLoc.GetFormattedText());
+    }
+
+    /// <summary>
     /// A loc string that cannot take the button down with it.
     ///
     /// `LocManager` throws for a key it does not have, and a key ships in the `.pck` while the code

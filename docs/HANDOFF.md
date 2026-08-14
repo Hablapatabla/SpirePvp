@@ -874,14 +874,74 @@ on 2026-08-14 before anything else was read:
 - **Nothing has been played on v0.111.0.** Confirm `83 patch classes applied cleanly (121 methods)`
   on first launch before trusting any in-game observation.
 
-#### The immediate next step: playtest the potion fix, on v0.111.0
+#### The immediate next step: playtest the lock-in cancel, and the new lobby defaults
 
-One turn-based duel is enough for both questions at once. Plan a potion, cancel the lock-in, then
-click the reclaimed potion — **throw and discard should both be live**. The log line to read is
-`potions: restore pass saw … (cleared IsQueued on N)`; N ≥ 1 on the cancel is the fix catching the
-bug. Read the patch-count line in the same log, since it is the first launch on the new game build.
+One turn-based duel covers all of it. Plan a card, lock in, cancel the lock-in — **the button must
+read "End Turn" afterwards, not "Lock In"**, and pressing it must be a deliberate choice to end the
+turn rather than a surprise. Then check the lobby opens on **Turn-Based** with **Fast** ticked, and
+that Turn-Based is the *first* chip in the row.
 
-#### FIXED: the reclaimed potion (2026-08-14, UNPLAYED)
+The log lines that settle the lock-in half are consecutive: `took back N play(s)` should **not** be
+followed by `locking in 0 play(s)` unless you pressed again meaning to end the turn.
+
+#### FIXED: the lock-in got stuck after a cancel (2026-08-14, UNPLAYED)
+
+Reported as *"turn 2 client got stuck after a cancel lock in or a lock in — something felt like it
+got stuck"*. The client log has it in four consecutive lines:
+
+```
+lock-in: locking in 1 play(s)
+lock-in: end turn pressed while locked in — taking it back
+lock-in: took back 1 play(s) — the opponent had not locked in
+lock-in: locking in 0 play(s)
+```
+
+**The button lied about what the next press would do.** `LockInPlanView`'s own doc states the rule
+the labels exist to teach — *Lock In* while you hold cards, *End Turn* while you hold none — and
+`LockInTurnModel.Unlock` ended by calling `ShowLockInLabel()` unconditionally, having just emptied
+`_local`. So after a cancel the button read **Lock In** while the press behind it would submit an
+empty batch, which is how you declare yourself **finished for the turn**.
+
+That is the whole of "stuck", and the trap has a second half that makes it unrecoverable:
+`CanUnlock` is `_localLockedIn && !_remoteLockedIn && !_flushing && _local.Count > 0`. An empty
+lock-in fails the last term, so the cancel affordance the player had just used is gone — they are
+locked in as finished, holding a full hand, with nothing to press.
+
+`Unlock` now calls `LockInPlanView.ShowEndTurnLabel()`, which restores vanilla's own label by
+reading the button's `_endTurnLoc` — vanilla's string, vanilla's turn-number substitution, no key
+of ours in the `.pck`.
+
+**Note what this was not.** The two logs end byte-identically at
+`after player turn phase two end action: id: 14`, which reads exactly like a hang in the enemy-turn
+transition and was chased as one for a while. It is not: that stretch is
+`Cmd.CustomScaledWait(0.5f, 0.8f)` plus two empty creature loops, none of which logs, so quitting
+during the enemy-turn animation leaves both logs stopped there. **Identical log tails are what a
+shared seed produces, not evidence of a deadlock** — the sim is deterministic, so both clients stop
+in the same place whenever they stop. Confirm a hang by whether the *player* is stuck, not by where
+the log ends.
+
+#### CHANGED: lobby defaults (2026-08-14, UNPLAYED)
+
+- **Turn-based is the default turn model**, and is now the first chip in the row. The old comment
+  justified real-time on the grounds that turn-based "currently plays as blitz anyway" — untrue
+  since the lock-in model shipped and was playtested end to end, so the default was pointing at the
+  less finished of the two.
+- **Fast animations default on.** Unticked means `Normal`, which is vanilla's solo pacing; a duel
+  has two people waiting on every animation.
+- The row order lives in `DuelModifierListPatch` (vanilla builds the tickboxes from
+  `ModelDb.GoodModifiers`, and the panel promotes them in that order) while the default lives in
+  `DuelHostFlow.DefaultPreset`. **They are one decision in two files** — move them together.
+
+#### FIXED: the reclaimed potion (2026-08-14, PLAYTESTED AND CONFIRMED)
+
+Confirmed in play the same day (*"potion works now"*) and on the wire:
+
+```
+potions: restore pass saw 2 holder(s), restored 1 (cleared IsQueued on 1), disabled flags now 0,0
+```
+
+`cleared IsQueued on 1` is the bug being caught — the flag was still set on a potion nothing was
+going to resolve. The reasoning below stands as written.
 
 A potion reclaimed by cancelling a lock-in was still unusable — **throw and discard both greyed**.
 Two fixes had already been aimed at the wrong component (the belt restore, then `CanThrowAtAlly`),
@@ -928,19 +988,18 @@ withdrawn **discard**, which greys the holder via `DisableUntilPotionRemoved` wi
 different enable paths going dark together excludes every gate that touches only one of them. The
 instrumentation would have measured the half of the screen that was working.
 
-**The diagnostic line now carries the proof**, so read it on the next run rather than the old one:
-
-```
-potions: restore pass saw 2 holder(s), restored 1 (cleared IsQueued on 1), disabled flags now 0,0
-```
-
-`cleared IsQueued on 1` on a cancelled lock-in **is** this bug, caught. A persistent `on 0` while a
-reclaimed potion is still dead means the flag was not the gate after all, and *then* the five-term
-condition is the next question. Once a playtest shows the potion usable again, this line and the one
-in `DuelQueuedCardHighlightPatch` can both come out.
+**The diagnostic line carries the proof** and did so on the first run — see the top of this section.
+A persistent `cleared IsQueued on 0` while a reclaimed potion is still dead would have meant the flag
+was not the gate after all, and *then* the five-term condition would have been the next question.
+It did not come to that. This line and the one in `DuelQueuedCardHighlightPatch` are now both
+retirable; they are kept for one more session only because the lock-in cancel path they sit on is
+still unplayed.
 
 #### Unplayed, awaiting a game
 
+- **The lock-in cancel label** — see above; the press after a cancel must end the turn only when the
+  player means it to
+- **Turn-based and Fast as the lobby defaults**, with turn-based first in the row
 - **Fast mode row** — one chip, now last in the lobby above "Other modifiers"
 - **Custom lobby restored** — `DuelLobbyPanel.Remove` returns the tickboxes and frees the panel when
   the screen is reused for a plain Custom run
