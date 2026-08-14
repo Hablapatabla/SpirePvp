@@ -1,6 +1,7 @@
 using HarmonyLib;
 using MegaCrit.Sts2.Core.Entities.Cards;
 using MegaCrit.Sts2.Core.Nodes.Cards;
+using MegaCrit.Sts2.Core.Nodes.Cards.Holders;
 using SpirePvp.Duel.Turns;
 
 namespace SpirePvp.Duel.Patches;
@@ -54,6 +55,15 @@ public static class DuelHandVisualFreezePatch
             return true;
         }
 
+        // **A card selection is the exception, and it is the whole reason this is not blanket.**
+        // During a selection the hand *is* interactive — Burning Pact brings your cards back to be
+        // picked from — so freezing there would grey out the thing you are being asked to choose.
+        // Same predicate the stall and the clocks use, so all three agree about who is deciding.
+        if (DuelChoiceStallPatch.PlayerGatheringChoice() != 0)
+        {
+            return true;
+        }
+
         // `HandIsClosed` is the model's own "a batch is committed or resolving", and it is the same
         // flag that greys the hand — so the freeze and the greying cannot disagree about whether you
         // are on the move.
@@ -63,5 +73,48 @@ public static class DuelHandVisualFreezePatch
         }
 
         return true;
+    }
+}
+
+/// <summary>
+/// Hides the playable glow on hand cards while a batch resolves, for the same reason the cost is
+/// frozen — and it is a *second* visual, on a different node, sampling the same unstable answer.
+///
+/// **Reported after the cost freeze landed:** *"energy costs on cards are frozen now but the
+/// 'playable' highlight is still popping in and out whether or not they actually are."* Right:
+/// `DuelHandVisualFreezePatch` covers `NCard.UpdateEnergyCostVisuals`, which owns the cost colour and
+/// the unplayable icon. The glow is `NHandCardHolder.UpdateCard`, which ends in
+/// `if (CardNode.Model.CanPlay() || ShouldGlowRed || ShouldGlowGold)` → `CardHighlight.AnimShow()`
+/// and otherwise `AnimHide()`. Same `CanPlay`, same alternation, different node — so freezing one
+/// left the other pulsing.
+///
+/// **Hidden rather than held at its last value.** A glow means "you can play this", and during a
+/// resolving batch you cannot play anything — so keeping a stale glow would be the one reading that
+/// is actively wrong, and it would contradict the greyed hand the model already shows. Locking in
+/// closes the hand, the glows go out, and they stay out until planning reopens.
+///
+/// A postfix rather than a skip, because `UpdateCard` also calls `UpdateVisuals`, which is what
+/// renders a card *drawn during resolution* — a draw card in the batch does exactly that. Skipping
+/// the method wholesale would leave those cards unrendered; letting it run and then taking the glow
+/// back down leaves everything else intact.
+/// </summary>
+[HarmonyPatch(typeof(NHandCardHolder), nameof(NHandCardHolder.UpdateCard))]
+public static class DuelHandGlowFreezePatch
+{
+    public static void Postfix(NHandCardHolder __instance)
+    {
+        if (!DuelSession.IsDuelActive || DuelTurnModel.Current is not IPlanningTurnModel { HandIsClosed: true })
+        {
+            return;
+        }
+
+        // Leave a selection alone: the cards being offered are meant to be lit, and
+        // `DuelQueuedCardHighlightPatch` marks the queued ones purple on top of that.
+        if (DuelChoiceStallPatch.PlayerGatheringChoice() != 0)
+        {
+            return;
+        }
+
+        __instance.CardNode?.CardHighlight?.AnimHide();
     }
 }

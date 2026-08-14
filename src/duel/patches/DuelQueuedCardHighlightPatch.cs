@@ -105,7 +105,29 @@ public static class DuelQueuedCardHighlightPatch
             return;
         }
 
-        if (queue.GetCardNode(node.Model) != null && node.CardHighlight.Modulate == NCardHighlight.playableColor)
+        if (queue.GetCardNode(node.Model) == null)
+        {
+            return;
+        }
+
+        // **During a selection the ring is not showing, and that is why this never appeared.**
+        // Reported 2026-08-14: "still not getting a purple highlight for cards in queue that are
+        // eligible for a choice, like being an exhaust target for Burning Pact." The condition used
+        // to be "recolour the ring if it is currently cyan" — but a selection happens *during*
+        // resolution, when `CanPlay` is false and `NHandCardHolder.UpdateCard` calls `AnimHide()`
+        // rather than showing a playable ring. There was never anything to recolour.
+        //
+        // So when a choice is open the ring is *raised* rather than merely repainted. This is the
+        // moment the mark exists for: your queued cards are back in the hand as candidates, and
+        // discarding or exhausting one silently is exactly what it is meant to prevent.
+        if (DuelChoiceStallPatch.PlayerGatheringChoice() != 0)
+        {
+            node.CardHighlight.AnimShow();
+            node.CardHighlight.Modulate = QueuedColor;
+            return;
+        }
+
+        if (node.CardHighlight.Modulate == NCardHighlight.playableColor)
         {
             node.CardHighlight.Modulate = QueuedColor;
         }
