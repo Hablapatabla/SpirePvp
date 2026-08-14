@@ -1,9 +1,11 @@
 using HarmonyLib;
 using MegaCrit.Sts2.Core.Entities.Actions;
+using MegaCrit.Sts2.Core.Entities.Multiplayer;
 using MegaCrit.Sts2.Core.GameActions;
 using MegaCrit.Sts2.Core.GameActions.Multiplayer;
 using MegaCrit.Sts2.Core.Logging;
 using MegaCrit.Sts2.Core.Runs;
+using SpirePvp.Duel.Turns;
 
 namespace SpirePvp.Duel.Patches;
 
@@ -184,5 +186,66 @@ public static class DuelChoiceKeepsPlacePatch
         Log.Info($"[SpirePvp] batch: {__instance} keeps id {__instance.Id.Value} across its choice "
                  + $"instead of taking {newId} — the round was committed in that order");
         newId = __instance.Id.Value;
+    }
+}
+
+/// <summary>
+/// Stops a card selection from cancelling the rest of your locked-in round.
+///
+/// **This is why a committed Defend never resolved.** Measured 2026-08-14, two lines apart:
+///
+/// ```
+/// [ActionQueueSet] Cancelling action PlayCardAction card: CARD.DEFEND_IRONCLAD (49639619)
+/// [SpirePvp] highlight: hand holder repainted during a choice — card DEFEND_IRONCLAD
+/// ```
+///
+/// `ActionQueueSet.PauseActionForPlayerChoice` does this when the choice carries
+/// `PlayerChoiceOptions.CancelPlayCardActions`:
+///
+/// ```csharp
+/// CancelNonExecutingActionsOfType&lt;PlayCardAction&gt;(action.OwnerId, …);
+/// queue.isCancellingPlayCardActions = true;
+/// ```
+///
+/// — every queued play that player owns, gone. Burning Pact's exhaust selection carries that flag.
+///
+/// **Vanilla is right again, and for a reason that does not survive this mode.** Outside a duel
+/// nothing is pre-committed: a card that gathers a choice is played on its own, so the only queued
+/// plays are ones you queued *while* it was resolving, and a choice that exhausts or discards can
+/// easily invalidate them. Cancelling them wholesale is cheap and safe. Under the lock-in model the
+/// queue holds a **round you already committed to**, and this throws the rest of it away — the
+/// player watches one card resolve and the others silently never happen.
+///
+/// **The targeted check it was standing in for still runs.** `PlayCardAction.ExecuteAction`
+/// re-validates its own card and cancels a play whose pile has changed — the same fact the queued
+/// card highlight is built on. So a play whose card really was exhausted by the choice still dies,
+/// on its own merits, one card at a time. What is dropped here is only the blanket.
+///
+/// # Why this cannot desync
+///
+/// It removes a flag from an options value both peers compute identically — the card passes it, and
+/// both sims run the same card. So both cancel the same set (none), and neither invents an action or
+/// changes an order. Note it deliberately does *not* touch `isCancellingPlayCardActions` afterwards:
+/// that field is set inside the same `if`, so skipping the flag skips both halves together, and
+/// `ResumeActionWithoutSynchronizing` clears it on the way out regardless.
+/// </summary>
+[HarmonyPatch(typeof(ActionQueueSet), nameof(ActionQueueSet.PauseActionForPlayerChoice))]
+public static class DuelKeepBatchThroughChoicePatch
+{
+    public static void Prefix(ref PlayerChoiceOptions options)
+    {
+        if (!DuelSession.IsDuelActive || DuelTurnModel.Current is not LockInTurnModel)
+        {
+            return;
+        }
+
+        if (!options.HasFlag(PlayerChoiceOptions.CancelPlayCardActions))
+        {
+            return;
+        }
+
+        Log.Warn("[SpirePvp] batch: keeping the committed round through a card selection — "
+                 + "vanilla would have cancelled every queued play of its owner's");
+        options &= ~PlayerChoiceOptions.CancelPlayCardActions;
     }
 }
