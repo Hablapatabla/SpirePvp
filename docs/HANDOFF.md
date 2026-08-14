@@ -784,6 +784,39 @@ Keep that split if you extend this.
 
 ## Immediate next step
 
+### WANTED, and the two halves are in different states (2026-08-13)
+
+Lucas, after the Steam session: *"still would like a pass on making card energy costs red when you
+are out of energy instead of having to play the card to find out. And for your energy to go down once
+you've added to the queue instead of having to calc in your head."*
+
+Both are about the same fact — a planned play has *committed* energy it has not yet spent — but they
+need opposite kinds of work, so do not treat them as one task.
+
+**1. Red costs: already built, so diagnose before rebuilding.** `DuelPlanEnergyPatch` postfixes
+`CardModel.CanPlay` and adds `UnplayableReason.EnergyCostTooHigh` when
+`PlayerCombatState.Energy - model.ReservedEnergy` will not cover the card — which is the same reason
+vanilla raises, so the cost is supposed to turn red through `CardCostHelper` rather than through a
+second mechanism of ours. It is reported as not happening, so the question is **why it is not firing**,
+not what to write. Three things to check in order, cheapest first: whether `CanPlay` is even consulted
+for the colour (the patch's own comment asserts the `CardCostHelper` route and that assertion has
+never been verified in play); whether `ReservedEnergy` is non-zero at the moment it is asked, given it
+sums `NetCombatCard.ToCardModelOrNull()` over the buffer; and whether the guard the patch carries —
+it answers only while `ActionExecutor.CurrentlyRunningAction` is null, which is what makes it
+desync-safe — is also silencing it during planning.
+
+**2. The energy orb counting down: genuinely not built, and it needs a display patch.**
+`NEnergyCounter` renders straight from the model — `_label.SetTextAutoSize($"{playerCombatState.Energy}/{playerCombatState.MaxEnergy}")`,
+with the red text, the dark orb material and the `_layers` modulate all keyed on `Energy == 0`. A
+planned play does not touch `Energy` until it executes, so the orb reads full while the hand is
+already spoken for. The fix is to subtract the turn model's `ReservedEnergy` at that read.
+
+**Watch the `Energy == 0` branches when doing it.** The counter changes its colour, its outline, its
+material and its modulate on that exact test, so a subtraction that only rewrites the *label* will
+show `0/3` in cream on a lit orb — worse than the current honest-but-unhelpful display, because it
+looks like a rendering fault rather than a rule. Whatever is patched has to feed all five reads from
+the same number.
+
 ### Playtesting over Steam, with a real second player — what differs from the dev rig
 
 Everything above was found on two local clients over ENet. A Steam session changes four things, and
