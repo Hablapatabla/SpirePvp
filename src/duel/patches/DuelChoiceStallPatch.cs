@@ -249,3 +249,28 @@ public static class DuelKeepBatchThroughChoicePatch
         options &= ~PlayerChoiceOptions.CancelPlayCardActions;
     }
 }
+
+/// <summary>
+/// Repaints the hand when a card selection closes, so the queued-card mark comes down with it.
+///
+/// **The purple ring is raised while a choice is open and taken down by the glow freeze on the next
+/// repaint — but nothing repaints when the choice ends.** Reported 2026-08-14: "purple highlight is
+/// rendering now, but not going away once the burning pact choice resolves."
+///
+/// `ResumeActionWithoutSynchronizing` is the engine's own "that choice is finished" — the same
+/// method whose renumbering `DuelChoiceKeepsPlacePatch` corrects — so it is the one place that is
+/// guaranteed to run exactly once per selection, on both peers, whoever was choosing.
+/// </summary>
+[HarmonyPatch(typeof(ActionQueueSet), nameof(ActionQueueSet.ResumeActionWithoutSynchronizing))]
+public static class DuelChoiceClosedRepaintPatch
+{
+    public static void Postfix()
+    {
+        if (!DuelSession.IsDuelActive)
+        {
+            return;
+        }
+
+        LockInPlanView.RefreshHandNow();
+    }
+}

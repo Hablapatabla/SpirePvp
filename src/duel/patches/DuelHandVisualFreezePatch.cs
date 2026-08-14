@@ -48,9 +48,19 @@ namespace SpirePvp.Duel.Patches;
 [HarmonyPatch(typeof(NCard), nameof(NCard.UpdateEnergyCostVisuals))]
 public static class DuelHandVisualFreezePatch
 {
-    public static bool Prefix(PileType pileType)
+    public static bool Prefix(NCard __instance, PileType pileType)
     {
         if (pileType != PileType.Hand || !DuelSession.IsDuelActive)
+        {
+            return true;
+        }
+
+        // **Only a card actually sitting in the hand pile.** The same method draws card *previews* —
+        // the library, a reward screen, a hover blow-up — and those are passed `PileType.Hand` while
+        // their models live elsewhere. Freezing those showed a stale cost on a screen that has
+        // nothing to do with the duel: reported 2026-08-14 as Burning Pact reading 2 energy when its
+        // base cost is 1. A frozen card is only ever the one you are holding.
+        if (__instance.Model?.Pile?.Type != PileType.Hand)
         {
             return true;
         }

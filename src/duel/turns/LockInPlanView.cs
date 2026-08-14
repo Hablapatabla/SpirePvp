@@ -6,6 +6,7 @@ using MegaCrit.Sts2.Core.Entities.Players;
 using MegaCrit.Sts2.Core.Helpers;
 using MegaCrit.Sts2.Core.Logging;
 using MegaCrit.Sts2.Core.Nodes.Rooms;
+using MegaCrit.Sts2.Core.Nodes.Screens.Overlays;
 using MegaCrit.Sts2.Core.Runs;
 using MegaCrit.Sts2.addons.mega_text;
 using MegaCrit.Sts2.Core.Entities.Multiplayer;
@@ -421,6 +422,80 @@ internal static class LockInPlanView
         label.Size = new Vector2(280f, 40f);
         arrow.AddChildSafely(label);
         label.SetTextAutoSize(new LocString("gameplay_ui", key).GetFormattedText());
+    }
+
+    /// <summary>
+    /// Keeps the initiative arrow out from over menus.
+    ///
+    /// **Reported 2026-08-14 with a screenshot of "You move first" sitting across the card
+    /// library.** The arrow is parented to a creature node at `ZIndex 100` so it clears the combat
+    /// art, and an overlay screen is a different canvas — so raising it above the board also raised
+    /// it above anything opened on top of the board.
+    ///
+    /// `NOverlayStack` is the engine's own answer to "is a screen open", and it raises `Changed`, so
+    /// this follows rather than polls. Visibility rather than freeing: the arrow belongs to the turn,
+    /// not to the screen, and it has to come back unchanged when the menu closes.
+    /// </summary>
+    public static void ArmOverlayWatch()
+    {
+        NOverlayStack? overlays = NOverlayStack.Instance;
+        if (overlays == null || _overlayWatched)
+        {
+            return;
+        }
+
+        overlays.Changed += OnOverlaysChanged;
+        _overlayWatched = true;
+    }
+
+    public static void DisarmOverlayWatch()
+    {
+        NOverlayStack? overlays = NOverlayStack.Instance;
+        if (overlays != null && _overlayWatched)
+        {
+            overlays.Changed -= OnOverlaysChanged;
+        }
+
+        _overlayWatched = false;
+    }
+
+    private static bool _overlayWatched;
+
+    private static void OnOverlaysChanged()
+    {
+        if (_initiativeArrow != null && GodotObject.IsInstanceValid(_initiativeArrow))
+        {
+            _initiativeArrow.Visible = (NOverlayStack.Instance?.ScreenCount ?? 0) == 0;
+        }
+    }
+
+    /// <summary>
+    /// Repaints every hand holder, ignoring the resolving guard.
+    ///
+    /// **For the moment a card selection closes.** The purple queued mark is raised while a choice
+    /// is open and taken down by the glow freeze on the next repaint — but nothing repaints when the
+    /// choice ends, so it stayed on the card. Reported 2026-08-14: "purple highlight is rendering
+    /// now, but not going away once the burning pact choice resolves."
+    ///
+    /// Safe to run mid-resolution now, which it was not when the flicker was first chased: both the
+    /// cost and the glow are frozen there, so a repaint produces the same frozen result rather than
+    /// sampling `CanPlay` again.
+    /// </summary>
+    public static void RefreshHandNow()
+    {
+        NPlayerHand? hand = NPlayerHand.Instance;
+        if (hand == null)
+        {
+            return;
+        }
+
+        foreach (NHandCardHolder holder in hand.Holders)
+        {
+            if (GodotObject.IsInstanceValid(holder))
+            {
+                holder.UpdateCard();
+            }
+        }
     }
 
     /// <summary>Drops the arrow. Called before redrawing it and on run teardown.</summary>

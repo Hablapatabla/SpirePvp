@@ -79,6 +79,7 @@ public static class DuelTurnModel
         // is the engine's own event for one. Nothing about the round loop keys off it, so it
         // carries none of the ordering hazards a turn-start *reset* would.
         CombatManager.Instance.TurnStarted += OnTurnStarted;
+        LockInPlanView.ArmOverlayWatch();
         _armed = true;
     }
 
@@ -87,6 +88,7 @@ public static class DuelTurnModel
         RunManager.Instance?.NetService?.UnregisterMessageHandler<DuelLockInMessage>(OnLockIn);
         RunManager.Instance?.NetService?.UnregisterMessageHandler<DuelUnlockMessage>(OnUnlock);
         CombatManager.Instance.TurnStarted -= OnTurnStarted;
+        LockInPlanView.DisarmOverlayWatch();
         _armed = false;
     }
 
