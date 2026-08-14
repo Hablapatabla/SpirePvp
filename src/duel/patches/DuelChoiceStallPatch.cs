@@ -129,3 +129,60 @@ public static class DuelChoiceStallPatch
         }
     }
 }
+
+/// <summary>
+/// A play that pauses for a card selection keeps its place in the round, instead of going to the
+/// back when the choice is made.
+///
+/// **This is the other half of <see cref="DuelChoiceStallPatch"/>, and without it the interleave is
+/// still broken — just less dangerously.** Vanilla resumes a choice-gathering action by handing it a
+/// *fresh* id: `ResumeActionWithoutSynchronizing` calls
+/// `ResumeAfterGatheringPlayerChoice(GetAndIncrementActionId())`, and that method assigns it to
+/// `Id`. Since `ActionQueueSet.GetReadyAction` orders by lowest id, the resumed action is thereby
+/// sent behind everything already queued — and its owner's later plays, which sit behind it in their
+/// own queue, go with it. Measured 2026-08-13: a round committed as
+/// `them, us, them, us, them, us` resolved with both of their strikes ahead of the Uppercut
+/// committed between them.
+///
+/// **Vanilla's renumbering is right for co-op and wrong here, for one specific reason.** It exists so
+/// that whatever the *other* players enqueued while you sat in a menu resolves before your resumed
+/// action — they were never waiting on you, so they should not be held up. In a duel they *are*
+/// waiting on you: `DuelChoiceStallPatch` stops the whole batch, so nothing of theirs is enqueued
+/// during the choice, and the only thing renumbering can still do is discard an order both players
+/// already committed to.
+///
+/// # Why this does not desync, which is the whole question
+///
+/// **The shared counter still advances.** `GetAndIncrementActionId()` is called by the caller
+/// *before* this method and unconditionally, so it runs whether or not its value is used. This
+/// changes which id the action carries, never how many ids have been handed out — which matters
+/// because `ActionQueueSet._nextActionId` numbers a stream both peers execute in common, and pulling
+/// it out of step is the single most expensive family of bugs this project has had (HANDOFF: the
+/// `duel now` divergences).
+///
+/// **The id stays unique.** It is the action's own, assigned when it was enqueued and never given to
+/// anything else; the action never left its queue while gathering.
+///
+/// **Both peers do the same thing.** The resume runs through `ActionQueueSynchronizer` on every
+/// client — its own comment says it should be called from nowhere else — so both sims keep the same
+/// id and order identically.
+///
+/// One consequence worth expecting rather than being surprised by: a resumed action can now execute
+/// with an id lower than one already executed, so `Last executed action ID` in a state dump may go
+/// backwards across a choice. That is symmetric, appears on both dumps, and is not a divergence.
+/// </summary>
+[HarmonyPatch(typeof(GameAction), nameof(GameAction.ResumeAfterGatheringPlayerChoice))]
+public static class DuelChoiceKeepsPlacePatch
+{
+    public static void Prefix(GameAction __instance, ref uint newId)
+    {
+        if (!DuelSession.IsDuelActive || __instance.Id == null)
+        {
+            return;
+        }
+
+        Log.Info($"[SpirePvp] batch: {__instance} keeps id {__instance.Id.Value} across its choice "
+                 + $"instead of taking {newId} — the round was committed in that order");
+        newId = __instance.Id.Value;
+    }
+}
