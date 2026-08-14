@@ -1,6 +1,7 @@
 using HarmonyLib;
 using MegaCrit.Sts2.Core.Saves;
 using MegaCrit.Sts2.Core.Settings;
+using SpirePvp.Duel.Turns;
 
 namespace SpirePvp.Duel.Patches;
 
@@ -52,9 +53,40 @@ public static class DuelFastModePatch
 {
     public static void Postfix(ref FastModeType __result)
     {
-        if (DuelSession.IsDuelActive)
+        if (!DuelSession.IsDuelActive)
         {
-            __result = FastModeType.Fast;
+            return;
         }
+
+        // **Turn-based honours the player's own setting; real-time does not.** Lucas, 2026-08-14:
+        // "I don't see why it would have any actual gameplay or balance impacts like it might in
+        // real time mode."
+        //
+        // That is right, and it is right for a reason worth writing down rather than assumed. The
+        // pin exists because vanilla sizes almost every wait through Fast Mode, so a faster setting
+        // buys reaction time — decisive in real time, where both players are acting continuously.
+        // In a resolving batch nobody can act at all: the hand is closed and the round is a replay
+        // of plays already committed.
+        //
+        // The one advantage left is that a faster client finishes resolving sooner and starts
+        // planning sooner — and that is **self-correcting**, because `DuelClockService` asks the
+        // turn model whether you are done deciding: planning reopening locally starts your clock.
+        // You get the extra thinking time and you pay for it, which is what a chess clock is for.
+        //
+        // **`Instant` is still clamped, and that is not a preference.** `Cmd.Wait` returns
+        // immediately at `Instant`, so `DuelPace`'s beat would not merely shorten — it would vanish,
+        // taking the readable gap between cards with it. A display setting must not delete a
+        // mechanic; that rule is what this file was written to enforce and it still holds.
+        if (DuelTurnModel.Current is LockInTurnModel)
+        {
+            if (__result == FastModeType.Instant)
+            {
+                __result = FastModeType.Fast;
+            }
+
+            return;
+        }
+
+        __result = FastModeType.Fast;
     }
 }
