@@ -1,3 +1,4 @@
+using Godot;
 using System.Collections.Generic;
 using System.Linq;
 using HarmonyLib;
@@ -97,6 +98,15 @@ public static class DuelLobbyPanelPatch
         // Set unconditionally, both ways. The submenu stack reuses this screen node, so a plain
         // Custom lobby opened after a duel would otherwise still be titled "Duel".
         DuelLobbyPanel.SetTitle(__instance, isDuel);
+
+        // The character row is built once, before the lobby's modifiers are known, so the Random
+        // button cannot decide for itself whether it belongs — see DuelRandomCharacterButtonPatch.
+        // This is where the answer exists, and where it is re-asked whenever it changes.
+        if (__instance._charButtonContainer?
+                .GetNodeOrNull<Control>(DuelRandomCharacterButtonPatch.ButtonName) is Control random)
+        {
+            random.Visible = isDuel;
+        }
 
         if (!isDuel)
         {

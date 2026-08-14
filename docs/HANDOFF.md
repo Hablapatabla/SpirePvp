@@ -79,7 +79,7 @@ abandons the rest, so one typo disables an arbitrary subset while the mod still 
 still logs "loaded". `SpirePvpInit` therefore applies each patch class independently and logs
 a count. **On every launch, confirm the log says `N patch classes applied cleanly`** — if it
 says `PATCH FAILED`, some of the mod is not running and in-game results mean nothing.
-**80 as of this handoff** (118 methods). 69/107 was confirmed against a live log on 2026-08-12.
+**82 as of this handoff** (120 methods). 69/107 was confirmed against a live log on 2026-08-12.
 Since then `DuelModifierMinimumPatch` added one of each, and the AoE fix retired `DuelAoeProbePatch`
 and added `DuelAoeTargetingPatch` and `DuelHookListenerScopePatch` — so **71/109 is arithmetic and
 has not been seen in a log yet**. The count is per *class*, not per patch: a class holding
@@ -830,7 +830,7 @@ Checked 2026-08-13: `%APPDATA%\SlayTheSpire2\steam\<steamid64>\settings.save` ha
 `SpirePvp: is_enabled = false` — switched off so an unmodded friend could be played with, which is the
 right thing to do and the wrong state to start a duel in. A disabled mod logs
 `Skipping loading mod SpirePvp` and **loads nothing at all while looking entirely normal**. Turn it
-back on from the Mods screen first, and confirm `80 patch classes applied cleanly (118 methods)` in
+back on from the Mods screen first, and confirm `82 patch classes applied cleanly (120 methods)` in
 the log before trusting anything in the session.
 
 **2. Both players' mod lists must match, or the join is refused outright.** `JoinFlow` compares
@@ -881,7 +881,7 @@ side and nine on the other is the signature of pack staleness**, because `client
 re-exports. The guard is the fix rather than the re-export, since a loc key and the code that reads
 it ship in different files and only one of them is rebuilt.
 
-**Patch count is 80 classes / 118 methods.**
+**Patch count is 82 classes / 120 methods.**
 
 **Deliberately not taken, so nobody assumes it was missed:** row 6 of the teardown audit
 (`Hook.AfterCombatEnd`, the largest remaining omission — it is `async`, so including it changes what
@@ -1435,7 +1435,7 @@ heading is built and *not yet played*, so treat "it works" as a claim, not a fac
 - Initiative (M9) is live in both: whoever reached the arena first leads, alternating each turn,
   shown as an arrow over that duelist with "You move first" / "They move first" above it.
 
-**Patch count: 80 classes / 118 methods.** 69/107 was verified against a live log before the last
+**Patch count: 82 classes / 120 methods.** 69/107 was verified against a live log before the last
 two 2026-08-12 commits, which add no patches (`DuelTurnModel.ShouldDefer`'s guard, and the scheduler
 rewrite/rename). `DuelModifierMinimumPatch` and the AoE fix take it to 71/109 on paper. **None of
 those have been run in game at all.**
@@ -2313,7 +2313,7 @@ guessing at it.
 **Everything from the 2026-08-12 session is built and playtested.** The loop, the desync fixes, the
 result screen, rematch — all confirmed in play on both clients, with the only errors in either log
 being vanilla's `Error deleting path …current_run_mp.save.backup`, which is noise and predates this
-work. Patch count was **69 classes / 107 methods** at the time of that note (80/118 now); confirm
+work. Patch count was **69 classes / 107 methods** at the time of that note (82/120 now); confirm
 that line on every launch.
 
 Closed and confirmed this session, so nothing below needs re-testing:
