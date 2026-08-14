@@ -4,6 +4,7 @@ using MegaCrit.Sts2.Core.Logging;
 using MegaCrit.Sts2.Core.Models;
 using MegaCrit.Sts2.Core.Models.Acts;
 using MegaCrit.Sts2.Core.Runs;
+using MegaCrit.Sts2.Core.Settings;
 using SpirePvp.Modifiers;
 using SpirePvp.Race;
 
@@ -98,6 +99,33 @@ public static class DuelMatch
     /// a match is configured as, say, a 10-minute race followed by a 2-minute duel.
     /// </summary>
     public static double DuelClockMinutes(IRunState? runState) => MinutesOf<DuelClockModifier>(runState);
+
+    /// <summary>
+    /// The animation speed both duelists agreed to in the lobby, or null when no chip is ticked.
+    ///
+    /// **Read from the run rather than from either player's settings**, which is the whole point of
+    /// moving it here — see `DuelSpeedModifier`. Null means a match configured before this option
+    /// existed, or one whose speed row was left empty; `DuelFastModePatch` treats that as `Normal`,
+    /// which is what every duel used until 2026-08-14.
+    ///
+    /// Reads the *current* run each time rather than caching at run start, so it is correct through
+    /// a rematch, which reconfigures in place.
+    /// </summary>
+    public static FastModeType? AgreedSpeed
+    {
+        get
+        {
+            foreach (ModifierModel modifier in EffectiveModifiers(RunManager.Instance?.State))
+            {
+                if (modifier is DuelSpeedModifier speed)
+                {
+                    return speed.Level;
+                }
+            }
+
+            return null;
+        }
+    }
 
     private static double MinutesOf<T>(IRunState? runState) where T : ClockModifierBase
     {

@@ -3,6 +3,7 @@ using MegaCrit.Sts2.Core.Helpers;
 using MegaCrit.Sts2.Core.Models;
 using MegaCrit.Sts2.Core.Models.Modifiers;
 using MegaCrit.Sts2.Core.Runs;
+using MegaCrit.Sts2.Core.Settings;
 using SpirePvp.Duel;
 
 namespace SpirePvp.Modifiers;
@@ -141,4 +142,47 @@ public sealed class DuelClockFive : DuelClockModifier
 public sealed class DuelClockNone : DuelClockModifier
 {
     public override double Minutes => 0;
+}
+
+/// <summary>
+/// How fast a resolving round plays out — agreed in the lobby, like the clocks and the turn model.
+///
+/// **Both players must experience the same pacing, and the clock is why.** Lucas, 2026-08-14: *"I
+/// think it's important the 2 players are experiencing the same thing, otherwise the clocks would
+/// get disjoint no?"* Yes, and the earlier attempt to let each player use their own Fast Mode was
+/// wrong for a reason that is easy to miss: **the clocks are host-authoritative.**
+/// `DuelClockService` decides both banks from the host's own model state, so a client whose
+/// animations run slower is charged from the *host's* timeline — billed for seconds in which it is
+/// still watching cards land and cannot act. The two clocks would be measuring two different
+/// experiences, which is exactly the disjointness named above.
+///
+/// So the speed joins the other three lobby decisions rather than living in a settings screen. That
+/// is the same argument that removed `duel clock &lt;minutes&gt;`: a mid-run change can only hand
+/// someone terms they never agreed to.
+/// </summary>
+public abstract class DuelSpeedModifier : DuelModifierBase
+{
+    /// <summary>The Fast Mode level both clients read for the duration of the duel.</summary>
+    public abstract FastModeType Level { get; }
+
+    protected override void AfterRunCreated(RunState runState) => DuelMatch.OnRunCreated(runState);
+
+    protected override void AfterRunLoaded(RunState runState) => DuelMatch.OnRunCreated(runState);
+}
+
+/// <summary>Vanilla's ordinary animation speed — the setting duels have always been pinned to.</summary>
+public sealed class DuelSpeedNormal : DuelSpeedModifier
+{
+    public override FastModeType Level => FastModeType.Normal;
+}
+
+/// <summary>
+/// Shorter animations. **Not `Instant`, and there is deliberately no `Instant` option:**
+/// `Cmd.Wait` returns immediately there, so `DuelPace`'s beat would not shorten but vanish, taking
+/// the readable gap between cards with it. Offering it in the lobby would be offering a way to
+/// delete a mechanic both players rely on.
+/// </summary>
+public sealed class DuelSpeedFast : DuelSpeedModifier
+{
+    public override FastModeType Level => FastModeType.Fast;
 }

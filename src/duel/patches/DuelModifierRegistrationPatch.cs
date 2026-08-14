@@ -39,7 +39,9 @@ public static class DuelModifierListPatch
             ModelDb.Modifier<DuelClockTwo>(),
             ModelDb.Modifier<DuelClockThree>(),
             ModelDb.Modifier<DuelClockFive>(),
-            ModelDb.Modifier<DuelClockNone>()
+            ModelDb.Modifier<DuelClockNone>(),
+            ModelDb.Modifier<DuelSpeedNormal>(),
+            ModelDb.Modifier<DuelSpeedFast>()
         };
         __result = withDuel;
     }
@@ -73,6 +75,11 @@ public static class DuelModifierExclusivityPatch
             ModelDb.Modifier<RaceClockTwelve>(),
             ModelDb.Modifier<RaceClockFifteen>(),
             ModelDb.Modifier<RaceClockNone>()
+        },
+        new HashSet<ModifierModel>
+        {
+            ModelDb.Modifier<DuelSpeedNormal>(),
+            ModelDb.Modifier<DuelSpeedFast>()
         },
         new HashSet<ModifierModel>
         {
