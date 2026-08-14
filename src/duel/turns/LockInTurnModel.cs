@@ -629,6 +629,14 @@ public sealed class LockInTurnModel : IPlanningTurnModel
         _local.Clear();
         _localEnd = null;
 
+        // **Potions are not cards, and the loop above only knows about cards.** `PlannedCard`
+        // returns null for a `UsePotionAction`, so a withdrawn potion had its play dropped while its
+        // belt slot stayed greyed by `DisableUntilPotionRemoved` — stranded: disabled, unplayable,
+        // and no longer queued. Reported 2026-08-14 as "the skill potion play is bugged", and the
+        // log shows exactly that shape: `holding UsePotionAction … SKILL_POTION` then `took back 1
+        // play(s)`. The belt has its own restore, and this is the other place that owes it.
+        LockInPlanView.RestorePlannedPotions();
+
         Log.Warn($"[SpirePvp] lock-in: took back {withdrawn} play(s) — the opponent had not locked in");
 
         RunManager.Instance?.NetService?.SendMessage(new DuelUnlockMessage { playCount = withdrawn });

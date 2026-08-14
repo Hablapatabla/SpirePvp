@@ -974,6 +974,33 @@ Vanilla's own `AnimateScoreBar` throws the same exception on the same click.
 condition, not on each route out — there is always another route.* The note reasoned about the one
 exit it happened to think of.
 
+### OPEN: not every potion should be queued (2026-08-14, marked not built)
+
+Lucas: *"Skill potions just feel funky. I think we're going to have to manually discriminate on
+potions — which need to be actually queued (fire, poison, etc) vs which can be used freely (skill
+potions, gambling potion, etc)."*
+
+**The rule underneath it is sound and worth stating.** A potion that *does something to the board* —
+damage, poison, block — is a play, and belongs in the batch alongside cards: it has to be ordered
+against the opponent's plays, and letting it resolve the instant you click would hand you a free
+action outside the interleave. A potion that only *changes your own options* — Skill Potion adding a
+card to hand, Gambling Potion swapping cards — has nothing to order against. Queueing it is all cost
+and no benefit: it cannot interact with the opponent, and deferring it means you plan a round without
+knowing what it gave you, which is the same dead-draw problem the multi-batch turn was invented to
+solve.
+
+**Why this is not just a list.** The split cannot be read off `TargetType` — Skill Potion and Fire
+Potion differ in what their effect *touches*, not in what they target — so it is a hand-maintained
+classification, which this project has avoided everywhere else on principle (the AoE fix explicitly
+rejected enumerating 70 models). The honest version is a small allow-list of "resolves immediately"
+potions with a comment saying why each is on it, plus a default of *queued* so a potion nobody has
+classified behaves like the conservative case.
+
+**Where it goes:** `DuelTurnModel.IsPlayerInitiated` already decides what a turn model may hold, and
+this is the same shape of question one level finer — it would become "and, for potions, only these".
+Note the interaction with the fix above: a free-use potion never enters `_local`, so it also never
+needs restoring on a withdrawal.
+
 ### Three items scoped 2026-08-13, each larger than its one-line description
 
 Worked down the open list in order and stopped at the first line of each, because the queue file's
