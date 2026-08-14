@@ -233,7 +233,38 @@ internal static class LockInPlanView
     /// the rule at the moment it applies, and there is nowhere else in this UI to explain it.
     /// </summary>
     public static void ShowLockInLabel() =>
-        SetLabel(new LocString("gameplay_ui", "SPIREPVP_LOCK_IN_BUTTON").GetFormattedText());
+        SetLabel(Label("SPIREPVP_LOCK_IN_BUTTON", "Lock In"));
+
+    /// <summary>
+    /// Says the press will take the lock-in back, while that window is open.
+    ///
+    /// **The button being live is not discoverable on its own** — it looks exactly like the button
+    /// that just committed you. Reported 2026-08-14 after the mechanic worked: "let's make the
+    /// button now say 'cancel lock in'".
+    /// </summary>
+    public static void ShowCancelLockInLabel() =>
+        SetLabel(Label("SPIREPVP_CANCEL_LOCK_IN", "Cancel Lock In"));
+
+    /// <summary>
+    /// A loc string that cannot take the button down with it.
+    ///
+    /// `LocManager` throws for a key it does not have, and a key ships in the `.pck` while the code
+    /// that reads it ships in the DLL — so a client that has rebuilt but not re-exported has the
+    /// call and not the string. That exact split killed a net message on 2026-08-13; here it would
+    /// throw inside a UI refresh. The English text is the fallback rather than the key, because a
+    /// raw `SPIREPVP_CANCEL_LOCK_IN` on a button teaches nobody anything.
+    /// </summary>
+    private static string Label(string key, string fallback)
+    {
+        try
+        {
+            return new LocString("gameplay_ui", key).GetFormattedText();
+        }
+        catch (Exception)
+        {
+            return fallback;
+        }
+    }
 
     /// <summary>
     /// Hands the turn back to the player after a batch has finished resolving.

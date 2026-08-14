@@ -30,6 +30,19 @@ public interface IPlanningTurnModel : IDuelTurnModel
     bool IsPlanned(CardModel card);
 
     /// <summary>
+    /// Whether this card is committed — planned, or handed over and not yet resolved.
+    ///
+    /// **Distinct from <see cref="IsPlanned"/>, and the difference is what a card selection sees.**
+    /// `IsPlanned` answers "is it in the buffer I am still editing", which is what the energy
+    /// reservation wants. By the time a mid-resolution selection opens, the buffer is empty and the
+    /// card is *committed* instead — and, measured 2026-08-14, it is no longer in the play queue
+    /// either: the selection pulls queued cards back into the hand to offer them, so
+    /// `NCardPlayQueue.GetCardNode` returns null and the card is indistinguishable from one you
+    /// never planned. This is the only remaining record that you did.
+    /// </summary>
+    bool IsCommitted(CardModel card);
+
+    /// <summary>
     /// The readable gap left after each of this model's plays resolves, in seconds.
     ///
     /// **A model's pacing is part of what it is.** A lock-in batch is a sequence you read after the

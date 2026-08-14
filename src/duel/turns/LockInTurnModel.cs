@@ -250,6 +250,28 @@ public sealed class LockInTurnModel : IPlanningTurnModel
     /// </summary>
     public void ClearInFlight() => _inFlight.Clear();
 
+    /// <summary>Planned, or handed over and not yet resolved. See IPlanningTurnModel.IsCommitted.</summary>
+    public bool IsCommitted(CardModel card)
+    {
+        foreach (GameAction action in _local)
+        {
+            if (ReferenceEquals(PlannedCard(action), card))
+            {
+                return true;
+            }
+        }
+
+        foreach (GameAction action in _inFlight)
+        {
+            if (ReferenceEquals(PlannedCard(action), card))
+            {
+                return true;
+            }
+        }
+
+        return false;
+    }
+
     /// <summary>The card a buffered play will resolve, or null for anything that is not a card.</summary>
     private static CardModel? PlannedCard(GameAction action) =>
         action is PlayCardAction play ? play.NetCombatCard.ToCardModelOrNull() : null;
@@ -526,8 +548,10 @@ public sealed class LockInTurnModel : IPlanningTurnModel
         LockInPlanView.RefreshLockInIcons();
 
         // The window to take this back is now open, and the press that got us here left the button
-        // disabled — see DuelUnlockButtonStatePatch.
+        // disabled — see DuelUnlockButtonStatePatch. The label has to say so too: a live button that
+        // reads "Lock In" looks like the one that just committed you.
         LockInPlanView.RefreshEndTurnButton();
+        LockInPlanView.ShowCancelLockInLabel();
 
         // A client hands its plays over through the engine's ordinary request path; the host holds
         // them rather than enqueuing, via DuelLockInPatch. The host has its own buffer already.
@@ -601,6 +625,7 @@ public sealed class LockInTurnModel : IPlanningTurnModel
 
         LockInPlanView.RefreshLockInIcons();
         LockInPlanView.RefreshEndTurnButton();
+        LockInPlanView.ShowLockInLabel();
         LockInPlanView.RefreshPlannedCosts();
     }
 
@@ -645,8 +670,10 @@ public sealed class LockInTurnModel : IPlanningTurnModel
 
         _remoteLockedIn = true;
 
-        // Their commitment closes our withdraw window, so the button stops being live.
+        // Their commitment closes our withdraw window, so the button stops being live and stops
+        // offering something it can no longer do.
         LockInPlanView.RefreshEndTurnButton();
+        LockInPlanView.ShowLockInLabel();
 
         // **A count of zero is the host declaring themselves finished for the turn.** The host
         // reads the same fact off an empty buffer when the client's end turn arrives; a client has

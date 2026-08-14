@@ -87,6 +87,13 @@ public sealed class TickTurnModel : IPlanningTurnModel
         }
     }
 
+    /// <summary>
+    /// In real time, committed and in flight are the same list — `_queued` holds plays from the
+    /// click until they resolve, so this is `IsPlanned` under another name and is kept separate only
+    /// because the lock-in model genuinely distinguishes them.
+    /// </summary>
+    public bool IsCommitted(CardModel card) => IsPlanned(card);
+
     public bool IsPlanned(CardModel card)
     {
         foreach (GameAction action in _queued)

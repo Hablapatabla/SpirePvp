@@ -62,10 +62,11 @@ public static class DuelQueuedCardHighlightPatch
             return;
         }
 
+        IPlanningTurnModel? committed = DuelTurnModel.Current as IPlanningTurnModel;
         int queued = 0;
         foreach (CardModel card in cardsToDisplay)
         {
-            if (queue.GetCardNode(card) != null)
+            if (queue.GetCardNode(card) != null || committed?.IsCommitted(card) == true)
             {
                 __instance.HighlightCard(card);
                 queued++;
@@ -133,7 +134,14 @@ public static class DuelQueuedCardHighlightPatch
             _loggedThisSelection = false;
         }
 
-        if (queue.GetCardNode(node.Model) == null)
+        // **Asks the turn model, not the play queue, and the diagnostic is why.** Measured
+        // 2026-08-14: `in play queue: False` while a choice was open — a selection pulls queued
+        // cards back into the hand to offer them, so by the time you are picking, the card has left
+        // the queue and looks exactly like one you never planned. The model's committed list is the
+        // only remaining record. This is what the patch should always have asked; the queue node was
+        // a proxy that happened to hold before the batch was flushed.
+        if (DuelTurnModel.Current is not IPlanningTurnModel committed
+            || !committed.IsCommitted(node.Model))
         {
             return;
         }
