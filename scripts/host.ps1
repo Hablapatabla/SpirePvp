@@ -63,7 +63,25 @@ if (-not $NoBuild) {
 
     Write-Host "Building..." -ForegroundColor Cyan
     dotnet build "$PSScriptRoot\..\SpirePvp.csproj" --nologo -v minimal
-    if ($LASTEXITCODE -ne 0) { throw "Build failed - not launching." }
+    if ($LASTEXITCODE -ne 0) {
+        # **Name the likely cause instead of leaving MSBuild's wall of retry text.** Two correct
+        # behaviours combine into a confusing one: this script deliberately does not stop a Steam
+        # instance (that is the whole point of Get-Sts2Process), and a Steam instance with SpirePvp
+        # *enabled* holds SpirePvp.dll open, so the post-build copy cannot land. Hit 2026-08-13,
+        # right after enabling the mod on the Steam profile for a real playtest - which is exactly
+        # when you would hit it, and exactly when the error reads as "my code is broken".
+        $foreign = @(Get-Sts2Process -Foreign)
+        if ($foreign.Count -gt 0) {
+            Write-Host ""
+            Write-Host "Build failed while $($foreign.Count) non-dev instance(s) are running." -ForegroundColor Red
+            Write-Host "If the errors above are MSB3021/MSB3027 about SpirePvp.dll, that is a file lock," -ForegroundColor Yellow
+            Write-Host "not a compile error - a Steam instance with the mod enabled holds the DLL open." -ForegroundColor Yellow
+            Write-Host "  Close that game, or re-run with -NoBuild to launch against what is installed." -ForegroundColor Yellow
+            Write-Host ""
+        }
+
+        throw "Build failed - not launching."
+    }
 
     # Godot assets (localization JSON, images) live in the .pck, which dotnet does not
     # produce. Re-export when anything under SpirePvp/ is newer than the installed pack -
