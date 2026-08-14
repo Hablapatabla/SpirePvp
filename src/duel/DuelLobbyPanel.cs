@@ -46,6 +46,12 @@ public static class DuelLobbyPanel
     /// <summary>The three decisions a match is made of, in the order they are made.</summary>
     private static readonly (string LocKey, System.Type Group)[] Groups =
     {
+        // **First, because it is the largest decision on the screen.** The turn model chooses how
+        // a duel is played; this chooses what happens before one — a race or a draft — and picking
+        // Draft removes the race clock row's meaning entirely. Same argument that puts the turn
+        // model above the presets, one level up.
+        ("SPIREPVP_LOBBY.matchFormat", typeof(MatchFormatModifier)),
+
         ("SPIREPVP_LOBBY.turnModel", typeof(DuelModifierBase)),
         ("SPIREPVP_LOBBY.raceClock", typeof(RaceClockModifier)),
         ("SPIREPVP_LOBBY.duelClock", typeof(DuelClockModifier)),
@@ -185,7 +191,11 @@ public static class DuelLobbyPanel
                 // wherever it reads best rather than wherever the type hierarchy forces it.
                 .Where(t => group != typeof(DuelModifierBase)
                             || (t.Modifier is not ClockModifierBase
-                                && t.Modifier is not DuelSpeedModifier))
+                                && t.Modifier is not DuelSpeedModifier
+                                // `MatchFormatModifier` is a `DuelModifierBase` too, so without
+                                // this the format chips would be swallowed into the turn-model row
+                                // — the same nesting trap the speed chip hit on 2026-08-14.
+                                && t.Modifier is not MatchFormatModifier))
                 .ToList();
 
             if (members.Count == 0)
@@ -213,7 +223,11 @@ public static class DuelLobbyPanel
                 promoted.Add(tickbox);
             }
 
-            if (!presetRowBuilt)
+            // **Anchored to the turn model, not to "the first row".** It was the first row until
+            // Match Format was added above it on 2026-08-14, and "first" would have quietly moved
+            // the presets above the turn model — undoing the placement decision three lines up,
+            // with nothing to notice it but a screenshot.
+            if (!presetRowBuilt && group == typeof(DuelModifierBase))
             {
                 BuildPresetRow(panel, list, CanEditModifiers(screen));
                 presetRowBuilt = true;

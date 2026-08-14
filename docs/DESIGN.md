@@ -786,7 +786,66 @@ what corrupted a duel on 2026-08-12. Rules that follow from that history:
 - **Arm the draft's handlers at run start**, not when the draft screen opens. Five separate bugs in
   this project have been a handler armed lazily and a peer that announced something first.
 
-### Open questions, none of them answered
+### DECIDED 2026-08-14 (Lucas). The six questions below are answered; kept for the reasoning.
+
+**Format.** Card pool **15 — 5 common, 5 uncommon, 5 rare**, one shared pool, alternating picks,
+**7 each and the 15th discarded**. Then a **relic draft: 10 in the pool, 5 each**. Then a **potion
+draft: 4 in the pool, 2 each**. Both pools drafted to exhaustion, so those two split evenly and only
+the card round has a remainder.
+
+*Why the 15th is discarded rather than taken.* Alternating over an odd pool gives the first picker
+an eighth card, and the compensation rule already spends first-pick advantage on initiative — the
+extra card would be a second payment for the same thing. Discarding keeps the decks symmetric and
+keeps the pool at 15, so denial still matters for every pick.
+
+**Loadout.** The character's **normal starting deck plus the drafted cards**, and the character's
+**starter relic plus the 5 drafted**. A floor means a bad draft is weak rather than unplayable, and
+in a mirror match both sides get the identical floor, so it costs no fairness. The drafted cards are
+the whole of the difference between the two decks.
+
+**Mirror stays, and the host picks the character.** The client follows. This is what makes a shared
+pool obviously fair and it sidesteps the per-character filtering that made Neow's offers differ.
+
+**Lobby shape: a fourth group**, `MatchFormatModifier` (`MatchFormatRace` / `MatchFormatDraft`),
+first in `DuelLobbyPanel.Groups` — above the turn model, because it chooses which game is played
+where the turn model only chooses how the duel inside it works. **It must not mark a run as PvP**:
+`DuelMatch.HasTurnModel` stays the single test for that, since it is asked from inside seeding and
+from inside Neow's option generation, and a second marker is a second thing to keep in sync.
+
+**Built 2026-08-14: the modifiers, the lobby row, the loc strings. Deliberately not registered.**
+`DuelModifierListPatch` has both entries commented with the reason — registering them is the switch
+that turns the mode on, and everything behind the chip is still missing. A selectable Draft chip
+today produces a run with no race, no draft and no route to the arena.
+
+### What is left, in the order it wants building
+
+1. **Suppress the race half for a draft run.** `DuelMatch.OnRunCreated` must not call
+   `ActivateRace`, `RaceCoordinator.BeginRace` or `InstallArenaNode`. New `DuelPhase.DraftActive`,
+   and a sweep of everything gated on `IsRaceActive` to check it means "race" and not "a match is
+   running".
+2. **Suppress Neow and the map.** This is the unresearched part and the reason the mode was not
+   finished in one sitting. A drafted loadout and a Neow blessing are two answers to the same
+   question, and the players never travel a map at all. `DuelNeowOptionsPatch` is where the Neow
+   knowledge already lives.
+3. **The draft core.** Host owns the pools and the turn order; clients request and never decide.
+   One generic alternating-pick loop over an ordered pool, run three times. **Announce every pick,
+   never infer it** — and read the stale-`_receivedChoices` note in HANDOFF first, because a card
+   pick travelling as a `PlayerChoiceResult` is exactly what corrupted a duel on 2026-08-12. Arm
+   the handlers at run start, release them in `DuelMatch.OnRunEnded`.
+4. **The screens.** Cards reuse `NDeckCardSelectScreen.Create(cards, prefs)`, exactly as `DuelEntry`
+   does. Relics reuse `NChooseARelicSelection.ShowScreen(relics)` + `RelicsSelected()` — but **not**
+   via `RelicSelectCmd`, which routes through `PlayerChoiceSynchronizer`, i.e. the mechanism above.
+   **Potions have no vanilla pick screen**; `_relicRow` also suggests the relic screen is a row and
+   may not take 10. Both need a surface decision before code.
+5. **Pool filtering.** Co-op-only cards already have machinery (`RaceNoCoopCardsPatch`). Relics need
+   the same treatment for a different reason: a duel has no map, so rest-site, shop and map-event
+   relics are dead at best. Filter on the hook a relic listens to rather than by enumerating models
+   — the AoE fix explicitly rejected hand-maintaining a 70-model list.
+6. **Initiative from the draft.** `IPlanningTurnModel.SetInitiative` is fed from `DuelStartMessage`
+   with arena arrival order, which will not exist. Whoever drafted first moves second. The field and
+   the plumbing are already there, so this is one line and a different input.
+
+### The original open questions, kept for the reasoning
 
 1. **Deck size and pool size** — "10-15 shown" is the pool; how many picks each, and is the pool
    refreshed between picks or drafted to exhaustion?
@@ -802,9 +861,9 @@ what corrupted a duel on 2026-08-12. Rules that follow from that history:
    M7's `DuelLobbyPanel` re-dresses `NCustomRunScreen` and would have to learn a mode with no race
    clock at all.
 
-**Not scheduled.** Recorded now because it is a *next milestone* candidate and because the reuse
-argument above is the kind of thing that is obvious while the duel is fresh and expensive to
-re-derive later.
+~~**Not scheduled.**~~ **Scheduled 2026-08-14 and started.** The scaffolding is in and inert; the
+six steps above are the build. The reuse argument still holds and is the reason this is worth doing
+next: it is the mod's own core with its riskiest phase deleted.
 
 ## 8. Dev workflow
 

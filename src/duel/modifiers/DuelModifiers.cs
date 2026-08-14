@@ -64,6 +64,46 @@ public sealed class DuelTurnBased : DuelModifierBase
 }
 
 /// <summary>
+/// How the two duelists get the deck they fight with — the Act 1 race, or a draft (DESIGN §7b).
+///
+/// **This is the largest of the lobby's decisions and it is deliberately not a turn model.**
+/// The turn model chooses how a duel is played; this chooses what happens *before* one, and the
+/// two are independent — a draft is played under blitz or turn-based exactly as a race is.
+/// Folding them into one group would have made four chips that mean two things.
+///
+/// **It does not mark a run as PvP, and must not.** `DuelMatch.HasTurnModel` is the single test
+/// for that, and it is asked from inside seeding and from inside Neow's option generation. A
+/// second thing that could mark a run PvP is a second thing to keep in sync; the format is read
+/// only *after* a match is known to be one.
+///
+/// No `AfterRunCreated` override for the same reason: `DuelMatch.OnRunCreated` already runs off
+/// the turn model, and hanging it off this one as well would run it twice.
+/// </summary>
+public abstract class MatchFormatModifier : DuelModifierBase
+{
+}
+
+/// <summary>
+/// The original mode: race Act 1 on a mirrored seed, then duel with whatever you built.
+///
+/// The default, and the one every existing note in HANDOFF describes.
+/// </summary>
+public sealed class MatchFormatRace : MatchFormatModifier
+{
+}
+
+/// <summary>
+/// No race at all: draft a deck from a shared pool, then duel (DESIGN §7b, built 2026-08-14).
+///
+/// **A mirror match by construction** — both duelists are the same character, which is what makes
+/// a shared pool obviously fair and sidesteps the per-character filtering that made Neow's offers
+/// differ. The host picks the character and the client follows.
+/// </summary>
+public sealed class MatchFormatDraft : MatchFormatModifier
+{
+}
+
+/// <summary>
 /// A time bank, in minutes. Zero means that phase is untimed and nobody can lose on time
 /// there — which is also what you get by picking no clock modifier at all, so the mod stays
 /// inert for anyone who has not opted in.

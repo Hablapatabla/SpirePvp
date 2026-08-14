@@ -1031,13 +1031,22 @@ fragile.
 
 #### Bigger work, in the order it is worth taking
 
-1. **Return to lobby** — screen mechanics now researched (see below); what is left is teardown
-   ordering across two clients. Do not start it at the end of a session.
-2. **Not every potion should be queued** — recorded with the reasoning; needs Lucas's classification.
-3. **Row 6 of the teardown audit** (`Hook.AfterCombatEnd`) — deliberately parked as "too subtle for
-   now, revisit when more feature complete".
-4. **The both-die corner**, the **rest site before the duel**, and the two Neow questions — all need a
-   decision before code.
+1. **M10 draft mode** — started 2026-08-14. Scaffolding is in and **deliberately inert**; DESIGN §7b
+   now carries the settled format and a six-step build order. The switch is two commented lines in
+   `DuelModifierListPatch`.
+2. **Row 6 of the teardown audit** (`Hook.AfterCombatEnd`) — how relics reset their own state.
+   Parked as "too subtle for now", but **rematch keeps the process alive across runs**, and draft
+   mode makes a match cheap enough that rematch becomes the normal loop. That is what turns this
+   from latent into the most likely next real bug. `WriteReplay(stopRecording: true)` is the same
+   shape, one row down.
+3. **The `CompactForRow` label gap** — the last hole in Lucas's invariant, and the only thing that
+   still leaks outside a duel: stash the original label when compacting, restore it on removal.
+4. **Return to lobby** — screen mechanics researched (see below); what is left is teardown ordering
+   across two clients. Do not start it at the end of a session.
+5. **Not every potion should be queued** — recorded with the reasoning; needs Lucas's classification.
+   Applies to draft mode too, where potions are drafted deliberately rather than found.
+6. **The both-die corner** and the **rest site before the duel** — race-only, so draft mode does not
+   wait on either. Both need a decision before code.
 
 #### Housekeeping
 
@@ -2255,7 +2264,12 @@ sessions ran on `Duel Clock: Off`; **test this one with a duel clock on**.
 
 **Confirmed working 2026-08-12:** the lock-in icons show over the end turn button on both sides.
 
-### Two more from that playtest, both unfixed and both about the same property
+### Two more from that playtest — BOTH CLOSED SINCE (kept for the reasoning)
+
+**Both were fixed and playtested by 2026-08-14** and this section is history, not an open list. The
+back-out is `DuelUnlockButtonPatch` (plus the label fix above, which is the bug the back-out
+introduced); the queued-card mark is confirmed *"appearing and clearing"*. Read on only for why
+each was hard.
 
 **You cannot back out of a lock-in.** `NEndTurnButton.CallReleaseLogic` sets the button
 `Disabled` on the click and only offers *Undo End Turn* while
@@ -2616,7 +2630,13 @@ submission (A1, B1, A2, B2 …) starting on fixed slot order. The shape:
 initiative belongs is named in §3.1b and the candidate is Lucas's first-to-arena, alternating each
 round, in M9.
 
-### Two known gaps, neither blocking
+### Two known gaps — BOTH CLOSED SINCE (kept for the reasoning)
+
+**The killing blow was fixed on 2026-08-13**: row 24 (`CombatEnded?.Invoke`) *was* added once
+`DrainPlayQueue` made the ordering safe — the double-free worry below is what that drain answers.
+**The badge teardown guard was closed the same day**: the route is `%ContinueButton`, which
+`NGameOverScreen._Ready` wires straight to `OpenSummaryScreen` and which is on screen from the
+moment the result is. Read on only for the reasoning.
 
 - **The killing blow hangs in mid-air behind the result screen.** Root-caused, **audited
   2026-08-13, still not fixed.** `DuelEndCombatPatch` skips `CombatManager.EndCombatInternal`

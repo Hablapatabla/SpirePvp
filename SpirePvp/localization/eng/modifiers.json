@@ -1,4 +1,10 @@
 {
+  "MATCH_FORMAT_RACE.title": "Match: Act 1 Race",
+  "MATCH_FORMAT_RACE.short": "Act 1 Race",
+  "MATCH_FORMAT_RACE.description": "Both players race the same seeded map through Act 1, then duel with whatever they built.",
+  "MATCH_FORMAT_DRAFT.title": "Match: Draft",
+  "MATCH_FORMAT_DRAFT.short": "Draft",
+  "MATCH_FORMAT_DRAFT.description": "No race. Both players are the same character and draft cards, relics and potions from a shared pool, then duel. Whoever drafts first moves second.",
   "DUEL_BLITZ.title": "1v1 Duel: Real-Time",
   "DUEL_BLITZ.short": "Real-Time",
   "DUEL_BLITZ.description": "Two players race the same map, then duel. Both act at once - actions resolve in the order they are made, so speed decides trades.",

@@ -35,6 +35,21 @@ public static class DuelModifierListPatch
             // and the ticked chip sitting first is what makes the row read as "this one, or that
             // one" rather than as a setting someone has changed. Swapped 2026-08-14 with the
             // default, and the two must move together.
+            // **Match format is deliberately NOT registered yet — this is the switch that turns
+            // draft mode on, and it is the last line to flip, not the first.**
+            //
+            // The modifiers, the lobby row and the loc strings are all in place and build clean;
+            // what is missing is everything behind the chip (DESIGN §7b): suppressing Neow and the
+            // map, the host-owned draft itself, the three pick screens, and applying the loadout.
+            // Registering these two now would put a *selectable* Draft chip in the lobby that
+            // produces a run with no race, no draft and no way to the arena.
+            //
+            // Uncomment both lines together with the run-flow branch. They lead the list because
+            // they lead the lobby: the format decides which game is being played, where the turn
+            // model only decides how the duel inside it works.
+            //
+            // ModelDb.Modifier<MatchFormatRace>(),
+            // ModelDb.Modifier<MatchFormatDraft>(),
             ModelDb.Modifier<DuelTurnBased>(),
             ModelDb.Modifier<DuelBlitz>(),
             ModelDb.Modifier<RaceClockEight>(),
@@ -69,6 +84,15 @@ public static class DuelModifierExclusivityPatch
     /// </summary>
     public static List<HashSet<ModifierModel>> DuelGroups() => new List<HashSet<ModifierModel>>
     {
+        // Uncomment with the registration above — an exclusivity set over two modifiers that are
+        // not in `GoodModifiers` would be a group vanilla never shows and
+        // `DuelModifierMinimumPatch` would still try to keep non-empty.
+        //
+        // new HashSet<ModifierModel>
+        // {
+        //     ModelDb.Modifier<MatchFormatRace>(),
+        //     ModelDb.Modifier<MatchFormatDraft>()
+        // },
         new HashSet<ModifierModel>
         {
             ModelDb.Modifier<DuelBlitz>(),
