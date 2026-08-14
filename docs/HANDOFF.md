@@ -974,6 +974,55 @@ Vanilla's own `AnimateScoreBar` throws the same exception on the same click.
 condition, not on each route out — there is always another route.* The note reasoned about the one
 exit it happened to think of.
 
+### Return to lobby — the screen mechanics, researched 2026-08-14. NOT built.
+
+The item was parked as "mechanism confirmed viable, **screen-stack mechanics genuinely
+unresearched**". That half is now done, and it is smaller than it looked: opening the lobby screen is
+three lines, and vanilla does it in two places we can copy verbatim.
+
+**Host** (`NMultiplayerHostSubmenu`):
+
+```csharp
+NCustomRunScreen screen = stack.GetSubmenuType<NCustomRunScreen>();
+screen.InitializeMultiplayerAsHost(netService, 4);
+stack.Push(screen);
+```
+
+**Client** (`NJoinFriendScreen`):
+
+```csharp
+NCustomRunScreen screen = stack.GetSubmenuType<NCustomRunScreen>();
+screen.InitializeMultiplayerAsClient(netService, joinResult.joinResponse.Value);
+stack.Push(screen);
+```
+
+`GetSubmenuType<T>` builds the screen on first use and reuses it after
+(`NMainMenuSubmenuStack` caches `_customRunScreen`), so nothing needs instantiating by hand — which
+also means **the screen is reused across lobbies**, and is why `DuelLobbyPanel.Apply` is idempotent
+and why the title is set both ways. That reuse is already load-bearing and will be again here.
+
+**The one hard constraint the research turned up:** the stack is `NMainMenu.SubmenuStack`, a node in
+the *main menu scene*. It does not exist during a run. So return-to-lobby is not "open a screen over
+the run" — it is **get back to the main menu with the connection intact, then push**. That reframes
+the work: the screen half is trivial and the ordering half is everything, which is the opposite of
+how the item has been scoped until now.
+
+**What is still to be worked out, and it is all ordering:**
+
+1. Tearing the run down without dropping the connection. `DuelResign` already proves this is possible
+   — it prefixes `RunManager.Abandon`, declares, and returns `false` precisely to leave the transport
+   up — and `DuelRematch` relies on the same. The route back to the main menu has to do that and no
+   more.
+2. **The client needs a `ClientLobbyJoinResponseMessage`**, which it only has from a join. Already
+   researched and viable: `HandleClientLobbyJoinRequestMessage` answers a request over a live
+   connection exactly as for a fresh one, so the client re-sends a join request after teardown and
+   uses the reply. That is the ordering to get right — host opens its lobby first, then answers.
+3. Who initiates, and what the other side does while waiting. Both peers have to arrive at the same
+   place, and a half-torn-down peer is the state this project has been bitten by most.
+
+**Do not start this at the end of a session.** It is teardown ordering across two clients, which is
+the category that produced both the 2026-08-13 desync and the stuck-turn loop.
+
 ### OPEN: not every potion should be queued (2026-08-14, marked not built)
 
 Lucas: *"Skill potions just feel funky. I think we're going to have to manually discriminate on
