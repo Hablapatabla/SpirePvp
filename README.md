@@ -179,7 +179,7 @@ Paste this to start a fresh agent session on this project.
 
 > You're picking up **SpirePvp**, a 1v1 PvP mod for Slay the Spire 2, at `<repo path>` (developed on a Windows desktop and a MacBook — see `docs/MAC_SETUP.md`). **Pull first.**
 >
-> Read in this order: `docs/HANDOFF.md` → `CLAUDE.md` → `docs/DESIGN.md`. **HANDOFF is the living document** — it holds the current state, the patch count, what is playtested and what is not, and your first task. Trust it over anything restated elsewhere, including this prompt. Decompiled game source lives outside the repo (regenerate per README if missing; game is v0.110.1 — check `release_info.json` and re-decompile if Steam moved it underneath you, which it has done mid-session before).
+> Read in this order: `docs/HANDOFF.md` → `CLAUDE.md` → `docs/DESIGN.md`. **HANDOFF is the living document** — it holds the current state, the patch count, what is playtested and what is not, and your first task. Trust it over anything restated elsewhere, including this prompt. Decompiled game source lives outside the repo (regenerate per README if missing; game is v0.111.0 — check `release_info.json` and re-decompile if Steam moved it underneath you, which it has now done twice mid-project).
 >
 > **State, in one line:** the whole loop is playable and has been played end to end many times — two players configure a match in a dedicated **Duel** lobby (turn model, race clock, duel clock), race the same seeded map independently with mirrored RNG, converge on an arena node placed back-to-back after the Act 1 boss, review each other's decks, and duel. **Both turn models work**: real-time blitz, and simultaneous turn-based where each side plans a round privately and the host resolves the two buffers interleaved. Matches end on HP, on the clock, by resignation, by agreed draw, or by a disconnect; a desync voids them as a draw. A **Rematch** button on the result screen replays the same seed without passing through the main menu. Checksums and pre-combat state sync are live throughout; back-to-back matches in one process reconfigure cleanly.
 >
@@ -209,7 +209,7 @@ Paste this to start a fresh agent session on this project.
 
 - **.NET SDK 9** (installed via winget)
 - **Godot 4.5.1 mono** at `C:\Users\lucas\Tools\Godot\Godot_v4.5.1-stable_mono_win64\` — must stay 4.5.1; the game rejects `.pck` files exported by newer Godot ("Megadot" is Mega Crit's fork of 4.5.1)
-- **Game**: `D:\SteamLibrary\steamapps\common\Slay the Spire 2` (v0.110.1). Referenced DLLs: `sts2.dll`, `0Harmony.dll` from `data_sts2_windows_x86_64\`
+- **Game**: `D:\SteamLibrary\steamapps\common\Slay the Spire 2` (**v0.111.0** as of 2026-08-14; check `release_info.json`, Steam updates it silently). Referenced DLLs: `sts2.dll`, `0Harmony.dll` from `data_sts2_windows_x86_64\`
 - **Decompiled game source** (ilspycmd): `D:\modding\sts2\decompiled\` — regenerate after game updates:
   ```
   ilspycmd -o D:\modding\sts2\decompiled "D:\SteamLibrary\steamapps\common\Slay the Spire 2\data_sts2_windows_x86_64\sts2.dll" --nested-directories -p

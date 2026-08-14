@@ -2,7 +2,9 @@
 
 Written for someone (human or agent) picking this up cold, on any OS. Everything below was
 built and playtested against **Slay the Spire 2 v0.110.1**, on two local clients connected
-over ENet.
+over ENet. **The game is now v0.111.0** (`41cef1ea`, released 2026-08-13) — see the START HERE
+section: the decompile was refreshed and the build is green, so nothing below is known stale,
+but nothing below has been *played* on v0.111.0 either.
 
 Read order: this file → `CLAUDE.md` → `README.md` → `docs/DESIGN.md`.
 Platform setup: `docs/MAC_SETUP.md` is macOS-specific but its *reasoning* is portable — the
@@ -856,36 +858,86 @@ disconnect test so far has gone through `DuelDisconnect`'s 30-second silence mea
 transport does report drops.** So a Steam session is the first time the announced-disconnect path runs
 for real, and it is worth deliberately having someone quit mid-duel to see it.
 
-### START HERE — 2026-08-14, end of a long session
+### START HERE — 2026-08-14, second session
 
-**Patch count is 83 classes / 121 methods.** Confirm that line on first launch.
+**The game moved to v0.111.0 underneath the project** (`41cef1ea`, released 2026-08-13), exactly the
+trap this document warns about — the previous session's work was all done against v0.110.1. Handled
+on 2026-08-14 before anything else was read:
 
-#### The immediate next step: instrument the potion popup
+- The decompile at `D:\modding\sts2\decompiled\` was **regenerated** against the v0.111.0 `sts2.dll`.
+  It had been sitting at 2026-08-04, i.e. two game versions stale.
+- **`dotnet build` is green**, which is a stronger statement here than usual: patch targets are
+  `nameof`, so every one of the 121 patched methods still resolves by name and signature. Nothing
+  moved. The single target that can still fail at *runtime* is `Neow.GenerateInitialOptions`, which
+  is virtual and therefore not publicized — so the patch-count line is the thing to read on the next
+  launch, not the build output.
+- **Nothing has been played on v0.111.0.** Confirm `83 patch classes applied cleanly (121 methods)`
+  on first launch before trusting any in-game observation.
 
-A potion reclaimed by cancelling a lock-in is still unusable — its **throw and discard buttons are
-greyed**. **Two fixes have already been aimed at the wrong component** (the belt restore, then
-`CanThrowAtAlly`), both reasoned from the outside without evidence, and the diagnostic finally ruled
-the belt out entirely:
+#### The immediate next step: playtest the potion fix, on v0.111.0
 
-```
-potions: restore pass saw 2 holder(s), restored 1, disabled flags now 0,0
-```
+One turn-based duel is enough for both questions at once. Plan a potion, cancel the lock-in, then
+click the reclaimed potion — **throw and discard should both be live**. The log line to read is
+`potions: restore pass saw … (cleared IsQueued on N)`; N ≥ 1 on the cancel is the fix catching the
+bug. Read the patch-count line in the same log, since it is the first launch on the new game build.
 
-The restore runs, finds the potion, and clears `_disabledUntilPotionRemoved` on both holders. So the
-holder is fine and the **popup** is what refuses. Its buttons are gated by a five-term condition in
-`NPotionPopup` (~line 439):
+#### FIXED: the reclaimed potion (2026-08-14, UNPLAYED)
+
+A potion reclaimed by cancelling a lock-in was still unusable — **throw and discard both greyed**.
+Two fixes had already been aimed at the wrong component (the belt restore, then `CanThrowAtAlly`),
+and the handoff nominated a third: instrument the five-term usability condition in
+`NPotionPopup.RefreshButtons`. **That would also have been the wrong component**, and the decompile
+says so without needing a run.
+
+**The tell was in the report the whole time: *both* buttons were greyed.** The five-term condition
+only ever disables `_useButton`, and `RefreshButtons` opens by unconditionally re-enabling
+`_discardButton`. Nothing in that condition can grey the discard button, so it could not be the gate
+— a log line of all five terms would have come back and answered nothing. The only place that
+disables both is `NPotionPopup._Ready`:
 
 ```csharp
-creature != null && CombatManager.Instance.IsInProgress
-  && creature.CombatState?.CurrentSide == creature.Side
-  && creature.IsAlive && !InACardSelectScreen
-  && !CombatManager.Instance.PlayerActionsDisabled
+if (Potion == null || Potion.IsQueued || Potion.Owner.Creature.IsDead)
+{
+    _useButton.Disable();
+    _discardButton.Disable();
+}
 ```
 
-Two are plausible here: `PlayerActionsDisabled`, which `DuelEndCombatPatch` manipulates and a
-resolving batch may leave set, and `CurrentSide == creature.Side`, since a duel puts both duelists on
-`CombatSide.Player`. **Log all five when the popup opens and read one run** — do not fix anything
-before that line exists. That approach has answered three bugs in a row today; guessing has cost two.
+**`PotionModel.IsQueued` was stuck true.** It is set by `EnqueueManualUse` — which every planned
+potion goes through, both branches of `NPotionHolder.UsePotion` — and cleared in exactly one place,
+`PotionModel.AfterUsageCanceled()`. Vanilla's own withdraw is `UsePotionAction.CancelAction`, and it
+does **two** things:
+
+```csharp
+NRun.Instance.GlobalUi.TopBar.PotionContainer.OnPotionUseOrDiscardCanceled(potion); // holder half
+potionAtSlotIndex?.AfterUsageCanceled();                                            // model half
+```
+
+`LockInTurnModel.Unlock` **drops** the held actions rather than cancelling them, so `CancelAction`
+never runs and neither half happened for free. `LockInPlanView.RestorePlannedPotions` had
+reimplemented the holder half only. So the belt was genuinely restored — which is why the diagnostic
+exonerated it, correctly — while the model kept the flag, and `_Ready`'s branch subscribes to none of
+the refresh events, so nothing could ever re-enable those buttons for the rest of the run.
+
+`RestorePlannedPotions` now calls both halves, and both unconditionally: `AfterUsageCanceled` is a
+no-op on an unqueued potion, and the holder half has to stay unconditional anyway to cover a
+withdrawn **discard**, which greys the holder via `DisableUntilPotionRemoved` without ever setting
+`IsQueued`.
+
+**The lesson, and it is a cheap one to reuse:** *the symptom named the component.* Two buttons with
+different enable paths going dark together excludes every gate that touches only one of them. The
+instrumentation would have measured the half of the screen that was working.
+
+**The diagnostic line now carries the proof**, so read it on the next run rather than the old one:
+
+```
+potions: restore pass saw 2 holder(s), restored 1 (cleared IsQueued on 1), disabled flags now 0,0
+```
+
+`cleared IsQueued on 1` on a cancelled lock-in **is** this bug, caught. A persistent `on 0` while a
+reclaimed potion is still dead means the flag was not the gate after all, and *then* the five-term
+condition is the next question. Once a playtest shows the potion usable again, this line and the one
+in `DuelQueuedCardHighlightPatch` can both come out.
 
 #### Unplayed, awaiting a game
 

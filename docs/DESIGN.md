@@ -4,9 +4,12 @@ Audience: Lucas + Claude (Opus) implementation agents. Each milestone below is s
 handed off as an independent task. File references like `Core/Combat/CombatManager.cs` point
 into the decompiled game source at `D:\modding\sts2\decompiled\MegaCrit\sts2\` (macOS:
 `~/Code/sts2-decompiled/MegaCrit/sts2/`) — read the referenced file before implementing
-against it. Game version: v0.110.1 (re-verify facts after game patches; re-run ilspycmd per
-README). Line numbers here are from the v0.110.1 macOS `data_sts2_macos_arm64/sts2.dll` and
-match the Windows figures, so the two decompiles are interchangeable for navigation.
+against it. **Game version: v0.111.0** (`41cef1ea`, 2026-08-13) — re-verify facts after game
+patches; re-run ilspycmd per README. Most of this document was written against v0.110.1; the
+bump was absorbed on 2026-08-14 and `dotnet build` stayed green, so no patch target moved, but
+line numbers below may have drifted by a few. Line numbers were originally taken from the
+v0.110.1 macOS `data_sts2_macos_arm64/sts2.dll` and matched the Windows figures, so the two
+decompiles are interchangeable for navigation.
 
 ## 1. The mode
 

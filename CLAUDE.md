@@ -10,6 +10,10 @@ StS2 modding model) → `docs/DESIGN.md` (full design, milestones, investigation
 Platform setup: `docs/MAC_SETUP.md` is macOS-specific; the flags and reasoning in HANDOFF are
 OS-neutral.
 
+**Game version: v0.111.0** (`41cef1ea`, 2026-08-13). Steam moved it from v0.110.1 mid-project;
+the decompile was regenerated and `dotnet build` stayed green on 2026-08-14, so no patch target
+moved — but nothing has been *played* on it yet. Confirm the patch-count line on first launch.
+
 **Current state (2026-08-11):** **M1–M6 done and playtested** against v0.110.1 on two local
 clients over ENet. The whole loop runs: lobby modifiers → race Act 1 on a mirrored seed →
 arena rendezvous → deck review → duel → result screen, with split race/duel clocks, checksums

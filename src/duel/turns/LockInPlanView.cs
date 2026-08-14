@@ -171,6 +171,25 @@ internal static class LockInPlanView
     /// actually drunk has already left the belt — `RemoveUsedPotion` empties its holder — so anything
     /// still holding a potion here is one that was planned and then cancelled, or planned in a batch
     /// that never flushed.
+    ///
+    /// **A cancel is two halves and this only ever did one of them.** Vanilla's own withdraw is
+    /// `UsePotionAction.CancelAction`, which calls `PotionContainer.OnPotionUseOrDiscardCanceled`
+    /// (the holder half, i.e. `CancelPotionUseOrDiscard`) **and then** `PotionModel.AfterUsageCanceled`
+    /// (the model half, which clears `IsQueued`). A withdrawn batch never reaches `CancelAction` at
+    /// all — <see cref="LockInTurnModel.Unlock"/> drops the held actions rather than cancelling them
+    /// — so `IsQueued` stayed true for the rest of the run.
+    ///
+    /// That is the whole of "the reclaimed potion is still unusable", and it is why the belt
+    /// diagnostic exonerated the belt: `NPotionPopup._Ready` disables **both** buttons outright on
+    /// `Potion.IsQueued`, before any of the five-term usability condition is consulted, and that
+    /// branch subscribes to none of the refresh events — so nothing could ever re-enable them.
+    /// Both buttons greyed was the tell: the five-term condition only ever disables the *use*
+    /// button, and the discard button is unconditionally re-enabled by `RefreshButtons`.
+    ///
+    /// The model half is called unconditionally, like the holder half, rather than only on potions
+    /// reading `IsQueued`: on an unqueued potion it is a no-op, and the holder half has to stay
+    /// unconditional anyway to cover a withdrawn *discard*, which greys the holder without ever
+    /// setting `IsQueued`.
     /// </summary>
     public static void RestorePlannedPotions()
     {
@@ -182,6 +201,7 @@ internal static class LockInPlanView
 
         int seen = 0;
         int restored = 0;
+        int unqueued = 0;
         foreach (NPotionHolder holder in holders)
         {
             if (!GodotObject.IsInstanceValid(holder))
@@ -193,18 +213,25 @@ internal static class LockInPlanView
             if (holder.Potion != null)
             {
                 holder.CancelPotionUseOrDiscard();
+
+                PotionModel model = holder.Potion.Model;
+                if (model.IsQueued)
+                {
+                    unqueued++;
+                }
+
+                model.AfterUsageCanceled();
                 restored++;
             }
         }
 
-        // **Instrumented because this has been reasoned about twice and is still wrong.** A
-        // reclaimed potion stays greyed and unusable, and the candidates cannot be told apart from
-        // outside: the holder may not be in this list, `Potion` may read null for a slot that
-        // visibly holds one (so the restore is skipped), or `_disabledUntilPotionRemoved` may be set
-        // again after this runs. The counts separate the first two; a `restored` of 0 with `seen`
-        // non-zero means the `Potion != null` test is the wrong question.
+        // `unqueued` is the count that proves the mechanism: it is the number of potions that were
+        // still carrying vanilla's "committed, not yet resolved" flag at a point where nothing was
+        // going to resolve them. One or more of these on a cancelled lock-in is this bug; a
+        // persistent zero on a run where a reclaimed potion is still dead means the flag was not
+        // the gate after all, and the next question is the five-term condition in `RefreshButtons`.
         Log.Warn($"[SpirePvp] potions: restore pass saw {seen} holder(s), "
-                 + $"restored {restored}, disabled flags now "
+                 + $"restored {restored} (cleared IsQueued on {unqueued}), disabled flags now "
                  + string.Join(",", holders.Where(GodotObject.IsInstanceValid)
                      .Select(h => h._disabledUntilPotionRemoved ? "1" : "0")));
     }
