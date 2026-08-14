@@ -576,8 +576,18 @@ public sealed class LockInTurnModel : IPlanningTurnModel
     /// information; and once they are in, the round is already resolving and there is nothing left
     /// to take back. `_flushing` is checked too, because the two can be true for the instant between
     /// their lock-in arriving and the flush running.
+    ///
+    /// **An empty lock-in cannot be withdrawn, and leaving that out cost a stuck turn.** Measured
+    /// 2026-08-14: the host toggled `locking in 0 play(s)` / `took back 0 play(s)` forever, because
+    /// pressing end turn with nothing planned closes the turn — `"nothing left to play — closing the
+    /// turn for you"` presses the button itself — and that press re-locked immediately after every
+    /// withdrawal. Meanwhile `HandIsClosed` was true throughout, so every card read unplayable on the
+    /// host while the client played on.
+    ///
+    /// There is also nothing to take back: an empty batch carries no plays, and it *means* "I am
+    /// finished", which the turn already has a way to undo — plan a card and the turn is live again.
     /// </summary>
-    public bool CanUnlock => _localLockedIn && !_remoteLockedIn && !_flushing;
+    public bool CanUnlock => _localLockedIn && !_remoteLockedIn && !_flushing && _local.Count > 0;
 
     /// <summary>
     /// Takes back the lock-in and returns the planned cards to the hand.

@@ -363,7 +363,14 @@ internal static class LockInPlanView
                 new Vector2(0f, -22f),
             },
             Color = StsColors.gold,
-            ZIndex = 100,
+
+            // **Low, and it used to be 100.** The arrow only has to clear the creature it points at;
+            // 100 put it above everything drawn in the same canvas, which is why it painted over
+            // menus and popups (reported three times, 2026-08-14). `ZAsRelative` is on by default, so
+            // this is relative to the creature node — enough to sit over the art, not enough to
+            // outrank UI. The overlay watch below covers screens on their own canvas; this covers
+            // everything sharing ours, which is what the watch could not see.
+            ZIndex = 1,
         };
 
         node.AddChildSafely(arrow);
