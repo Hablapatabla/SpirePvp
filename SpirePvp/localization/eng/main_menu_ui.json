@@ -5,6 +5,7 @@
   "SPIREPVP_LOBBY.matchFormat": "Match",
   "SPIREPVP_LOBBY.turnModel": "Turn model",
   "SPIREPVP_LOBBY.raceClock": "Race clock",
+  "SPIREPVP_LOBBY.draftClock": "Draft clock",
   "SPIREPVP_LOBBY.duelClock": "Duel clock",
   "SPIREPVP_LOBBY.advanced": "Other modifiers",
   "SPIREPVP_LOBBY.preset": "Preset",

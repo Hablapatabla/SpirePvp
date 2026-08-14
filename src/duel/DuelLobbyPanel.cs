@@ -44,6 +44,13 @@ public static class DuelLobbyPanel
     private const string PanelName = "SpirePvpDuelPanel";
 
     /// <summary>The three decisions a match is made of, in the order they are made.</summary>
+    /// <summary>
+    /// The race clock's heading, kept so the format row can retitle it. Null until the panel is
+    /// built, and cleared with the panel — the screen is reused across lobbies, so a stale node
+    /// here would be a freed `MegaLabel` the next lobby tried to write to.
+    /// </summary>
+    private static MegaLabel? _raceClockHeading;
+
     private static readonly (string LocKey, System.Type Group)[] Groups =
     {
         // **First, because it is the largest decision on the screen.** The turn model chooses how
@@ -112,6 +119,10 @@ public static class DuelLobbyPanel
             returned++;
         }
 
+        // The heading dies with the panel, and the screen is reused — a stale reference here would
+        // be a freed node the next lobby writes to.
+        _raceClockHeading = null;
+
         panel.QueueFree();
         Log.Info($"[SpirePvp] duel lobby: panel removed, {returned} tickbox(es) returned to Custom");
     }
@@ -147,6 +158,7 @@ public static class DuelLobbyPanel
             // Already built — but the clocks may have changed since, by preset or by hand, so
             // the preset row still needs re-syncing. This runs on every ModifiersChanged.
             SyncPresetRow(list);
+            SyncClockHeading(list);
             return;
         }
 
@@ -203,7 +215,11 @@ public static class DuelLobbyPanel
                 continue;
             }
 
-            Heading(panel, locKey);
+            MegaLabel heading = Heading(panel, locKey);
+            if (group == typeof(RaceClockModifier))
+            {
+                _raceClockHeading = heading;
+            }
 
             // One row per group, so a decision reads as a row of alternatives rather than as
             // four more entries in a vertical list. This is what makes the three groups look
@@ -257,6 +273,7 @@ public static class DuelLobbyPanel
         BuildCollapsible(panel, "SPIREPVP_LOBBY.advanced", tickboxes.Except(promoted).ToList());
 
         SyncPresetRow(list);
+        SyncClockHeading(list);
 
         Log.Warn($"[SpirePvp] duel lobby: promoted {promoted.Count} duel modifier(s) into " +
                  $"{Groups.Length} groups, {tickboxes.Count - promoted.Count} left below");
@@ -378,6 +395,32 @@ public static class DuelLobbyPanel
     /// Safe to call whenever the modifiers change: NTickbox.IsTicked only swaps the tick images
     /// and does not raise Toggled, so this cannot re-enter the handler that applies a preset.
     /// </summary>
+    /// <summary>
+    /// Retitles the race clock row when the match format changes.
+    ///
+    /// **The bank already means the right thing, which is why this is a label and not a mechanic.**
+    /// `DuelClockService`'s first bank is "time until the duel starts" — in a race that is time to
+    /// reach the arena, and in a draft it is time to finish drafting. Same countdown, same loss on
+    /// expiry, same code. Leaving it headed *Race clock* in a mode with no race was the only thing
+    /// wrong with it. Asked for by Lucas 2026-08-14.
+    ///
+    /// Runs on every `ModifiersChanged`, which is what makes it change under the player's hands
+    /// rather than only when the lobby is opened — the same hook `SyncPresetRow` uses, and the
+    /// answer to "can the lobby menu change while you are in it".
+    /// </summary>
+    private static void SyncClockHeading(NCustomRunModifiersList list)
+    {
+        if (_raceClockHeading == null || !GodotObject.IsInstanceValid(_raceClockHeading))
+        {
+            return;
+        }
+
+        bool draft = list.GetModifiersTickedOn().Any(m => m is MatchFormatDraft);
+        // Plain `Text`, never `SetTextAutoSize` — see `Heading`, which explains why autosize is
+        // wrong for these labels and how it once shrank them to nothing.
+        _raceClockHeading.Text = Loc(draft ? "SPIREPVP_LOBBY.draftClock" : "SPIREPVP_LOBBY.raceClock");
+    }
+
     private static void SyncPresetRow(NCustomRunModifiersList list)
     {
         List<ModifierModel> ticked = list.GetModifiersTickedOn().ToList();

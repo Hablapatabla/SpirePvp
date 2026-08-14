@@ -1,6 +1,7 @@
 using System;
 using System.Collections.Generic;
 using System.Linq;
+using Godot;
 using MegaCrit.Sts2.Core.Context;
 using MegaCrit.Sts2.Core.Entities.Cards;
 using MegaCrit.Sts2.Core.Entities.Players;
@@ -78,6 +79,9 @@ public static class DuelDraft
 
     private static DateTime _lastBroadcast = DateTime.MinValue;
 
+    /// <summary>Set whenever the state changed, so the next tick rebuilds the screen for it.</summary>
+    private static bool _screenDirty;
+
     /// <summary>
     /// How long the host waits before repeating an unacknowledged draft state.
     ///
@@ -119,6 +123,7 @@ public static class DuelDraft
         _pickerId = 0;
         _firstPickerId = 0;
         _complete = false;
+        _screenDirty = false;
         _awaitingAck = false;
         _lastBroadcast = DateTime.MinValue;
         CloseScreen();
@@ -331,6 +336,10 @@ public static class DuelDraft
     /// </summary>
     public static void Tick()
     {
+        // **Screen upkeep comes first and runs on both peers.** See EnsureScreen for why this is
+        // a tick and not a push at the moment the state arrives.
+        EnsureScreen();
+
         if (!_awaitingAck || _pool.Count == 0)
         {
             return;
@@ -343,6 +352,56 @@ public static class DuelDraft
 
         Log.Info("[SpirePvp] draft: no ack yet — repeating the pool");
         Broadcast();
+    }
+
+    /// <summary>
+    /// Opens the pick screen when it should be open, and puts it back if anything took it down.
+    ///
+    /// **Pushing it the moment the state arrives does not work, and the first playtest showed both
+    /// halves of why.** The draft is set up in `OnRunLaunched`, which fires *before* the run has
+    /// finished entering act 1 — and `RunManager.SetActInternal` calls `ClearScreens()` on its way
+    /// to the first room. So on the client the screen opened and was swept away a moment later
+    /// (`your pick (15 left)`, then a `TaskCanceledException` out of `CardsSelected`), and on the
+    /// host `NOverlayStack.Instance` did not exist yet, so nothing opened at all and **nothing said
+    /// so** — the absent log line being the only symptom, which is the trap this project keeps
+    /// meeting.
+    ///
+    /// Rather than racing the run's own startup sequence, this asks every tick whether the screen
+    /// that *should* be up is up. That is immune to the ordering entirely: it does not matter when
+    /// the overlay stack appears or how many times something clears it, because the next tick puts
+    /// the screen back. The run timer ticks about once a second, so a sweep costs a blink.
+    /// </summary>
+    private static void EnsureScreen()
+    {
+        if (!IsDrafting)
+        {
+            return;
+        }
+
+        bool alive = _screen != null
+                     && GodotObject.IsInstanceValid(_screen)
+                     && _screen.IsInsideTree();
+
+        if (alive && !_screenDirty)
+        {
+            return;
+        }
+
+        if (NOverlayStack.Instance == null)
+        {
+            // Expected for the first tick or two while the run finishes entering the act. Logged
+            // at Info because "the draft never appeared" must not be a silent state.
+            Log.Info("[SpirePvp] draft: no overlay stack yet — will retry next tick");
+            return;
+        }
+
+        if (!alive && !_screenDirty)
+        {
+            Log.Warn("[SpirePvp] draft: the pick screen went away — putting it back");
+        }
+
+        _screenDirty = false;
+        ShowScreen();
     }
 
     /// <summary>The client has the state, so stop repeating it.</summary>
@@ -414,7 +473,9 @@ public static class DuelDraft
             return;
         }
 
-        ShowScreen();
+        // Marked rather than pushed: the screen is built by EnsureScreen on the next tick, which is
+        // what makes it survive the run's own act-entry sequence clearing screens underneath it.
+        _screenDirty = true;
     }
 
     /// <summary>
@@ -430,8 +491,15 @@ public static class DuelDraft
         CloseScreen();
 
         List<CardModel> remaining = Remaining().ToList();
-        if (remaining.Count == 0 || NOverlayStack.Instance == null)
+        if (remaining.Count == 0)
         {
+            Log.Warn("[SpirePvp] draft: nothing left in the pool to show");
+            return;
+        }
+
+        if (NOverlayStack.Instance == null)
+        {
+            Log.Warn("[SpirePvp] draft: cannot show the pool — no overlay stack");
             return;
         }
 
@@ -469,6 +537,13 @@ public static class DuelDraft
         try
         {
             chosen = (await screen.CardsSelected()).FirstOrDefault();
+        }
+        catch (OperationCanceledException)
+        {
+            // Normal: EnsureScreen closes and rebuilds this screen whenever the state changes or
+            // something clears the overlay stack, and closing it cancels the pending selection.
+            // The rebuild starts a fresh wait, so there is nothing to recover here.
+            return;
         }
         catch (Exception e)
         {
