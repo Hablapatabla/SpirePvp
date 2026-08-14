@@ -551,7 +551,16 @@ public sealed class LockInTurnModel : IPlanningTurnModel
         // disabled — see DuelUnlockButtonStatePatch. The label has to say so too: a live button that
         // reads "Lock In" looks like the one that just committed you.
         LockInPlanView.RefreshEndTurnButton();
-        LockInPlanView.ShowCancelLockInLabel();
+
+        // **Only when the press would actually do something.** The label used to be set on every
+        // lock-in, while the button is only enabled when `CanUnlock` — so an empty lock-in, or one
+        // the opponent had already answered, showed a greyed button reading "Cancel Lock In".
+        // Reported 2026-08-14: "it says cancel lock in but it's greyed out." A control that names an
+        // action it will not perform is worse than one that says nothing.
+        if (CanUnlock)
+        {
+            LockInPlanView.ShowCancelLockInLabel();
+        }
 
         // A client hands its plays over through the engine's ordinary request path; the host holds
         // them rather than enqueuing, via DuelLockInPatch. The host has its own buffer already.
