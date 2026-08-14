@@ -1731,7 +1731,7 @@ puller who builds without it sees `RACE_CLOCK_EIGHT.title` as a raw key.
   queue started holding planned cards. Root cause not proven — see the note further down, and find
   the *first* free rather than assuming.
 
-**Still unbuilt: M8.5 slice 3** — the opponent's *unsubmitted* queue on the wire, drawn on their
+**BUILT 2026-08-13 and confirmed in play — M8.5 slice 3** — the opponent's *unsubmitted* queue on the wire, drawn on their
 side. Without it you can only see what has already been released, which is at most 0.4s of warning:
 not enough to read or answer, which is the point of the mode. It is a deliberate change to the
 information rules (DESIGN §1) and was decided as such.
@@ -1891,7 +1891,7 @@ reopens planning.
   distributed through the Workshop at all, so even if the engine had that feature it could not
   apply. Both players build from the same commit; there is no way around it.
 
-### Two bugs found 2026-08-12, both unfixed
+### Two bugs found 2026-08-12 — the lobby row one is FIXED (2026-08-13), the other is below
 
 - ~~**The lobby's radio rows can be emptied.**~~ **FIXED 2026-08-13 (`DuelModifierMinimumPatch`),
   unplayed.** Unticking the last option in a group left *no* selection, and an empty turn-model row
