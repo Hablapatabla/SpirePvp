@@ -35,8 +35,6 @@
   "DUEL_CLOCK_NONE.title": "Duel Clock: Off",
   "DUEL_CLOCK_NONE.short": "Off",
   "DUEL_CLOCK_NONE.description": "No time limit in the duel. Nobody can lose on time there.",
-  "DUEL_SPEED_NORMAL.title": "Duel Speed: Normal",
-  "DUEL_SPEED_NORMAL.description": "Cards resolve at the game's ordinary animation speed.",
-  "DUEL_SPEED_FAST.title": "Duel Speed: Fast",
+  "DUEL_SPEED_FAST.title": "Fast resolution",
   "DUEL_SPEED_FAST.description": "Cards resolve with shorter animations. Both duelists use the agreed speed, so the clocks measure the same thing."
 }

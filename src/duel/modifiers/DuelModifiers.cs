@@ -160,6 +160,10 @@ public sealed class DuelClockNone : DuelClockModifier
 /// is the same argument that removed `duel clock &lt;minutes&gt;`: a mid-run change can only hand
 /// someone terms they never agreed to.
 /// </summary>
+/// **One optional chip in a row of its own, not a pair.** Built as Normal/Fast first and changed
+/// the same day: two mutually exclusive chips said the same thing twice, and the row read as
+/// clutter next to the three that are genuine either/or decisions. Unticked is Normal, which is
+/// what every duel used before this existed.
 public abstract class DuelSpeedModifier : DuelModifierBase
 {
     /// <summary>The Fast Mode level both clients read for the duration of the duel.</summary>
@@ -168,12 +172,6 @@ public abstract class DuelSpeedModifier : DuelModifierBase
     protected override void AfterRunCreated(RunState runState) => DuelMatch.OnRunCreated(runState);
 
     protected override void AfterRunLoaded(RunState runState) => DuelMatch.OnRunCreated(runState);
-}
-
-/// <summary>Vanilla's ordinary animation speed — the setting duels have always been pinned to.</summary>
-public sealed class DuelSpeedNormal : DuelSpeedModifier
-{
-    public override FastModeType Level => FastModeType.Normal;
 }
 
 /// <summary>

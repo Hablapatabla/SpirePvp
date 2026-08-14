@@ -46,6 +46,12 @@ public static class DuelLobbyPanel
     /// <summary>The three decisions a match is made of, in the order they are made.</summary>
     private static readonly (string LocKey, System.Type Group)[] Groups =
     {
+        // **Before the turn model, and that ordering is load-bearing.** The turn-model row matches
+        // `DuelModifierBase`, which every duel modifier inherits — including this one — so listed
+        // after it the speed chip was swallowed into the turn-model row. Reported 2026-08-14 with a
+        // screenshot of it sitting beside Real-Time and Turn-Based. First match wins, so the
+        // narrower group has to be asked first.
+        ("SPIREPVP_LOBBY.duelSpeed", typeof(DuelSpeedModifier)),
         ("SPIREPVP_LOBBY.turnModel", typeof(DuelModifierBase)),
         ("SPIREPVP_LOBBY.raceClock", typeof(RaceClockModifier)),
         ("SPIREPVP_LOBBY.duelClock", typeof(DuelClockModifier))
