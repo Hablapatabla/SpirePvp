@@ -588,3 +588,36 @@ public record struct DuelPendingPlaysMessage : INetMessage
 
     public void Deserialize(PacketReader reader) => plays = reader.ReadList<SerializablePendingPlay>();
 }
+
+/// <summary>
+/// "I have taken my lock-in back" — the counterpart to <see cref="DuelLockInMessage"/>.
+///
+/// **Allowed only while the opponent has not locked in**, which is what makes it safe as a
+/// competitive rule rather than merely convenient: you learn nothing by unlocking, because you
+/// cannot see their plan either way, and once they are in the round is already resolving. The
+/// decision was Lucas's (2026-08-14); DESIGN §3.1b had left it open.
+///
+/// **The plays have to be recalled, not just the flag.** A client forwards its buffer to the host
+/// *before* announcing the lock-in, so by the time this is sent the host is holding those actions in
+/// `_remote`. Un-readying without dropping them would flush a round containing plays their owner had
+/// withdrawn — which is worse than not offering the button at all.
+///
+/// Appended last: ids are positional.
+/// </summary>
+public record struct DuelUnlockMessage : INetMessage
+{
+    public bool ShouldBroadcast => true;
+
+    public NetTransferMode Mode => NetTransferMode.Reliable;
+
+    public LogLevel LogLevel => LogLevel.Info;
+
+    public bool ShouldBuffer => true;
+
+    /// <summary>How many plays the sender withdrew. Host-side sanity check and a log line worth having.</summary>
+    public int playCount;
+
+    public void Serialize(PacketWriter writer) => writer.WriteInt(playCount);
+
+    public void Deserialize(PacketReader reader) => playCount = reader.ReadInt();
+}

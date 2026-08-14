@@ -73,6 +73,7 @@ public static class DuelTurnModel
         }
 
         net.RegisterMessageHandler<DuelLockInMessage>(OnLockIn);
+        net.RegisterMessageHandler<DuelUnlockMessage>(OnUnlock);
 
         // Display only: the indicator over the leader's head changes at turn boundaries, and this
         // is the engine's own event for one. Nothing about the round loop keys off it, so it
@@ -84,6 +85,7 @@ public static class DuelTurnModel
     public static void Disarm()
     {
         RunManager.Instance?.NetService?.UnregisterMessageHandler<DuelLockInMessage>(OnLockIn);
+        RunManager.Instance?.NetService?.UnregisterMessageHandler<DuelUnlockMessage>(OnUnlock);
         CombatManager.Instance.TurnStarted -= OnTurnStarted;
         _armed = false;
     }
@@ -171,6 +173,21 @@ public static class DuelTurnModel
         }
 
         (Current as LockInTurnModel)?.RemoteLockedIn(message.playCount);
+    }
+
+    /// <summary>
+    /// The opponent took their lock-in back. Armed alongside the lock-in handler at run start, for
+    /// the reason every handler in this project is: the peer can announce it before you have done
+    /// anything, and a message with no handler is dropped in silence.
+    /// </summary>
+    private static void OnUnlock(DuelUnlockMessage message, ulong senderId)
+    {
+        if (LocalContext.NetId == senderId)
+        {
+            return;
+        }
+
+        (Current as LockInTurnModel)?.HoldRemoteUnlock(message.playCount);
     }
 
     private static bool _armed;

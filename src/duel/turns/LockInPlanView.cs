@@ -211,6 +211,17 @@ internal static class LockInPlanView
     /// (`RefreshPlayerVotes(animate: false)`), so the icons clear themselves each round and this
     /// only ever has to add one. `DuelLockInIconPatch` decides what they show.
     /// </summary>
+    /// <summary>
+    /// Re-asks the end turn button whether it should be live.
+    ///
+    /// **Needed because the press that locks you in disables it and nothing re-enables it.**
+    /// `DuelUnlockButtonStatePatch` puts it back while a lock-in can still be withdrawn, but it is a
+    /// postfix on `RefreshEnabled` — so something has to call that at the two moments the window
+    /// opens and closes: your own lock-in, and the opponent's arriving.
+    /// </summary>
+    public static void RefreshEndTurnButton() =>
+        NCombatRoom.Instance?.Ui.EndTurnButton?.RefreshEnabled();
+
     public static void RefreshLockInIcons() =>
         NCombatRoom.Instance?.Ui.EndTurnButton?._playerIconContainer?.RefreshPlayerVotes();
 

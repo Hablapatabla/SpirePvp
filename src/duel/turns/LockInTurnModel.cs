@@ -8,6 +8,8 @@ using MegaCrit.Sts2.Core.GameActions.Multiplayer;
 using MegaCrit.Sts2.Core.Logging;
 using MegaCrit.Sts2.Core.Models;
 using MegaCrit.Sts2.Core.Multiplayer.Game;
+using MegaCrit.Sts2.Core.Nodes.Cards;
+using MegaCrit.Sts2.Core.Nodes.Combat;
 using MegaCrit.Sts2.Core.Runs;
 using SpirePvp.Net;
 
@@ -523,6 +525,10 @@ public sealed class LockInTurnModel : IPlanningTurnModel
         // is the one moment it says nothing.
         LockInPlanView.RefreshLockInIcons();
 
+        // The window to take this back is now open, and the press that got us here left the button
+        // disabled — see DuelUnlockButtonStatePatch.
+        LockInPlanView.RefreshEndTurnButton();
+
         // A client hands its plays over through the engine's ordinary request path; the host holds
         // them rather than enqueuing, via DuelLockInPatch. The host has its own buffer already.
         if (run.NetService.Type == NetGameType.Client)
@@ -535,6 +541,87 @@ public sealed class LockInTurnModel : IPlanningTurnModel
 
         run.NetService.SendMessage(new DuelLockInMessage { playCount = _local.Count });
         TryFlush();
+    }
+
+    /// <summary>
+    /// Whether the lock-in can still be taken back: you are in, they are not, and no flush has
+    /// started.
+    ///
+    /// **The window is exactly "they have not committed yet"** (Lucas, 2026-08-14). You learn
+    /// nothing by unlocking — neither player can see the other's plan — so this costs no
+    /// information; and once they are in, the round is already resolving and there is nothing left
+    /// to take back. `_flushing` is checked too, because the two can be true for the instant between
+    /// their lock-in arriving and the flush running.
+    /// </summary>
+    public bool CanUnlock => _localLockedIn && !_remoteLockedIn && !_flushing;
+
+    /// <summary>
+    /// Takes back the lock-in and returns the planned cards to the hand.
+    ///
+    /// **The plays are recalled, not just the flag.** A client forwards its buffer to the host
+    /// *before* announcing the lock-in (see <see cref="LockIn"/>), so the host is already holding
+    /// those actions in `_remote`; un-readying without dropping them would flush a round containing
+    /// plays their owner had withdrawn. `DuelUnlockMessage` is what makes the peer let go, and it is
+    /// sent whichever side we are — the host has to tell a client to clear its `_remoteLockedIn` for
+    /// the icon, and a client has to make the host drop the actions themselves.
+    ///
+    /// Everything goes back rather than the last card only. "Unsubmit" is a return to planning, and
+    /// a partial undo would need an order to undo *in* — the batch has none, being a set you
+    /// committed at once.
+    /// </summary>
+    public void Unlock()
+    {
+        if (!CanUnlock)
+        {
+            return;
+        }
+
+        int withdrawn = _local.Count;
+        _localLockedIn = false;
+
+        // Back to the hand before the buffer is cleared: the queue is keyed on the card, and the
+        // model is where we still know which cards were ours.
+        NCardPlayQueue? queue = NCardPlayQueue.Instance;
+        foreach (GameAction action in _local)
+        {
+            CardModel? card = PlannedCard(action);
+            NCard? node = card == null ? null : queue?.GetCardNode(card);
+            if (node != null)
+            {
+                queue!.RemoveCardFromQueueForCancellation(node, forceReturnToHand: true);
+            }
+        }
+
+        _local.Clear();
+        _localEnd = null;
+
+        Log.Warn($"[SpirePvp] lock-in: took back {withdrawn} play(s) — the opponent had not locked in");
+
+        RunManager.Instance?.NetService?.SendMessage(new DuelUnlockMessage { playCount = withdrawn });
+
+        LockInPlanView.RefreshLockInIcons();
+        LockInPlanView.RefreshEndTurnButton();
+        LockInPlanView.RefreshPlannedCosts();
+    }
+
+    /// <summary>
+    /// The opponent took their lock-in back, so drop what they had handed over.
+    ///
+    /// **Dropping `_remote` is the point of the message.** On the host those are real actions
+    /// already forwarded through `RequestEnqueue` and held by `DuelLockInPatch`; leaving them would
+    /// flush plays that had been withdrawn. On a client `_remote` is empty and only the flag and the
+    /// icon matter, which is why both sides run the same code.
+    /// </summary>
+    public void HoldRemoteUnlock(int playCount)
+    {
+        Log.Warn($"[SpirePvp] lock-in: opponent took back {playCount} play(s) "
+                 + $"({_remote.Count} held here, dropping)");
+
+        _remote.Clear();
+        _remoteLockedIn = false;
+        _remoteEnd = null;
+
+        LockInPlanView.RefreshLockInIcons();
     }
 
     /// <summary>
@@ -557,6 +644,9 @@ public sealed class LockInTurnModel : IPlanningTurnModel
         }
 
         _remoteLockedIn = true;
+
+        // Their commitment closes our withdraw window, so the button stops being live.
+        LockInPlanView.RefreshEndTurnButton();
 
         // **A count of zero is the host declaring themselves finished for the turn.** The host
         // reads the same fact off an empty buffer when the client's end turn arrives; a client has
