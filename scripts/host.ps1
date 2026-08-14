@@ -46,7 +46,19 @@ if (-not $NoBuild) {
     if ($running.Count -gt 0) {
         Write-Host "Stopping $($running.Count) dev instance(s) - they lock the mod DLL." -ForegroundColor Yellow
         $running | ForEach-Object { Stop-Process -Id $_.ProcessId -Force }
-        Start-Sleep -Milliseconds 700
+    }
+
+    # **Wait for the DLL, not for a guess.** A stopped process does not release its handles
+    # synchronously, and the fixed 700ms this replaced was a guess that held until it did not
+    # (2026-08-14: MSB3027, "The file is locked by SlayTheSpire2 (10992)").
+    if (-not (Wait-Sts2ModDllWritable)) {
+        Write-Host ""
+        Write-Host "SpirePvp.dll is still locked by a running Slay the Spire 2." -ForegroundColor Red
+        Get-Process SlayTheSpire2 -ErrorAction SilentlyContinue |
+            ForEach-Object { Write-Host "  pid $($_.Id) - started $($_.StartTime.ToString('HH:mm:ss'))" -ForegroundColor Yellow }
+        Write-Host "  Close it, or re-run with -NoBuild to launch against what is installed." -ForegroundColor Yellow
+        Write-Host ""
+        throw "Mod DLL is locked - not building."
     }
 
     # A Steam instance survives the line above, but it still holds the DLL open if SpirePvp is
@@ -70,13 +82,16 @@ if (-not $NoBuild) {
         # *enabled* holds SpirePvp.dll open, so the post-build copy cannot land. Hit 2026-08-13,
         # right after enabling the mod on the Steam profile for a real playtest - which is exactly
         # when you would hit it, and exactly when the error reads as "my code is broken".
-        $foreign = @(Get-Sts2Process -Foreign)
-        if ($foreign.Count -gt 0) {
+        # Keyed on the file rather than on the process list, because those two disagreed once and
+        # the file was right - see Test-Sts2ModDllWritable.
+        if (-not (Test-Sts2ModDllWritable)) {
             Write-Host ""
-            Write-Host "Build failed while $($foreign.Count) non-dev instance(s) are running." -ForegroundColor Red
-            Write-Host "If the errors above are MSB3021/MSB3027 about SpirePvp.dll, that is a file lock," -ForegroundColor Yellow
-            Write-Host "not a compile error - a Steam instance with the mod enabled holds the DLL open." -ForegroundColor Yellow
-            Write-Host "  Close that game, or re-run with -NoBuild to launch against what is installed." -ForegroundColor Yellow
+            Write-Host "That is a FILE LOCK, not a compile error." -ForegroundColor Red
+            Write-Host "SpirePvp.dll is held open by a running Slay the Spire 2 - a Steam instance with" -ForegroundColor Yellow
+            Write-Host "the mod enabled will do it, and so will one this script deliberately left alone." -ForegroundColor Yellow
+            Get-Process SlayTheSpire2 -ErrorAction SilentlyContinue |
+                ForEach-Object { Write-Host "  pid $($_.Id)" -ForegroundColor Yellow }
+            Write-Host "  Close it, or re-run with -NoBuild to launch against what is installed." -ForegroundColor Yellow
             Write-Host ""
         }
 

@@ -37,6 +37,48 @@ A CIM query that fails - permissions, the WMI service, a locked-down box - retur
 rather than throwing, so the caller stops nothing. That is the safe direction to fail in: the
 cost is a build error naming the locked DLL, against the cost of ending someone's match.
 #>
+<#
+Whether the installed mod DLL can be written right now.
+
+**Asks the file, not the process list.** Classifying processes answers "is something running";
+this answers the question that actually decides whether the build can finish. On 2026-08-14 a
+build failed on `The file is locked by: "SlayTheSpire2 (10992)"` while the classifier reported no
+foreign instance at all - so the two disagreed, and the file was right. A CIM query that fails,
+a process whose command line cannot be read, or a handle not yet released by a process that has
+already gone will all fool the process list and none of them fool this.
+#>
+function Test-Sts2ModDllWritable {
+    $dll = Join-Path (Get-Sts2Path) "mods\SpirePvp\SpirePvp.dll"
+    if (-not (Test-Path $dll)) { return $true }
+
+    try {
+        $stream = [System.IO.File]::Open($dll, 'Open', 'Write', 'None')
+        $stream.Close()
+        return $true
+    }
+    catch {
+        return $false
+    }
+}
+
+<#
+Waits for the installed DLL to become writable, for processes that are on their way out.
+
+A stopped process does not release its file handles synchronously, and the fixed 700ms this
+replaced was a guess that held until it did not.
+#>
+function Wait-Sts2ModDllWritable {
+    param([int]$TimeoutMs = 8000)
+
+    $deadline = (Get-Date).AddMilliseconds($TimeoutMs)
+    while ((Get-Date) -lt $deadline) {
+        if (Test-Sts2ModDllWritable) { return $true }
+        Start-Sleep -Milliseconds 200
+    }
+
+    return Test-Sts2ModDllWritable
+}
+
 function Get-Sts2Process {
     param([switch]$Foreign)
 
