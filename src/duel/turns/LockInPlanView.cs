@@ -100,7 +100,24 @@ internal static class LockInPlanView
     /// </summary>
     public static void RefreshPlannedCosts()
     {
-        NPlayerHand? hand = NPlayerHand.Instance;
+        // **The hand is not repainted while a batch is resolving, and that is a fix rather than an
+        // optimisation.** Reported 2026-08-14: "during the turn resolution the cards in hand are
+        // jumping between playable and unplayable and it's visually distracting."
+        //
+        // They were, and the flicker is `DuelPlanEnergyPatch`'s desync guard seen from outside. That
+        // patch answers only while `ActionExecutor.CurrentlyRunningAction` is null — it must, because
+        // `PlayCardAction.ExecuteAction` re-checks `CanPlay` on the card it is playing and a "no"
+        // there would cancel the play. So *between* actions it reports the hand closed and every card
+        // unplayable, and *during* an action it stands aside and vanilla's plain affordability answer
+        // shows through. Repainting on every action start sampled both, alternately.
+        //
+        // Nothing is interactive during resolution, so the honest fix is to stop asking: the last
+        // paint before the flush already shows the hand correctly, and it is still correct when
+        // planning reopens. The orb below is repainted regardless — it is the one thing that *should*
+        // move while cards resolve.
+        bool resolving = DuelTurnModel.Current is IPlanningTurnModel model && model.HandIsClosed;
+
+        NPlayerHand? hand = resolving ? null : NPlayerHand.Instance;
         if (hand != null)
         {
             foreach (NHandCardHolder holder in hand.Holders)
