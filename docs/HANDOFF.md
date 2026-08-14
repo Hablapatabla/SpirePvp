@@ -856,7 +856,85 @@ disconnect test so far has gone through `DuelDisconnect`'s 30-second silence mea
 transport does report drops.** So a Steam session is the first time the announced-disconnect path runs
 for real, and it is worth deliberately having someone quit mid-duel to see it.
 
-### START HERE — 2026-08-13 evening, pushed for playtesting
+### START HERE — 2026-08-14, end of a long session
+
+**Patch count is 83 classes / 121 methods.** Confirm that line on first launch.
+
+#### The immediate next step: instrument the potion popup
+
+A potion reclaimed by cancelling a lock-in is still unusable — its **throw and discard buttons are
+greyed**. **Two fixes have already been aimed at the wrong component** (the belt restore, then
+`CanThrowAtAlly`), both reasoned from the outside without evidence, and the diagnostic finally ruled
+the belt out entirely:
+
+```
+potions: restore pass saw 2 holder(s), restored 1, disabled flags now 0,0
+```
+
+The restore runs, finds the potion, and clears `_disabledUntilPotionRemoved` on both holders. So the
+holder is fine and the **popup** is what refuses. Its buttons are gated by a five-term condition in
+`NPotionPopup` (~line 439):
+
+```csharp
+creature != null && CombatManager.Instance.IsInProgress
+  && creature.CombatState?.CurrentSide == creature.Side
+  && creature.IsAlive && !InACardSelectScreen
+  && !CombatManager.Instance.PlayerActionsDisabled
+```
+
+Two are plausible here: `PlayerActionsDisabled`, which `DuelEndCombatPatch` manipulates and a
+resolving batch may leave set, and `CurrentSide == creature.Side`, since a duel puts both duelists on
+`CombatSide.Player`. **Log all five when the popup opens and read one run** — do not fix anything
+before that line exists. That approach has answered three bugs in a row today; guessing has cost two.
+
+#### Unplayed, awaiting a game
+
+- **Fast mode row** — one chip, now last in the lobby above "Other modifiers"
+- **Custom lobby restored** — `DuelLobbyPanel.Remove` returns the tickboxes and frees the panel when
+  the screen is reused for a plain Custom run
+- **"Cancel Lock In" label** — now only shown when the button can actually withdraw
+- **The cancelled-Defend fix** — locked-in cards surviving a card selection
+
+#### Confirmed working today
+
+Random character, the purple queued-card mark (appearing *and* clearing), the initiative arrow
+staying under menus, correct costs in the card library, the energy orb holding steady across a flush,
+and cancelling a lock-in.
+
+#### The invariant Lucas set, and the one gap left in it
+
+*"The average person with this mod shouldn't have literally any chance of anything in their game
+breaking outside the duel button, lobby, and run itself."* The mod is inert at runtime outside a duel
+— every patch is gated behind `DuelSession` — and the **lobby screen is the one place shared UI is
+mutated**, because `NMainMenuSubmenuStack` caches a single `NCustomRunScreen` and hands it to both
+Custom and Duel. `Remove` closes most of that; the remaining gap is that `CompactForRow` shortens a
+tickbox's label and the original text is not kept, so a Custom lobby entered after a duel shows
+correct but abbreviated modifier names. **Stash the original on the tickbox when compacting and put
+it back on removal** — that finishes the invariant.
+
+Building a separate lobby screen instead was raised and is a real milestone rather than a fix:
+`NCustomRunScreen` carries the character row, the seed field, the remote-player container and the
+multiplayer join handshake (`InitializeMultiplayerAsHost`/`AsClient`) that the whole lobby and
+return-to-lobby depend on. Make the re-dressing reversible first; reconsider only if it still feels
+fragile.
+
+#### Bigger work, in the order it is worth taking
+
+1. **Return to lobby** — screen mechanics now researched (see below); what is left is teardown
+   ordering across two clients. Do not start it at the end of a session.
+2. **Not every potion should be queued** — recorded with the reasoning; needs Lucas's classification.
+3. **Row 6 of the teardown audit** (`Hook.AfterCombatEnd`) — deliberately parked as "too subtle for
+   now, revisit when more feature complete".
+4. **The both-die corner**, the **rest site before the duel**, and the two Neow questions — all need a
+   decision before code.
+
+#### Housekeeping
+
+The diagnostic logging in `DuelQueuedCardHighlightPatch` and the potion restore pass has done its
+job and can come out once the popup bug is closed. Both `overnight/*` branches are fully absorbed
+into master and can be deleted.
+
+### The previous handoff — 2026-08-13 evening
 
 **Playtested and confirmed today**, in order: the arena heal on the wire; real-time paced (position
 ordering, cross-player beat, contest window — *"felt great"*); turn-based end to end (*"working
