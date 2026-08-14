@@ -79,7 +79,11 @@ public static class DuelDraftScreenPatch
 {
     public static bool Prefix(CardModel card)
     {
-        if (!DuelDraft.IsDrafting || DuelDraft.LocalMayPick)
+        // **`IsDraftRun`, not `IsDrafting`.** The final pool is deliberately left on screen after
+        // the last pick, so that a draft run does not stare at a black game area while it waits for
+        // the arena — and `IsDrafting` is already false by then, which would have made every card
+        // on that screen clickable again.
+        if (!DuelDraft.IsDraftRun || DuelDraft.LocalMayPick)
         {
             return true;
         }

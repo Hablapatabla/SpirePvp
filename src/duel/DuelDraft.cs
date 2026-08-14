@@ -255,11 +255,50 @@ public static class DuelDraft
             // twice reads as a bug even when it is not, and denial stops meaning anything.
             foreach (CardModel card in ofRarity.OrderBy(_ => rng.Next()).Take(PerRarity))
             {
-                pool.Add(card.ToMutable());
+                pool.Add(Own(card.ToMutable(), drafter));
             }
         }
 
         return pool;
+    }
+
+    /// <summary>
+    /// Gives a pool card an owner, which is not cosmetic.
+    ///
+    /// **A card with no `Owner` renders as nonsense**, and the first playtest showed exactly how:
+    /// every energy cost and star cost read 1 and every description read as an error string. Most
+    /// card text and most cost maths resolve through `Owner` — it is how a card reaches its
+    /// player's run state, relics and combat state — so an ownerless card cannot answer either
+    /// question and falls back.
+    ///
+    /// `Owner` is write-once (it throws if set twice), so this is guarded rather than assigned
+    /// blind: the pool is rebuilt on every state broadcast and a card that already has its owner
+    /// must be left alone.
+    ///
+    /// Each peer owns its own copies. The host's pool belongs to the host's player and the
+    /// client's to the client's, which is right — they are two presentations of one agreed list,
+    /// and the seven each side keeps go into that side's deck.
+    /// </summary>
+    private static CardModel Own(CardModel card, Player? owner)
+    {
+        if (owner == null)
+        {
+            return card;
+        }
+
+        try
+        {
+            if (card.Owner == null)
+            {
+                card.Owner = owner;
+            }
+        }
+        catch (Exception e)
+        {
+            Log.Warn($"[SpirePvp] draft: could not set owner on {card.Id.Entry}: {e.Message}");
+        }
+
+        return card;
     }
 
     /// <summary>Host only: apply a pick, whoever asked for it, then tell everyone.</summary>
@@ -470,10 +509,15 @@ public static class DuelDraft
             return;
         }
 
+        Player? me = RunManager.Instance?.State == null
+            ? null
+            : LocalContext.GetMe(RunManager.Instance.State.Players);
+
         _pool = (message.pool ?? new List<SerializableCard>())
             .Select(CardModel.FromSerializable)
             .Where(c => c != null)
-            .ToList()!;
+            .Select(c => Own(c!, me))
+            .ToList();
         _hostPicks.Clear();
         _hostPicks.AddRange(message.hostPicks ?? new List<int>());
         _clientPicks.Clear();
@@ -533,8 +577,14 @@ public static class DuelDraft
         // (1, 1) is vanilla's "pick exactly one" — the card-reward interaction, which is what a
         // draft pick is. Not cancelable: there is no valid state where a player declines to draft,
         // and the opponent is waiting on the answer.
+        //
+        // **The title says whose turn it is**, which is the only place that fact is written down:
+        // the pool looks identical on both screens and the cards simply stop responding when it is
+        // not yours, which reads as a broken screen rather than as waiting. It borrowed
+        // `TO_UPGRADE` while the flow was being built and told everyone to choose a card to
+        // upgrade, which is a different game.
         CardSelectorPrefs prefs = new CardSelectorPrefs(
-            new LocString("card_selection", "TO_UPGRADE"), 1, 1)
+            DraftTitle(myTurn), 1, 1)
         {
             Cancelable = false
         };
@@ -554,6 +604,33 @@ public static class DuelDraft
 
         Log.Info($"[SpirePvp] draft: your pick ({remaining.Count} left)");
         WaitForPick(screen, remaining);
+    }
+
+    /// <summary>
+    /// The screen's heading, and a missing key must not be able to take the draft down with it.
+    ///
+    /// `LocManager` throws for a key it does not have, and the key ships in the `.pck` while the
+    /// code that reads it ships in the DLL — so a client that rebuilt without re-exporting has the
+    /// call and not the string. That split killed a net message on 2026-08-13 and would throw here
+    /// inside the screen build, i.e. no draft at all. English is the fallback rather than the raw
+    /// key, because `SPIREPVP_DRAFT.yourTurn` on a heading teaches nobody anything.
+    /// </summary>
+    private static LocString DraftTitle(bool myTurn)
+    {
+        string key = myTurn ? "SPIREPVP_DRAFT.yourTurn" : "SPIREPVP_DRAFT.theirTurn";
+
+        // `GetIfExists` rather than the constructor: the constructor throws for a key the pack does
+        // not have, and this runs inside the screen build, so a stale pack would mean no draft at
+        // all rather than a wrong heading.
+        LocString? loc = LocString.GetIfExists("card_selection", key);
+        if (loc != null)
+        {
+            return loc;
+        }
+
+        Log.Warn($"[SpirePvp] draft: loc key {key} is missing — the .pck is stale. Re-export it; "
+                 + "the heading will read as a card upgrade until you do.");
+        return new LocString("card_selection", "TO_UPGRADE");
     }
 
     private static async void WaitForPick(NDeckCardSelectScreen screen, List<CardModel> remaining)
@@ -647,8 +724,14 @@ public static class DuelDraft
     /// </summary>
     private static void Finish()
     {
-        CloseScreen();
-
+        // **Deliberately not closed.** Closing it here left the game area black until the arena
+        // loaded: a draft run has closed the map (see EnsureScreen), so with the draft screen gone
+        // too there is nothing behind it — reported as "the game screen went black when there was
+        // 1 left", with the top bar and multiplayer overlay still drawn over the void.
+        //
+        // The final pool stays up instead, and `DuelEntry`'s deck review replaces it when both
+        // players arrive. `DuelDraftScreenPatch` keeps it unclickable in the meantime, which is why
+        // that gate asks `IsDraftRun` rather than `IsDrafting`.
         RunState? runState = RunManager.Instance?.State;
         Player? me = runState == null ? null : LocalContext.GetMe(runState.Players);
         if (runState == null || me == null)
@@ -666,7 +749,11 @@ public static class DuelDraft
                 continue;
             }
 
-            me.Deck.AddInternal(_pool[index].ToMutable());
+            // **Not `ToMutable()` again.** Pool cards are already mutable copies — `ToMutable`
+            // asserts the source is canonical, so a second call on one of these is wrong by
+            // construction. They already carry this player as their owner, which is what the deck
+            // wants anyway.
+            me.Deck.AddInternal(_pool[index]);
             added++;
         }
 
