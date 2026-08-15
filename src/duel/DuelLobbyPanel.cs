@@ -49,7 +49,10 @@ public static class DuelLobbyPanel
     /// built, and cleared with the panel — the screen is reused across lobbies, so a stale node
     /// here would be a freed `MegaLabel` the next lobby tried to write to.
     /// </summary>
-    private static MegaLabel? _raceClockHeading;
+    /// <summary>The two clock rows, kept so the format can show one and hide the other.</summary>
+    private static (MegaLabel Heading, Control Row)? _raceClockRow;
+
+    private static (MegaLabel Heading, Control Row)? _draftClockRow;
 
     private static readonly (string LocKey, System.Type Group)[] Groups =
     {
@@ -120,9 +123,10 @@ public static class DuelLobbyPanel
             returned++;
         }
 
-        // The heading dies with the panel, and the screen is reused — a stale reference here would
-        // be a freed node the next lobby writes to.
-        _raceClockHeading = null;
+        // The rows die with the panel, and the screen is reused — stale references here would be
+        // freed nodes the next lobby writes to.
+        _raceClockRow = null;
+        _draftClockRow = null;
 
         panel.QueueFree();
         Log.Info($"[SpirePvp] duel lobby: panel removed, {returned} tickbox(es) returned to Custom");
@@ -159,7 +163,7 @@ public static class DuelLobbyPanel
             // Already built — but the clocks may have changed since, by preset or by hand, so
             // the preset row still needs re-syncing. This runs on every ModifiersChanged.
             SyncPresetRow(list);
-            SyncClockHeading(list);
+            SyncClockRows(list);
             Patches.DuelDraftMirrorPatch.MirrorNow(screen);
             return;
         }
@@ -217,27 +221,8 @@ public static class DuelLobbyPanel
                 continue;
             }
 
-            // **One clock row or the other, never both.** The race clock and the draft clock feed
-            // the same bank — "time until the duel starts" — so exactly one of them is meaningful,
-            // and which one is decided by the format. Built rather than hidden, because the row is
-            // rebuilt on every modifier change anyway and a hidden row still takes part in layout.
-            bool draftFormat = list.GetModifiersTickedOn().Any(m => m is MatchFormatDraft);
-            if ((group == typeof(RaceClockModifier) && draftFormat)
-                || (group == typeof(DraftClockModifier) && !draftFormat))
-            {
-                foreach (NRunModifierTickbox spare in members)
-                {
-                    promoted.Add(spare);
-                }
-
-                continue;
-            }
 
             MegaLabel heading = Heading(panel, locKey);
-            if (group == typeof(RaceClockModifier))
-            {
-                _raceClockHeading = heading;
-            }
 
             // One row per group, so a decision reads as a row of alternatives rather than as
             // four more entries in a vertical list. This is what makes the three groups look
@@ -248,6 +233,20 @@ public static class DuelLobbyPanel
                 SizeFlagsHorizontal = Control.SizeFlags.ExpandFill
             };
             panel.AddChildSafely(row);
+
+            // **Both clock rows are built and one is hidden, rather than one being built.** The
+            // panel is constructed once per lobby and only *synced* on later modifier changes —
+            // which is why filtering at build time changed nothing when the format was switched
+            // afterwards, reported as "no difference other than the heading of the row". Keeping
+            // both and toggling visibility is what survives a panel that is not rebuilt.
+            if (group == typeof(RaceClockModifier))
+            {
+                _raceClockRow = (heading, row);
+            }
+            else if (group == typeof(DraftClockModifier))
+            {
+                _draftClockRow = (heading, row);
+            }
 
             foreach (NRunModifierTickbox tickbox in members)
             {
@@ -291,7 +290,7 @@ public static class DuelLobbyPanel
         BuildCollapsible(panel, "SPIREPVP_LOBBY.advanced", tickboxes.Except(promoted).ToList());
 
         SyncPresetRow(list);
-        SyncClockHeading(list);
+        SyncClockRows(list);
         Patches.DuelDraftMirrorPatch.MirrorNow(screen);
 
         Log.Warn($"[SpirePvp] duel lobby: promoted {promoted.Count} duel modifier(s) into " +
@@ -427,17 +426,24 @@ public static class DuelLobbyPanel
     /// rather than only when the lobby is opened — the same hook `SyncPresetRow` uses, and the
     /// answer to "can the lobby menu change while you are in it".
     /// </summary>
-    private static void SyncClockHeading(NCustomRunModifiersList list)
+    private static void SyncClockRows(NCustomRunModifiersList list)
     {
-        if (_raceClockHeading == null || !GodotObject.IsInstanceValid(_raceClockHeading))
+        bool draft = list.GetModifiersTickedOn().Any(m => m is MatchFormatDraft);
+        Show(_raceClockRow, !draft);
+        Show(_draftClockRow, draft);
+    }
+
+    private static void Show((MegaLabel Heading, Control Row)? pair, bool visible)
+    {
+        if (pair == null
+            || !GodotObject.IsInstanceValid(pair.Value.Heading)
+            || !GodotObject.IsInstanceValid(pair.Value.Row))
         {
             return;
         }
 
-        bool draft = list.GetModifiersTickedOn().Any(m => m is MatchFormatDraft);
-        // Plain `Text`, never `SetTextAutoSize` — see `Heading`, which explains why autosize is
-        // wrong for these labels and how it once shrank them to nothing.
-        _raceClockHeading.Text = Loc(draft ? "SPIREPVP_LOBBY.draftClock" : "SPIREPVP_LOBBY.raceClock");
+        pair.Value.Heading.Visible = visible;
+        pair.Value.Row.Visible = visible;
     }
 
     private static void SyncPresetRow(NCustomRunModifiersList list)

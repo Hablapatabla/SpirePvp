@@ -210,6 +210,7 @@ public static class DuelMatch
         Turns.LockInPlanView.ClearInitiative();
         DuelDraft.Disarm();
         DuelDraft.Reset();
+        Patches.DuelDraftMirrorPatch.Reset();
         MaskedModifiers = null;
     }
 

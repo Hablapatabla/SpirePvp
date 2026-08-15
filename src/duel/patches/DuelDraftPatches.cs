@@ -217,6 +217,28 @@ public static class DuelDraftMirrorPatch
     internal static bool DraftLobbyActive { get; private set; }
 
     /// <summary>
+    /// Lets go of everything this class remembers, at run teardown.
+    ///
+    /// **Mod state is static and the run it belongs to is not** — the rule this project has been
+    /// caught by more than any other. Reported 2026-08-14: the first draft of a session worked,
+    /// then returning to the main menu and starting a second gave mismatched characters and no
+    /// draft again. `DraftLobbyActive` and `_lastDump` both survived the first run, so the second
+    /// lobby started with the first one's answers: the dump suppressed its opening line as
+    /// unchanged, and the lock could be live before the new lobby had said anything about its
+    /// format.
+    ///
+    /// `_mirroring` is cleared too. It is only ever true inside one call, but a mirror interrupted
+    /// by a teardown would leave it stuck true and silently disable the lock for the whole next
+    /// match.
+    /// </summary>
+    public static void Reset()
+    {
+        DraftLobbyActive = false;
+        _mirroring = false;
+        _lastDump = string.Empty;
+    }
+
+    /// <summary>
     /// Prints what each peer believes the lobby holds, once per refresh and only when it changes.
     ///
     /// **Added after the fourth failed fix, which is three too many.** Each attempt was reasoned
