@@ -5,6 +5,7 @@ using Godot;
 using MegaCrit.Sts2.Core.Context;
 using MegaCrit.Sts2.Core.Entities.Cards;
 using MegaCrit.Sts2.Core.Entities.Players;
+using MegaCrit.Sts2.Core.Helpers;
 using MegaCrit.Sts2.Core.Localization;
 using MegaCrit.Sts2.Core.Logging;
 using MegaCrit.Sts2.Core.Models;
@@ -76,6 +77,9 @@ public static class DuelDraft
 
     private static NDeckCardSelectScreen? _screen;
 
+    /// <summary>The campfire scene drawn behind the draft. See ShowBackdrop.</summary>
+    private static Control? _backdrop;
+
     /// <summary>Host only: true until the client confirms it has the state. See DraftAckMessage.</summary>
     private static bool _awaitingAck;
 
@@ -131,6 +135,7 @@ public static class DuelDraft
         _screenDirty = false;
         _addedToDeck = 0;
         _awaitingAck = false;
+        CloseBackdrop();
         _lastBroadcast = DateTime.MinValue;
         CloseScreen();
     }
@@ -407,6 +412,15 @@ public static class DuelDraft
         // a tick and not a push at the moment the state arrives.
         EnsureScreen();
 
+        // The backdrop deliberately outlives the draft — it carries the deck review too, which is
+        // the gap that was black before — but it must not follow anyone into the arena. Taken down
+        // on the phase rather than on the last pick, because the phase is the condition that
+        // actually means "the scenery is wrong now"; guard on the condition, not on a route.
+        if (DuelSession.IsDuelActive)
+        {
+            CloseBackdrop();
+        }
+
         if (!_awaitingAck || _pool.Count == 0)
         {
             return;
@@ -625,6 +639,8 @@ public static class DuelDraft
             Cancelable = false
         };
 
+        ShowBackdrop();
+
         NDeckCardSelectScreen screen = NDeckCardSelectScreen.Create(new List<CardModel>(_pool), prefs);
         _screen = screen;
         NOverlayStack.Instance.Push(screen);
@@ -760,6 +776,63 @@ public static class DuelDraft
         Log.Warn($"[SpirePvp] draft: complete — deck is {me.Deck.Cards.Count} cards, heading for the arena");
 
         DuelRendezvous.ArriveLocal();
+    }
+
+    /// <summary>
+    /// Puts the act's campfire scene behind the draft, instead of nothing.
+    ///
+    /// **A draft run closes the map, so there was no room behind the overlay and the game area was
+    /// plain black.** Asked for on sight: *"can we have a dim campfire background?"* — and the act
+    /// already builds exactly that for its rest sites, as a `Control`, in one call. Borrowed rather
+    /// than invented, like the play queue and the end-turn button before it: it is the act you are
+    /// actually in, so it matches the duel that follows.
+    ///
+    /// Dimmed, because it is scenery and the cards are the screen. The overlay's own backstop still
+    /// sits on top of this, so the tint only has to take it from "a room" to "a room behind glass".
+    ///
+    /// Parented to the overlay stack and moved to the back, so it is torn down with the draft and
+    /// cannot outlive it into the arena.
+    /// </summary>
+    private static void ShowBackdrop()
+    {
+        if (_backdrop != null && GodotObject.IsInstanceValid(_backdrop))
+        {
+            return;
+        }
+
+        NOverlayStack? overlays = NOverlayStack.Instance;
+        ActModel? act = RunManager.Instance?.State?.Act;
+        if (overlays == null || act == null)
+        {
+            return;
+        }
+
+        try
+        {
+            Control backdrop = act.CreateRestSiteBackground();
+            backdrop.Name = "SpirePvpDraftBackdrop";
+            backdrop.Modulate = new Color(0.55f, 0.55f, 0.6f, 1f);
+            backdrop.MouseFilter = Control.MouseFilterEnum.Ignore;
+            overlays.AddChildSafely(backdrop);
+            overlays.MoveChildSafely(backdrop, 0);
+            _backdrop = backdrop;
+            Log.Info($"[SpirePvp] draft: campfire backdrop up ({act.Id.Entry})");
+        }
+        catch (Exception e)
+        {
+            // Scenery. A missing or unloadable scene must not cost anyone the draft.
+            Log.Warn($"[SpirePvp] draft: no backdrop ({e.Message}) — the draft runs without one");
+        }
+    }
+
+    private static void CloseBackdrop()
+    {
+        if (_backdrop != null && GodotObject.IsInstanceValid(_backdrop))
+        {
+            _backdrop.QueueFree();
+        }
+
+        _backdrop = null;
     }
 
     private static void CloseScreen()
