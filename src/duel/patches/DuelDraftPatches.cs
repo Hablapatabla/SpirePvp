@@ -141,6 +141,36 @@ public static class DuelDraftMirrorPatch
     public static void AfterChanged(NCustomRunScreen __instance, StartRunLobbyPlayer player) =>
         MirrorHost(__instance, player);
 
+    /// <summary>
+    /// Re-runs the mirror for whatever the lobby currently holds.
+    ///
+    /// **Called from the modifiers refresh, and that is the fix for the first attempt failing.**
+    /// Hooking `PlayerConnected`/`PlayerChanged` alone assumed the format was already known when a
+    /// character arrived, and it is not: the two travel on different schedules, so a client that
+    /// learns the characters before `MatchFormatDraft` is ticked bails out of the gate below and
+    /// never hears about it again. Measured 2026-08-14 — host IRONCLAD, client DEFECT, and not one
+    /// `mirroring the host` line in either log.
+    ///
+    /// Same family as hooking arrival *and* change: whichever of the two facts lands last has to be
+    /// the one that triggers the work, so both have to trigger it.
+    /// </summary>
+    public static void MirrorNow(NCustomRunScreen screen)
+    {
+        StartRunLobby? lobby = screen._lobby;
+        if (lobby == null)
+        {
+            return;
+        }
+
+        foreach (StartRunLobbyPlayer player in lobby.Players)
+        {
+            if (player.id != lobby.LocalPlayer.id)
+            {
+                MirrorHost(screen, player);
+            }
+        }
+    }
+
     private static void MirrorHost(NCustomRunScreen screen, StartRunLobbyPlayer player)
     {
         StartRunLobby? lobby = screen._lobby;
@@ -153,6 +183,8 @@ public static class DuelDraftMirrorPatch
         NCustomRunModifiersList? modifiers = screen._modifiersList;
         if (modifiers == null || !modifiers.GetModifiersTickedOn().Any(m => m is MatchFormatDraft))
         {
+            // Not a draft lobby *yet*. `MirrorNow` re-asks on every modifier change, which is what
+            // covers the format arriving after the characters.
             return;
         }
 

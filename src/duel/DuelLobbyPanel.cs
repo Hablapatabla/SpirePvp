@@ -159,6 +159,7 @@ public static class DuelLobbyPanel
             // the preset row still needs re-syncing. This runs on every ModifiersChanged.
             SyncPresetRow(list);
             SyncClockHeading(list);
+            Patches.DuelDraftMirrorPatch.MirrorNow(screen);
             return;
         }
 
@@ -274,6 +275,7 @@ public static class DuelLobbyPanel
 
         SyncPresetRow(list);
         SyncClockHeading(list);
+        Patches.DuelDraftMirrorPatch.MirrorNow(screen);
 
         Log.Warn($"[SpirePvp] duel lobby: promoted {promoted.Count} duel modifier(s) into " +
                  $"{Groups.Length} groups, {tickboxes.Count - promoted.Count} left below");
