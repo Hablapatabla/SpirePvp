@@ -168,6 +168,8 @@ public static class DuelDraftMirrorPatch
         DraftLobbyActive = list != null
                            && list.GetModifiersTickedOn().Any(m => m is MatchFormatDraft);
 
+        DumpLobby(lobby);
+
         foreach (StartRunLobbyPlayer player in lobby.Players)
         {
             if (player.id != lobby.LocalPlayer.id)
@@ -195,6 +197,42 @@ public static class DuelDraftMirrorPatch
     /// </summary>
     internal static bool DraftLobbyActive { get; private set; }
 
+    /// <summary>
+    /// Prints what each peer believes the lobby holds, once per refresh and only when it changes.
+    ///
+    /// **Added after the fourth failed fix, which is three too many.** Each attempt was reasoned
+    /// from the decompile and each was right about the thing it changed; what was never established
+    /// is the one fact that decides all of them — whether the client's character change reaches the
+    /// *host's* record at all. The client's own log says it mirrored (`taking REGENT`) and the host
+    /// then created the run as `REGENT and IRONCLAD`, so the two peers disagree and nothing so far
+    /// has said which side drops it.
+    ///
+    /// Both peers print, so the two lines can be diffed directly — the host's view of the client is
+    /// the authority, since the run is seeded from it.
+    ///
+    /// Note `RANDOM_CHARACTER` appears in the client's mirror log, which no fix has accounted for:
+    /// the host can sit on a random-character placeholder that resolves later
+    /// (`DuelRandomCharacterPatch`), so a mirror taken while it is unresolved copies the
+    /// placeholder. Whether that is this bug or a second one is exactly what this line will settle.
+    /// </summary>
+    private static void DumpLobby(StartRunLobby lobby)
+    {
+        string state = string.Join(", ", lobby.Players.Select(p =>
+            $"{p.id}{(p.id == lobby.LocalPlayer.id ? "(me)" : "")}="
+            + $"{p.character?.Id.Entry ?? "none"}"));
+
+        if (state == _lastDump)
+        {
+            return;
+        }
+
+        _lastDump = state;
+        Log.Warn($"[SpirePvp] draft lobby [{lobby.NetService.Type}] draft={DraftLobbyActive} "
+                 + $"players: {state}  <- diff this against the other client's line");
+    }
+
+    private static string _lastDump = string.Empty;
+
     private static void MirrorHost(NCustomRunScreen screen, StartRunLobbyPlayer player)
     {
         StartRunLobby? lobby = screen._lobby;
@@ -217,6 +255,16 @@ public static class DuelDraftMirrorPatch
         // The player who changed is us, or has no character yet: nothing to copy.
         if (player.id == lobby.LocalPlayer.id || player.character == null)
         {
+            return;
+        }
+
+        // **Never mirror the random-character placeholder.** It is not a character — it resolves to
+        // one later — so copying it puts the client on a placeholder that will resolve
+        // independently, i.e. to a different character, which is the opposite of a mirror. Seen in
+        // the client's log as `taking RANDOM_CHARACTER` before it took the real one.
+        if (player.character.Id.Entry == "RANDOM_CHARACTER")
+        {
+            Log.Info("[SpirePvp] draft lobby: host is on random — waiting for it to resolve");
             return;
         }
 
