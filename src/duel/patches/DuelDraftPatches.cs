@@ -171,6 +171,26 @@ public static class DuelDraftMirrorPatch
         }
     }
 
+    /// <summary>
+    /// True only while <see cref="MirrorHost"/> is driving `SelectCharacter` itself, so the block
+    /// below can tell our own assignment from a player's click.
+    /// </summary>
+    private static bool _mirroring;
+
+    /// <summary>Exposed so the lock patch can let our own assignment through.</summary>
+    internal static bool IsMirroring => _mirroring;
+
+    /// <summary>True while a draft lobby is refusing the client's own character clicks.</summary>
+    internal static bool BlocksLocalChoice(NCustomRunScreen screen)
+    {
+        StartRunLobby? lobby = screen._lobby;
+        NCustomRunModifiersList? modifiers = screen._modifiersList;
+        return lobby != null
+               && lobby.NetService.Type == NetGameType.Client
+               && modifiers != null
+               && modifiers.GetModifiersTickedOn().Any(m => m is MatchFormatDraft);
+    }
+
     private static void MirrorHost(NCustomRunScreen screen, StartRunLobbyPlayer player)
     {
         StartRunLobby? lobby = screen._lobby;
@@ -212,6 +232,45 @@ public static class DuelDraftMirrorPatch
         }
 
         Log.Warn($"[SpirePvp] draft lobby: mirroring the host — taking {player.character.Id.Entry}");
-        screen.SelectCharacter(button, player.character);
+        _mirroring = true;
+        try
+        {
+            screen.SelectCharacter(button, player.character);
+        }
+        finally
+        {
+            _mirroring = false;
+        }
+    }
+}
+
+/// <summary>
+/// In a draft lobby the client cannot pick its own character at all.
+///
+/// **Mirroring was not enough on its own.** `DuelDraftMirrorPatch` copies the host's choice
+/// whenever one arrives, but nothing stopped the client clicking a different character afterwards —
+/// reported 2026-08-14 as "the client can still set it after the fact", with the run then starting
+/// cross-character and the draft refusing. Copying a value and then leaving the control live is
+/// half a rule.
+///
+/// So the buttons are inert for a client in a draft lobby, and the only thing that moves the
+/// client's character is the mirror itself, which sets `_mirroring` around its own call. That is
+/// what "the client character selection should be completely ignored" actually asks for.
+///
+/// The host is untouched — it is the one being copied — and a race lobby is untouched, where
+/// cross-character is legal and always has been.
+/// </summary>
+[HarmonyPatch(typeof(NCustomRunScreen), nameof(NCustomRunScreen.SelectCharacter))]
+public static class DuelDraftCharacterLockPatch
+{
+    public static bool Prefix(NCustomRunScreen __instance)
+    {
+        if (DuelDraftMirrorPatch.IsMirroring || !DuelDraftMirrorPatch.BlocksLocalChoice(__instance))
+        {
+            return true;
+        }
+
+        Log.Info("[SpirePvp] draft lobby: ignoring a character click — a draft mirrors the host");
+        return false;
     }
 }
