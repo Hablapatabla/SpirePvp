@@ -1,4 +1,12 @@
+using System.Linq;
 using HarmonyLib;
+using MegaCrit.Sts2.Core.Entities.Multiplayer;
+using MegaCrit.Sts2.Core.Multiplayer.Game;
+using MegaCrit.Sts2.Core.Multiplayer.Game.Lobby;
+using MegaCrit.Sts2.Core.Nodes.Screens.CharacterSelect;
+using MegaCrit.Sts2.Core.Nodes.Screens.CustomRun;
+using MegaCrit.Sts2.Core.Nodes.Screens.MainMenu;
+using SpirePvp.Modifiers;
 using MegaCrit.Sts2.Core.Logging;
 using MegaCrit.Sts2.Core.Models;
 using MegaCrit.Sts2.Core.Nodes.Screens.CardSelection;
@@ -95,5 +103,83 @@ public static class DuelDraftScreenPatch
         // opponent's turn, and on a card already taken, a click should do nothing at all.
         DuelDraft.SubmitPick(card);
         return false;
+    }
+}
+
+/// <summary>
+/// In a draft lobby the client does not choose a character — it is given the host's.
+///
+/// **A mirror is the premise the shared pool rests on.** One pool is built from one character and
+/// shown to both players, so two different characters means the client drafts cards it cannot play
+/// into a deck of another colour. `DuelDraft.Begin` refuses outright when it sees that, which is the
+/// safe failure but not the answer: reported 2026-08-14 as a Defect pool with an Ironclad client,
+/// and then as "the client's character selection should be completely ignored".
+///
+/// So it is, here, rather than by asking the player to remember. `SelectCharacter` is the same entry
+/// point the character buttons use, so this leaves the lobby in exactly the state a click would
+/// have: the local character set on the lobby, the button visuals updated, and the change synced to
+/// the host like any other.
+///
+/// **Hooked on arrival as well as on change**, because a message that only fires on *change* cannot
+/// carry initial state — the standing rule in this project, and the fifth thing it has caught. A
+/// client that joins after the host has already chosen gets one `PlayerConnected` and no
+/// `PlayerChanged`, so hooking only the latter would mirror every character except the one the host
+/// picked before anyone was listening.
+///
+/// Host-side this does nothing: the host is the one being copied.
+/// </summary>
+[HarmonyPatch(typeof(NCustomRunScreen))]
+public static class DuelDraftMirrorPatch
+{
+    [HarmonyPostfix]
+    [HarmonyPatch(nameof(NCustomRunScreen.PlayerConnected))]
+    public static void AfterConnected(NCustomRunScreen __instance, StartRunLobbyPlayer player) =>
+        MirrorHost(__instance, player);
+
+    [HarmonyPostfix]
+    [HarmonyPatch(nameof(NCustomRunScreen.PlayerChanged))]
+    public static void AfterChanged(NCustomRunScreen __instance, StartRunLobbyPlayer player) =>
+        MirrorHost(__instance, player);
+
+    private static void MirrorHost(NCustomRunScreen screen, StartRunLobbyPlayer player)
+    {
+        StartRunLobby? lobby = screen._lobby;
+        if (lobby == null || lobby.NetService.Type != NetGameType.Client)
+        {
+            return;
+        }
+
+        // Only mirror a draft lobby. A race match is free to be cross-character and always has been.
+        NCustomRunModifiersList? modifiers = screen._modifiersList;
+        if (modifiers == null || !modifiers.GetModifiersTickedOn().Any(m => m is MatchFormatDraft))
+        {
+            return;
+        }
+
+        // The player who changed is us, or has no character yet: nothing to copy.
+        if (player.id == lobby.LocalPlayer.id || player.character == null)
+        {
+            return;
+        }
+
+        if (lobby.LocalPlayer.character != null
+            && lobby.LocalPlayer.character.Id.Equals(player.character.Id))
+        {
+            return;
+        }
+
+        NCharacterSelectButton? button = screen._charButtonContainer.GetChildren()
+            .OfType<NCharacterSelectButton>()
+            .FirstOrDefault(b => b._character != null && b._character.Id.Equals(player.character.Id));
+
+        if (button == null)
+        {
+            Log.Warn($"[SpirePvp] draft lobby: no character button for {player.character.Id.Entry}, "
+                     + "cannot mirror the host");
+            return;
+        }
+
+        Log.Warn($"[SpirePvp] draft lobby: mirroring the host — taking {player.character.Id.Entry}");
+        screen.SelectCharacter(button, player.character);
     }
 }
