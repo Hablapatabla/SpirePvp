@@ -192,6 +192,14 @@ public static class DuelDraft
             return;
         }
 
+        // **The other end of the lobby telemetry.** The lobby lines say what each peer believed
+        // before the run; this says what the run was actually seeded with. If the lobby agreed and
+        // this does not, the lobby record is not what seeds the run and the search moves a layer
+        // down — which is the possibility four fixes never separated.
+        Log.Warn("[SpirePvp] lobby telemetry: run seeded with "
+                 + string.Join(", ", runState.Players.Select(p =>
+                       $"{p.NetId}{(LocalContext.IsMe(p) ? "(me)" : "")}={p.Character.Id.Entry}")));
+
         Player? me = LocalContext.GetMe(runState.Players);
         Player? opponent = runState.Players.FirstOrDefault(p => !LocalContext.IsMe(p));
         if (me == null || opponent == null)

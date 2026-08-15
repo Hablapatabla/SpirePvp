@@ -3,6 +3,7 @@ using HarmonyLib;
 using MegaCrit.Sts2.Core.Entities.Multiplayer;
 using MegaCrit.Sts2.Core.Multiplayer.Game;
 using MegaCrit.Sts2.Core.Multiplayer.Game.Lobby;
+using MegaCrit.Sts2.Core.Models;
 using MegaCrit.Sts2.Core.Nodes.Screens.CharacterSelect;
 using MegaCrit.Sts2.Core.Nodes.Screens.CustomRun;
 using MegaCrit.Sts2.Core.Nodes.Screens.MainMenu;
@@ -133,13 +134,31 @@ public static class DuelDraftMirrorPatch
 {
     [HarmonyPostfix]
     [HarmonyPatch(nameof(NCustomRunScreen.PlayerConnected))]
-    public static void AfterConnected(NCustomRunScreen __instance, StartRunLobbyPlayer player) =>
+    public static void AfterConnected(NCustomRunScreen __instance, StartRunLobbyPlayer player)
+    {
+        Log.Warn($"[SpirePvp] lobby telemetry: PlayerConnected {player.id} = "
+                 + $"{player.character?.Id.Entry ?? "none"}");
+        if (__instance._lobby != null)
+        {
+            DumpLobby(__instance._lobby, "PlayerConnected");
+        }
+
         MirrorHost(__instance, player);
+    }
 
     [HarmonyPostfix]
     [HarmonyPatch(nameof(NCustomRunScreen.PlayerChanged))]
-    public static void AfterChanged(NCustomRunScreen __instance, StartRunLobbyPlayer player) =>
+    public static void AfterChanged(NCustomRunScreen __instance, StartRunLobbyPlayer player)
+    {
+        Log.Warn($"[SpirePvp] lobby telemetry: PlayerChanged {player.id} = "
+                 + $"{player.character?.Id.Entry ?? "none"}");
+        if (__instance._lobby != null)
+        {
+            DumpLobby(__instance._lobby, "PlayerChanged");
+        }
+
         MirrorHost(__instance, player);
+    }
 
     /// <summary>
     /// Re-runs the mirror for whatever the lobby currently holds.
@@ -168,7 +187,7 @@ public static class DuelDraftMirrorPatch
         DraftLobbyActive = list != null
                            && list.GetModifiersTickedOn().Any(m => m is MatchFormatDraft);
 
-        DumpLobby(lobby);
+        DumpLobby(lobby, "modifiers refresh");
 
         foreach (StartRunLobbyPlayer player in lobby.Players)
         {
@@ -215,20 +234,15 @@ public static class DuelDraftMirrorPatch
     /// (`DuelRandomCharacterPatch`), so a mirror taken while it is unresolved copies the
     /// placeholder. Whether that is this bug or a second one is exactly what this line will settle.
     /// </summary>
-    private static void DumpLobby(StartRunLobby lobby)
+    internal static void DumpLobby(StartRunLobby lobby, string where)
     {
         string state = string.Join(", ", lobby.Players.Select(p =>
             $"{p.id}{(p.id == lobby.LocalPlayer.id ? "(me)" : "")}="
             + $"{p.character?.Id.Entry ?? "none"}"));
 
-        if (state == _lastDump)
-        {
-            return;
-        }
-
         _lastDump = state;
-        Log.Warn($"[SpirePvp] draft lobby [{lobby.NetService.Type}] draft={DraftLobbyActive} "
-                 + $"players: {state}  <- diff this against the other client's line");
+        Log.Warn($"[SpirePvp] lobby telemetry [{lobby.NetService.Type}] draft={DraftLobbyActive} "
+                 + $"at {where}: {state}  <- diff against the other client's line");
     }
 
     private static string _lastDump = string.Empty;
@@ -323,20 +337,21 @@ public static class DuelDraftMirrorPatch
 [HarmonyPatch(typeof(StartRunLobby), nameof(StartRunLobby.SetLocalCharacter))]
 public static class DuelDraftCharacterLockPatch
 {
-    public static bool Prefix(StartRunLobby __instance)
+    public static bool Prefix(StartRunLobby __instance, CharacterModel character)
     {
-        if (DuelDraftMirrorPatch.IsMirroring)
-        {
-            return true;
-        }
+        bool mirroring = DuelDraftMirrorPatch.IsMirroring;
+        bool client = __instance.NetService.Type == NetGameType.Client;
+        bool draft = DuelDraftMirrorPatch.DraftLobbyActive;
+        bool allowed = mirroring || !client || !draft;
 
-        if (__instance.NetService.Type != NetGameType.Client
-            || !DuelDraftMirrorPatch.DraftLobbyActive)
-        {
-            return true;
-        }
+        // **Every character change, on either peer, allowed or not.** This is the line that answers
+        // the question four fixes could not: whether a change the client makes ever becomes real.
+        // It prints on the way *in*, so a change that is allowed here and still missing from the
+        // host's record is a delivery problem rather than a lobby one.
+        Log.Warn($"[SpirePvp] lobby telemetry: SetLocalCharacter -> {character?.Id.Entry ?? "null"} "
+                 + $"[{__instance.NetService.Type}] mirroring={mirroring} draft={draft} "
+                 + $"=> {(allowed ? "ALLOWED" : "BLOCKED")}");
 
-        Log.Info("[SpirePvp] draft lobby: ignoring a character change — a draft mirrors the host");
-        return false;
+        return allowed;
     }
 }
