@@ -765,14 +765,17 @@ public static class DuelDraft
     /// </summary>
     private static void Finish()
     {
-        // **Deliberately not closed.** Closing it here left the game area black until the arena
-        // loaded: a draft run has closed the map (see EnsureScreen), so with the draft screen gone
-        // too there is nothing behind it — reported as "the game screen went black when there was
-        // 1 left", with the top bar and multiplayer overlay still drawn over the void.
+        // **Closed now that there is scenery behind it.** This deliberately stayed up for a while:
+        // closing it used to leave the game area black until the arena loaded, because a draft run
+        // has closed the map and nothing else was drawing. The campfire backdrop fixed that, and it
+        // outlives the draft on purpose — so the pool can go, and the gap it was covering is now
+        // covered by something meant to be looked at.
         //
-        // The final pool stays up instead, and `DuelEntry`'s deck review replaces it when both
-        // players arrive. `DuelDraftScreenPatch` keeps it unclickable in the meantime, which is why
-        // that gate asks `IsDraftRun` rather than `IsDrafting`.
+        // Leaving it up was visible in the end: the deck review drew over a still-present pool.
+        // What was asked for is the calmer version — the campfire from the first pick until the
+        // duel starts, with the pool and then the review on top of it.
+        CloseScreen();
+
         RunState? runState = RunManager.Instance?.State;
         Player? me = runState == null ? null : LocalContext.GetMe(runState.Players);
         if (runState == null || me == null)
