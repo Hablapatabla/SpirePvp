@@ -150,6 +150,41 @@ public sealed class RaceClockNone : RaceClockModifier
 }
 
 /// <summary>
+/// The draft's own deadline, at second scale (DESIGN §7b).
+///
+/// **A separate group rather than reusing the race clock, because the values are the modifier.**
+/// `RaceClockEight` *is* eight minutes — there is no scaling knob — so a draft lobby showing
+/// `8 / 10 / 12 / 15 min` was offering race deadlines under a heading that said Draft clock. Lucas,
+/// 2026-08-14: *"an act 1 race taking 10 minutes is normal. The clock for draft should be like 20
+/// seconds."*
+///
+/// It feeds the same first bank as the race clock — `DuelClockService`'s "time until the duel
+/// starts" — which is why nothing downstream changes and why `Minutes` stays the unit. Twenty
+/// seconds is a third of a minute and the clock has always been a `double`.
+/// </summary>
+public abstract class DraftClockModifier : ClockModifierBase;
+
+public sealed class DraftClockTwenty : DraftClockModifier
+{
+    public override double Minutes => 20.0 / 60.0;
+}
+
+public sealed class DraftClockThirty : DraftClockModifier
+{
+    public override double Minutes => 30.0 / 60.0;
+}
+
+public sealed class DraftClockSixty : DraftClockModifier
+{
+    public override double Minutes => 1;
+}
+
+public sealed class DraftClockNone : DraftClockModifier
+{
+    public override double Minutes => 0;
+}
+
+/// <summary>
 /// How long the duel itself gets (DESIGN §9).
 ///
 /// A *fresh* bank granted when the duel begins, not the race's remainder — so arriving at the

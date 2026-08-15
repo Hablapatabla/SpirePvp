@@ -111,7 +111,10 @@ public static class DuelMatch
     /// silently giving someone a timer they did not agree to would be worse than giving them
     /// none.
     /// </summary>
-    public static double RaceClockMinutes(IRunState? runState) => MinutesOf<RaceClockModifier>(runState);
+    public static double RaceClockMinutes(IRunState? runState) =>
+        IsDraftMatch(runState)
+            ? MinutesOf<DraftClockModifier>(runState)
+            : MinutesOf<RaceClockModifier>(runState);
 
     /// <summary>
     /// The agreed per-player bank for the duel, in minutes. Granted fresh when the duel begins

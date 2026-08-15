@@ -76,6 +76,11 @@ public static class DuelHostFlow
         ModelDb.Modifier<MatchFormatRace>().ToMutable(),
         ModelDb.Modifier<DuelTurnBased>().ToMutable(),
         ModelDb.Modifier<RaceClockNone>().ToMutable(),
+
+        // Both clock groups get a default even though only one row is ever shown: the group that is
+        // hidden still exists, and `DuelModifierMinimumPatch` keeps every group non-empty, so
+        // leaving one unticked would mean a lobby that is one format-switch away from an empty row.
+        ModelDb.Modifier<DraftClockNone>().ToMutable(),
         ModelDb.Modifier<DuelClockNone>().ToMutable(),
         ModelDb.Modifier<DuelSpeedFast>().ToMutable()
     };

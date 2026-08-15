@@ -61,6 +61,7 @@ public static class DuelLobbyPanel
 
         ("SPIREPVP_LOBBY.turnModel", typeof(DuelModifierBase)),
         ("SPIREPVP_LOBBY.raceClock", typeof(RaceClockModifier)),
+        ("SPIREPVP_LOBBY.draftClock", typeof(DraftClockModifier)),
         ("SPIREPVP_LOBBY.duelClock", typeof(DuelClockModifier)),
 
         // Last, and above "Other modifiers" — Lucas's placement (2026-08-14). It is the only row
@@ -213,6 +214,22 @@ public static class DuelLobbyPanel
 
             if (members.Count == 0)
             {
+                continue;
+            }
+
+            // **One clock row or the other, never both.** The race clock and the draft clock feed
+            // the same bank — "time until the duel starts" — so exactly one of them is meaningful,
+            // and which one is decided by the format. Built rather than hidden, because the row is
+            // rebuilt on every modifier change anyway and a hidden row still takes part in layout.
+            bool draftFormat = list.GetModifiersTickedOn().Any(m => m is MatchFormatDraft);
+            if ((group == typeof(RaceClockModifier) && draftFormat)
+                || (group == typeof(DraftClockModifier) && !draftFormat))
+            {
+                foreach (NRunModifierTickbox spare in members)
+                {
+                    promoted.Add(spare);
+                }
+
                 continue;
             }
 
