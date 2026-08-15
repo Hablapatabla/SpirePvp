@@ -162,6 +162,12 @@ public static class DuelDraftMirrorPatch
             return;
         }
 
+        // Re-derived each refresh so that leaving a draft lobby releases the character lock, rather
+        // than leaving a client unable to choose in the next Custom run it joins.
+        NCustomRunModifiersList? list = screen._modifiersList;
+        DraftLobbyActive = list != null
+                           && list.GetModifiersTickedOn().Any(m => m is MatchFormatDraft);
+
         foreach (StartRunLobbyPlayer player in lobby.Players)
         {
             if (player.id != lobby.LocalPlayer.id)
@@ -180,16 +186,14 @@ public static class DuelDraftMirrorPatch
     /// <summary>Exposed so the lock patch can let our own assignment through.</summary>
     internal static bool IsMirroring => _mirroring;
 
-    /// <summary>True while a draft lobby is refusing the client's own character clicks.</summary>
-    internal static bool BlocksLocalChoice(NCustomRunScreen screen)
-    {
-        StartRunLobby? lobby = screen._lobby;
-        NCustomRunModifiersList? modifiers = screen._modifiersList;
-        return lobby != null
-               && lobby.NetService.Type == NetGameType.Client
-               && modifiers != null
-               && modifiers.GetModifiersTickedOn().Any(m => m is MatchFormatDraft);
-    }
+    /// <summary>
+    /// Whether the lobby currently on screen is configured as a draft.
+    ///
+    /// Cached from the last modifier refresh rather than read from the screen, because the lock now
+    /// sits on `StartRunLobby` and has no screen to ask. Set false on every refresh that is not a
+    /// draft, so backing out of a draft lobby releases the lock.
+    /// </summary>
+    internal static bool DraftLobbyActive { get; private set; }
 
     private static void MirrorHost(NCustomRunScreen screen, StartRunLobbyPlayer player)
     {
@@ -207,6 +211,8 @@ public static class DuelDraftMirrorPatch
             // covers the format arriving after the characters.
             return;
         }
+
+        DraftLobbyActive = true;
 
         // The player who changed is us, or has no character yet: nothing to copy.
         if (player.id == lobby.LocalPlayer.id || player.character == null)
@@ -245,32 +251,44 @@ public static class DuelDraftMirrorPatch
 }
 
 /// <summary>
-/// In a draft lobby the client cannot pick its own character at all.
+/// In a draft lobby the client cannot change its character at all — blocked at the sync point.
 ///
-/// **Mirroring was not enough on its own.** `DuelDraftMirrorPatch` copies the host's choice
-/// whenever one arrives, but nothing stopped the client clicking a different character afterwards —
-/// reported 2026-08-14 as "the client can still set it after the fact", with the run then starting
-/// cross-character and the draft refusing. Copying a value and then leaving the control live is
-/// half a rule.
+/// **The first version blocked `NCustomRunScreen.SelectCharacter` and that was the wrong
+/// chokepoint.** It is the UI path, so the client's *screen* obeyed while the host's lobby record
+/// did not, and the run is seeded from the host's record. Measured 2026-08-14: the client showed
+/// Necrobinder, the host's remote-player panel showed Regent, the run was created as
+/// `NECROBINDER and REGENT`, and `DuelDraft.Begin` refused — which is why "the draft overlay didn't
+/// come up" and the "distracting visual bug" turned out to be the same fault. The host's panel was
+/// telling the truth.
 ///
-/// So the buttons are inert for a client in a draft lobby, and the only thing that moves the
-/// client's character is the mirror itself, which sets `_mirroring` around its own call. That is
-/// what "the client character selection should be completely ignored" actually asks for.
+/// `StartRunLobby.SetLocalCharacter` is the real one: it changes the local record *and* sends
+/// `LobbyPlayerChangedCharacterMessage`, so it is the single place a character choice becomes real
+/// to anyone else. Blocking here cannot be routed around by a path that reaches the lobby some
+/// other way.
 ///
-/// The host is untouched — it is the one being copied — and a race lobby is untouched, where
-/// cross-character is legal and always has been.
+/// Same lesson as `CombatState.GetOpponentsOf` over `HittableEnemies`: patch the chokepoint that
+/// carries the decision, not the surface that happens to be in front of it.
+///
+/// `_mirroring` lets our own assignment through, and it is the only thing that can move a draft
+/// client's character.
 /// </summary>
-[HarmonyPatch(typeof(NCustomRunScreen), nameof(NCustomRunScreen.SelectCharacter))]
+[HarmonyPatch(typeof(StartRunLobby), nameof(StartRunLobby.SetLocalCharacter))]
 public static class DuelDraftCharacterLockPatch
 {
-    public static bool Prefix(NCustomRunScreen __instance)
+    public static bool Prefix(StartRunLobby __instance)
     {
-        if (DuelDraftMirrorPatch.IsMirroring || !DuelDraftMirrorPatch.BlocksLocalChoice(__instance))
+        if (DuelDraftMirrorPatch.IsMirroring)
         {
             return true;
         }
 
-        Log.Info("[SpirePvp] draft lobby: ignoring a character click — a draft mirrors the host");
+        if (__instance.NetService.Type != NetGameType.Client
+            || !DuelDraftMirrorPatch.DraftLobbyActive)
+        {
+            return true;
+        }
+
+        Log.Info("[SpirePvp] draft lobby: ignoring a character change — a draft mirrors the host");
         return false;
     }
 }

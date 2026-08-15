@@ -212,7 +212,8 @@ public static class DuelDraft
         {
             Log.Error($"[SpirePvp] draft: refusing to start — this is a mirror mode and the two "
                       + $"players are {me.Character.Id.Entry} and {opponent.Character.Id.Entry}. "
-                      + "Pick the same character on both clients. The lobby does not force this yet.");
+                      + "The lobby is supposed to force this — if you see this line, the mirror "
+                      + "did not take, and the host's own lobby record is the one to trust.");
             return;
         }
 
