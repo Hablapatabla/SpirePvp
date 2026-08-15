@@ -874,7 +874,39 @@ on 2026-08-14 before anything else was read:
 - **Nothing has been played on v0.111.0.** Confirm `83 patch classes applied cleanly (121 methods)`
   on first launch before trusting any in-game observation.
 
-#### FIXED: draft cards rendered as True Grit (2026-08-14, UNPLAYED)
+#### FIXED: the draft's card preview (2026-08-14, UNPLAYED) — **patch count is now 86**
+
+**Three distinct faults hid behind one report, and only the third was the whole of it.** The report
+changed shape each time one was fixed — costs all 1, then error-string descriptions, then every card
+drawing as True Grit, and finally the decisive one: *"they look fine in the draft, it's when you
+actually click"*.
+
+That last sentence names the method. With `MinSelect == MaxSelect == 1`, `OnCardClicked` calls
+`PreviewSelection` the instant a card is chosen, and `PreviewSelection` ends with
+
+```csharp
+nCard.UpdateVisuals(selectedCard.Pile.Type, CardPreviewMode.Normal);
+```
+
+`CardModel.Pile` is `_owner?.Piles.FirstOrDefault(p => p.Cards.Contains(this))`. A pool card is
+owned and registered with the run but is deliberately **in no pile** — it is a card you have not
+taken yet — so `Pile` is null and the preview renders a card that never received its visuals.
+
+`DuelDraftPreviewPatch` skips the preview for a draft and calls
+`CheckIfSelectionComplete` directly, which is what the confirm button would have called. **Not** by
+giving pool cards a pile: fifteen undrafted cards sitting in one of the player's real piles is a far
+worse bug than the one being fixed. The preview is unwanted regardless — it exists so a campfire
+upgrade can be inspected before committing, where a draft pick is already deliberate and the
+opponent is waiting on it.
+
+**The methodology note, which is the reusable part.** The first two fixes were aimed from the
+outside and both were *correct on their own terms* — an ownerless card cannot compute its cost, an
+unregistered one has not run `AfterCreated` — and both left the screen exactly as broken, because
+neither supplied what the preview actually reads. What finally isolated it was a user observation
+that separated two states that had been treated as one: the grid was always fine; only selection was
+not. **When a symptom survives two correct fixes, stop fixing and find the narrower question.**
+
+#### And before that: draft cards were never built through the factory (2026-08-14)
 
 **All three reported symptoms were one gap, and it is `RunManager.EnterRoom` wearing a new hat.**
 Reported in order over one session: every energy and star cost reading 1, every description reading

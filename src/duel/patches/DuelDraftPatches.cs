@@ -91,3 +91,47 @@ public static class DuelDraftScreenPatch
         return false;
     }
 }
+
+/// <summary>
+/// A draft pick is a click, not a click-then-confirm — and the confirm step is what broke the cards.
+///
+/// **The symptom was "they look fine in the draft, they break when you click".** That is precise and
+/// it names the method: with `MinSelect == MaxSelect == 1`, `OnCardClicked` calls
+/// `PreviewSelection` the instant a card is chosen, and `PreviewSelection` ends with
+///
+///     nCard.UpdateVisuals(selectedCard.Pile.Type, CardPreviewMode.Normal);
+///
+/// `CardModel.Pile` is `_owner?.Piles.FirstOrDefault(p =&gt; p.Cards.Contains(this))`. A pool card is
+/// registered with the run and owned, but it is deliberately **in no pile** — it is a card you have
+/// not taken yet — so `Pile` is null and the preview renders a card that never got its visuals.
+/// Hence "broken card", and hence every previewed card looking like the same wrong one.
+///
+/// This is the third distinct fault behind one report, and the first two were mine: the cards were
+/// never registered with the run (fixed by going through `RunState.CreateCard`'s steps), and before
+/// that they had no owner. Each fix was real and each left the screen still broken, because the
+/// preview needs something none of them supply.
+///
+/// **Skipping the preview is the fix rather than giving the card a pile.** Putting pool cards into
+/// a pile to satisfy a getter would mean fifteen cards sitting in one of the player's real piles
+/// while they are still on offer — a card you have not drafted appearing in your deck is a far
+/// worse bug than the one being fixed. And the preview is not wanted anyway: it exists so a campfire
+/// upgrade can be inspected and confirmed, where a draft pick is already deliberate and the opponent
+/// is waiting. Clicking a card takes it, which is what the screen's own heading promises.
+///
+/// `CheckIfSelectionComplete` is what the confirm button would have called, so this is vanilla's own
+/// completion, reached one step earlier.
+/// </summary>
+[HarmonyPatch(typeof(NDeckCardSelectScreen), "PreviewSelection", new System.Type[] { })]
+public static class DuelDraftPreviewPatch
+{
+    public static bool Prefix(NDeckCardSelectScreen __instance)
+    {
+        if (!DuelDraft.IsDraftRun)
+        {
+            return true;
+        }
+
+        __instance.CheckIfSelectionComplete();
+        return false;
+    }
+}
