@@ -874,44 +874,39 @@ on 2026-08-14 before anything else was read:
 - **Nothing has been played on v0.111.0.** Confirm `83 patch classes applied cleanly (121 methods)`
   on first launch before trusting any in-game observation.
 
-#### THE IMMEDIATE NEXT STEP: draft cards all render as True Grit (2026-08-14, OPEN)
+#### FIXED: draft cards rendered as True Grit (2026-08-14, UNPLAYED)
 
-**The draft logic is right and the rendering is wrong. The log proves it:**
+**All three reported symptoms were one gap, and it is `RunManager.EnterRoom` wearing a new hat.**
+Reported in order over one session: every energy and star cost reading 1, every description reading
+as an error string, and finally every card in the pool drawing as **True Grit**. Not three bugs —
+one unregistered, un-initialised model rendering as a fallback, getting more specific each time
+something else was fixed around it.
 
+`RunState.CreateCard` is the whole of what makes a usable card, and it is three lines:
+
+```csharp
+CardModel cardModel = canonicalCard.ToMutable();
+AddCard(cardModel, owner);
+cardModel.AfterCreated();
 ```
-draft: 1001 took BLOOD_WALL (host 0, client 1)
-draft: 1    took PACTS_END  (host 1, client 1)
-draft: 1001 took HELLRAISER (host 1, client 2)
-draft: 1    took MOLTEN_FIST (host 2, client 2)
-draft: 1001 took ARMAMENTS  (host 2, client 3)
-```
 
-Fifteen distinct correct cards, picks alternating, both peers agreeing. On screen every one of
-them draws as **True Grit**. So do not debug the pool, the messages or the turn order — they are
-all doing exactly what they should.
+The pool did the first line, **invented its own version of the second** (assigning `Owner` by hand)
+and **skipped the third entirely**. A vanilla creation path reimplemented in one line, inheriting
+every omission silently — which is exactly what `DuelArena` spent six separate omissions learning
+about `EnterMapPointInternal`, and the rule that came out of it applies unchanged: *when vanilla has
+a real path, call it rather than approximating it.*
 
-**This is one bug wearing three costumes, and the first two were misdiagnosed.** Reported in order:
-every energy and star cost reading 1, every description reading as an error string, and now every
-name and art reading True Grit. Those are not three faults — they are `NCard` rendering a model it
-cannot resolve and falling back. The `Owner` fix (see the previous commit) was reasoned from the
-decompile and is *correct on its own terms* — an ownerless card genuinely cannot compute its cost —
-but it plainly was not the whole cause, because the symptom survived it and got more specific.
+**The `Owner` fix that preceded this was true and useless**, which is worth keeping. An ownerless
+card genuinely cannot compute its cost, the decompile says so, and fixing it changed nothing —
+because `AddCard` is what actually establishes ownership, so the manual assignment was a worse
+version of a line that was already missing. Two fixes were aimed from the outside here before the
+factory was read; the log had already ruled out the draft logic by then (fifteen distinct correct
+card ids, picks alternating, both peers agreeing), so the search should have gone straight to *how
+these models are made* rather than to what they are missing.
 
-**The question that splits it, and it has not been asked yet: is this the host, the client, or
-both?** The two pools come from different places and only one of them is a proven path:
-
-- **Host:** `CardPool.GetUnlockedCards(...)` → `ToMutable()`. Canonical models cloned straight out
-  of the model database, never near a pile, a factory or the wire.
-- **Client:** `CardModel.FromSerializable` off `DraftStateMessage`.
-
-**`FromSerializable` into `NDeckCardSelectScreen` is already known good** — it is exactly what the
-deck review does with `DuelRendezvous.OpponentDeck`, on the same screen class, and those cards
-render correctly. So if True Grit appears on the *host only*, the canonical→mutable path is the
-culprit and the fix is to build the pool the way the review's cards are built. If it appears on
-both, the difference is what the review's cards have that these do not — they come from a real
-deck, so a pile and a run history, where a pool card has neither.
-
-Ask Lucas which screen showed it before writing any code; that one answer removes half the search.
+**The diagnostic that mattered was asking which screen showed it.** "Both" ruled out the wire and
+the canonical→mutable path in one answer, and left only what the two pools have in common: neither
+had been through the factory.
 
 #### Then: playtest the rest of the cards-only draft (2026-08-14)
 

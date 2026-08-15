@@ -255,7 +255,7 @@ public static class DuelDraft
             // twice reads as a bug even when it is not, and denial stops meaning anything.
             foreach (CardModel card in ofRarity.OrderBy(_ => rng.Next()).Take(PerRarity))
             {
-                pool.Add(Own(card.ToMutable(), drafter));
+                pool.Add(Register(card.ToMutable(), drafter, runState));
             }
         }
 
@@ -263,39 +263,45 @@ public static class DuelDraft
     }
 
     /// <summary>
-    /// Gives a pool card an owner, which is not cosmetic.
+    /// Puts a pool card through the rest of vanilla's card creation, which is not optional.
     ///
-    /// **A card with no `Owner` renders as nonsense**, and the first playtest showed exactly how:
-    /// every energy cost and star cost read 1 and every description read as an error string. Most
-    /// card text and most cost maths resolve through `Owner` — it is how a card reaches its
-    /// player's run state, relics and combat state — so an ownerless card cannot answer either
-    /// question and falls back.
+    /// **This is `RunManager.EnterRoom` again, in miniature.** `RunState.CreateCard` is three lines
+    /// and the whole of what makes a usable card:
     ///
-    /// `Owner` is write-once (it throws if set twice), so this is guarded rather than assigned
-    /// blind: the pool is rebuilt on every state broadcast and a card that already has its owner
-    /// must be left alone.
+    ///     CardModel cardModel = canonicalCard.ToMutable();
+    ///     AddCard(cardModel, owner);
+    ///     cardModel.AfterCreated();
     ///
-    /// Each peer owns its own copies. The host's pool belongs to the host's player and the
-    /// client's to the client's, which is right — they are two presentations of one agreed list,
-    /// and the seven each side keeps go into that side's deck.
+    /// The pool did the first line, invented its own version of the second (assigning `Owner` by
+    /// hand) and skipped the third entirely — a vanilla creation path reimplemented in one line,
+    /// inheriting every omission silently, which is exactly the trap `DuelArena` spent six
+    /// omissions learning.
+    ///
+    /// **All three reported symptoms were this one gap**, getting more specific each time: every
+    /// cost reading 1, every description reading as an error string, and finally every card drawing
+    /// as True Grit. One unregistered, un-initialised model rendering as a fallback — not three
+    /// bugs, and not the `Owner` half alone, which was true as far as it went and fixed nothing.
+    ///
+    /// `AddCard` is what actually establishes ownership, so `Owner` is no longer assigned here.
+    /// Each peer registers its own copies with its own run: the host's pool belongs to the host's
+    /// player and the client's to the client's, which is right — they are two presentations of one
+    /// agreed list, and the seven each side keeps go into that side's deck.
     /// </summary>
-    private static CardModel Own(CardModel card, Player? owner)
+    private static CardModel Register(CardModel card, Player? owner, RunState? runState)
     {
-        if (owner == null)
+        if (owner == null || runState == null)
         {
             return card;
         }
 
         try
         {
-            if (card.Owner == null)
-            {
-                card.Owner = owner;
-            }
+            runState.AddCard(card, owner);
+            card.AfterCreated();
         }
         catch (Exception e)
         {
-            Log.Warn($"[SpirePvp] draft: could not set owner on {card.Id.Entry}: {e.Message}");
+            Log.Warn($"[SpirePvp] draft: could not register {card.Id.Entry} with the run: {e.Message}");
         }
 
         return card;
@@ -516,7 +522,7 @@ public static class DuelDraft
         _pool = (message.pool ?? new List<SerializableCard>())
             .Select(CardModel.FromSerializable)
             .Where(c => c != null)
-            .Select(c => Own(c!, me))
+            .Select(c => Register(c!, me, RunManager.Instance?.State))
             .ToList();
         _hostPicks.Clear();
         _hostPicks.AddRange(message.hostPicks ?? new List<int>());
