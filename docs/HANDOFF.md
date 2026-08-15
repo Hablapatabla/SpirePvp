@@ -874,7 +874,46 @@ on 2026-08-14 before anything else was read:
 - **Nothing has been played on v0.111.0.** Confirm `83 patch classes applied cleanly (121 methods)`
   on first launch before trusting any in-game observation.
 
-#### The immediate next step: playtest the cards-only draft (2026-08-14, UNPLAYED)
+#### THE IMMEDIATE NEXT STEP: draft cards all render as True Grit (2026-08-14, OPEN)
+
+**The draft logic is right and the rendering is wrong. The log proves it:**
+
+```
+draft: 1001 took BLOOD_WALL (host 0, client 1)
+draft: 1    took PACTS_END  (host 1, client 1)
+draft: 1001 took HELLRAISER (host 1, client 2)
+draft: 1    took MOLTEN_FIST (host 2, client 2)
+draft: 1001 took ARMAMENTS  (host 2, client 3)
+```
+
+Fifteen distinct correct cards, picks alternating, both peers agreeing. On screen every one of
+them draws as **True Grit**. So do not debug the pool, the messages or the turn order — they are
+all doing exactly what they should.
+
+**This is one bug wearing three costumes, and the first two were misdiagnosed.** Reported in order:
+every energy and star cost reading 1, every description reading as an error string, and now every
+name and art reading True Grit. Those are not three faults — they are `NCard` rendering a model it
+cannot resolve and falling back. The `Owner` fix (see the previous commit) was reasoned from the
+decompile and is *correct on its own terms* — an ownerless card genuinely cannot compute its cost —
+but it plainly was not the whole cause, because the symptom survived it and got more specific.
+
+**The question that splits it, and it has not been asked yet: is this the host, the client, or
+both?** The two pools come from different places and only one of them is a proven path:
+
+- **Host:** `CardPool.GetUnlockedCards(...)` → `ToMutable()`. Canonical models cloned straight out
+  of the model database, never near a pile, a factory or the wire.
+- **Client:** `CardModel.FromSerializable` off `DraftStateMessage`.
+
+**`FromSerializable` into `NDeckCardSelectScreen` is already known good** — it is exactly what the
+deck review does with `DuelRendezvous.OpponentDeck`, on the same screen class, and those cards
+render correctly. So if True Grit appears on the *host only*, the canonical→mutable path is the
+culprit and the fix is to build the pool the way the review's cards are built. If it appears on
+both, the difference is what the review's cards have that these do not — they come from a real
+deck, so a pile and a run history, where a pool card has neither.
+
+Ask Lucas which screen showed it before writing any code; that one answer removes half the search.
+
+#### Then: playtest the rest of the cards-only draft (2026-08-14)
 
 **Patch count moves to 85 classes** — `DuelDraftNeowPatch` and `DuelDraftScreenPatch`. Confirm the
 line on first launch as always.
