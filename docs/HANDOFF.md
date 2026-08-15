@@ -874,6 +874,47 @@ on 2026-08-14 before anything else was read:
 - **Nothing has been played on v0.111.0.** Confirm `83 patch classes applied cleanly (121 methods)`
   on first launch before trusting any in-game observation.
 
+#### NEXT, and scoped but NOT built: the draft clock needs its own values
+
+Asked for 2026-08-14: *"an act 1 race taking 10 minutes is normal. The clock for draft should be
+like 20 seconds."* Right — the heading now retitles to **Draft clock**, but the chips underneath are
+still `8 / 10 / 12 / 15 min`, which are race deadlines. The label changed and the choices did not.
+
+**The label was free and this is not, because the values live in the modifiers themselves.**
+`RaceClockEight` *is* eight minutes; there is no scaling knob. So a draft clock means a second group:
+
+1. **`DraftClockModifier`** beside `RaceClockModifier`, with second-scale members — 20s / 30s / 60s /
+   Off is the obvious set. `ClockModifierBase` already carries minutes as a `double`, so 20 seconds
+   is `1.0/3.0` and needs no new plumbing in `DuelClockService`.
+2. **Register both** in `DuelModifierListPatch`, and give the new group its own exclusivity set.
+3. **Show one row or the other**, keyed on the ticked format. The row build in `DuelLobbyPanel`
+   already filters by group type, so this is a predicate rather than new layout — and
+   `SyncClockHeading` then stops being needed, because two groups with their own headings say it
+   better than one that renames itself.
+4. **`DuelMatch.RaceClockMinutes` becomes format-aware**, reading `DraftClockModifier` for a draft
+   and `RaceClockModifier` otherwise. It feeds the *first* bank, which is already the right
+   abstraction — "time until the duel starts" — so nothing downstream changes.
+5. **Watch `DuelModifierMinimumPatch`**, which keeps every group non-empty. With two clock groups it
+   must enforce only the one actually on screen, or a draft lobby will insist on a race clock nobody
+   can see.
+
+**The presets need a decision, and it is the one part that is not mechanical.** Blitz and Rapid set a
+race clock and a duel clock. In a draft lobby they would have to set a *draft* clock instead, or the
+row sits at Off while the preset claims otherwise — the same "the label says one thing and the
+control does another" fault fixed twice already today.
+
+#### Still unverified: the draft lobby character mirror
+
+Three fixes, each closing a real gap the last one exposed: hooked only player events (the format
+arrives separately), then only on change (nothing re-asked), then the client could still click a
+different character afterwards. **None of the three has been confirmed working in a log.**
+
+`DuelDraftMirrorPatch` and `DuelDraftCharacterLockPatch` both rest on `DuelLobbyPanel.Apply` running
+on the client when modifiers change, and **that assumption has never been checked against a log.**
+If the mirror misses a fourth time, do not patch it again — add a line dumping the lobby state on
+every refresh (local character, host character, ticked format, net type) and read one run. That is
+what closed the potion popup and the True Grit cards; it is exactly what this item has not had.
+
 #### FIXED: the draft's card preview (2026-08-14, UNPLAYED) — **patch count is now 86**
 
 **Three distinct faults hid behind one report, and only the third was the whole of it.** The report
