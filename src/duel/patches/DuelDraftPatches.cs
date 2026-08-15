@@ -79,59 +79,21 @@ public static class DuelDraftScreenPatch
 {
     public static bool Prefix(CardModel card)
     {
-        // **`IsDraftRun`, not `IsDrafting`.** The final pool is deliberately left on screen after
-        // the last pick, so that a draft run does not stare at a black game area while it waits for
-        // the arena — and `IsDrafting` is already false by then, which would have made every card
-        // on that screen clickable again.
-        if (!DuelDraft.IsDraftRun || DuelDraft.LocalMayPick)
-        {
-            return true;
-        }
-
-        return false;
-    }
-}
-
-/// <summary>
-/// A draft pick is a click, not a click-then-confirm — and the confirm step is what broke the cards.
-///
-/// **The symptom was "they look fine in the draft, they break when you click".** That is precise and
-/// it names the method: with `MinSelect == MaxSelect == 1`, `OnCardClicked` calls
-/// `PreviewSelection` the instant a card is chosen, and `PreviewSelection` ends with
-///
-///     nCard.UpdateVisuals(selectedCard.Pile.Type, CardPreviewMode.Normal);
-///
-/// `CardModel.Pile` is `_owner?.Piles.FirstOrDefault(p =&gt; p.Cards.Contains(this))`. A pool card is
-/// registered with the run and owned, but it is deliberately **in no pile** — it is a card you have
-/// not taken yet — so `Pile` is null and the preview renders a card that never got its visuals.
-/// Hence "broken card", and hence every previewed card looking like the same wrong one.
-///
-/// This is the third distinct fault behind one report, and the first two were mine: the cards were
-/// never registered with the run (fixed by going through `RunState.CreateCard`'s steps), and before
-/// that they had no owner. Each fix was real and each left the screen still broken, because the
-/// preview needs something none of them supply.
-///
-/// **Skipping the preview is the fix rather than giving the card a pile.** Putting pool cards into
-/// a pile to satisfy a getter would mean fifteen cards sitting in one of the player's real piles
-/// while they are still on offer — a card you have not drafted appearing in your deck is a far
-/// worse bug than the one being fixed. And the preview is not wanted anyway: it exists so a campfire
-/// upgrade can be inspected and confirmed, where a draft pick is already deliberate and the opponent
-/// is waiting. Clicking a card takes it, which is what the screen's own heading promises.
-///
-/// `CheckIfSelectionComplete` is what the confirm button would have called, so this is vanilla's own
-/// completion, reached one step earlier.
-/// </summary>
-[HarmonyPatch(typeof(NDeckCardSelectScreen), "PreviewSelection", new System.Type[] { })]
-public static class DuelDraftPreviewPatch
-{
-    public static bool Prefix(NDeckCardSelectScreen __instance)
-    {
         if (!DuelDraft.IsDraftRun)
         {
             return true;
         }
 
-        __instance.CheckIfSelectionComplete();
+        // **The draft takes the click outright and vanilla's selection never runs.** That is what
+        // lets the screen be built once: vanilla's flow selects, previews and then *completes*,
+        // and a completed screen removes itself — which is what made every pick a teardown and
+        // rebuild, reported as "a janky black screen refresh for every pick". It also sidesteps
+        // the preview, which reads `selectedCard.Pile.Type` and breaks on a card that is in no
+        // pile because you have not drafted it yet.
+        //
+        // Returning false for a pick that cannot be made is deliberate rather than lazy: on the
+        // opponent's turn, and on a card already taken, a click should do nothing at all.
+        DuelDraft.SubmitPick(card);
         return false;
     }
 }

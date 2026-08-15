@@ -1,4 +1,6 @@
 {
-  "SPIREPVP_DRAFT.yourTurn": "Draft - your pick",
-  "SPIREPVP_DRAFT.theirTurn": "Draft - opponent is picking"
+  "SPIREPVP_DRAFT.title": "Draft your deck",
+  "SPIREPVP_DRAFT.yourTurn": "Your pick",
+  "SPIREPVP_DRAFT.theirTurn": "Opponent is picking",
+  "SPIREPVP_DRAFT.done": "Draft complete - waiting for the arena"
 }

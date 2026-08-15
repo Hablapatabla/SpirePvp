@@ -9,6 +9,7 @@ using MegaCrit.Sts2.Core.Localization;
 using MegaCrit.Sts2.Core.Logging;
 using MegaCrit.Sts2.Core.Models;
 using MegaCrit.Sts2.Core.Multiplayer.Game;
+using MegaCrit.Sts2.Core.Nodes.Cards;
 using MegaCrit.Sts2.Core.Nodes.Screens.CardSelection;
 using MegaCrit.Sts2.Core.Nodes.Screens.Map;
 using MegaCrit.Sts2.Core.Nodes.Screens.Overlays;
@@ -83,6 +84,9 @@ public static class DuelDraft
     /// <summary>Set whenever the state changed, so the next tick rebuilds the screen for it.</summary>
     private static bool _screenDirty;
 
+    /// <summary>How many of our own picks have already reached the deck. See SyncDeck.</summary>
+    private static int _addedToDeck;
+
     /// <summary>
     /// How long the host waits before repeating an unacknowledged draft state.
     ///
@@ -125,6 +129,7 @@ public static class DuelDraft
         _firstPickerId = 0;
         _complete = false;
         _screenDirty = false;
+        _addedToDeck = 0;
         _awaitingAck = false;
         _lastBroadcast = DateTime.MinValue;
         CloseScreen();
@@ -187,6 +192,22 @@ public static class DuelDraft
         if (me == null || opponent == null)
         {
             Log.Error($"[SpirePvp] draft: cannot begin, me={me?.NetId}, opponent={opponent?.NetId}");
+            return;
+        }
+
+        // **The mirror is a premise, not a preference, and nothing was checking it.** The pool is
+        // built from one character and shown to both players, so two different characters means the
+        // client drafts cards it cannot play into a deck of a different colour — reported 2026-08-14
+        // with a Defect pool and an Ironclad client.
+        //
+        // Refusing is the safe failure while the lobby cannot yet force the match to mirror: a run
+        // that continues without a draft is recoverable, and a duel decided by which side got a
+        // legal deck is not. Same reasoning as `SpirePvpInit.PatchesHealthy` refusing to arbitrate.
+        if (!me.Character.Id.Equals(opponent.Character.Id))
+        {
+            Log.Error($"[SpirePvp] draft: refusing to start — this is a mirror mode and the two "
+                      + $"players are {me.Character.Id.Entry} and {opponent.Character.Id.Entry}. "
+                      + "Pick the same character on both clients. The lobby does not force this yet.");
             return;
         }
 
@@ -448,8 +469,18 @@ public static class DuelDraft
                      && GodotObject.IsInstanceValid(_screen)
                      && _screen.IsInsideTree();
 
-        if (alive && !_screenDirty)
+        if (alive)
         {
+            // **The screen is never rebuilt for a pick.** It used to be, and every pick cost a
+            // full teardown and rebuild — reported as "a janky black screen refresh for every
+            // pick". The pool is fixed for the whole draft, so the grid can be built once and only
+            // its highlights and its status line change.
+            if (_screenDirty)
+            {
+                _screenDirty = false;
+                RefreshVisuals();
+            }
+
             return;
         }
 
@@ -472,6 +503,7 @@ public static class DuelDraft
         // Push happens with the backstop in whatever state the map left it, so ask the stack to
         // present the top screen properly now that the map is shut.
         NOverlayStack.Instance?.ShowOverlays();
+        RefreshVisuals();
     }
 
     /// <summary>The client has the state, so stop repeating it.</summary>
@@ -519,11 +551,18 @@ public static class DuelDraft
             ? null
             : LocalContext.GetMe(RunManager.Instance.State.Players);
 
-        _pool = (message.pool ?? new List<SerializableCard>())
-            .Select(CardModel.FromSerializable)
-            .Where(c => c != null)
-            .Select(c => Register(c!, me, RunManager.Instance?.State))
-            .ToList();
+        // **Built once.** Later broadcasts carry the same pool, so rebuilding would hand the grid
+        // fresh `CardModel` instances every pick — new nodes, a new screen, and a re-registration of
+        // fifteen cards with the run each time. The pool is fixed for the whole draft; only the
+        // picks and the turn move.
+        if (_pool.Count == 0)
+        {
+            _pool = (message.pool ?? new List<SerializableCard>())
+                .Select(CardModel.FromSerializable)
+                .Where(c => c != null)
+                .Select(c => Register(c!, me, RunManager.Instance?.State))
+                .ToList();
+        }
         _hostPicks.Clear();
         _hostPicks.AddRange(message.hostPicks ?? new List<int>());
         _clientPicks.Clear();
@@ -551,6 +590,7 @@ public static class DuelDraft
         // Marked rather than pushed: the screen is built by EnsureScreen on the next tick, which is
         // what makes it survive the run's own act-entry sequence clearing screens underneath it.
         _screenDirty = true;
+        SyncDeck();
     }
 
     /// <summary>
@@ -565,109 +605,113 @@ public static class DuelDraft
     {
         CloseScreen();
 
-        List<CardModel> remaining = Remaining().ToList();
-        if (remaining.Count == 0)
+        if (_pool.Count == 0 || NOverlayStack.Instance == null)
         {
-            Log.Warn("[SpirePvp] draft: nothing left in the pool to show");
+            Log.Warn($"[SpirePvp] draft: cannot show the pool (cards={_pool.Count}, "
+                     + $"overlays={(NOverlayStack.Instance == null ? "none" : "ok")})");
             return;
         }
 
-        if (NOverlayStack.Instance == null)
-        {
-            Log.Warn("[SpirePvp] draft: cannot show the pool — no overlay stack");
-            return;
-        }
-
-        bool myTurn = _pickerId == LocalId();
-
-        // (1, 1) is vanilla's "pick exactly one" — the card-reward interaction, which is what a
-        // draft pick is. Not cancelable: there is no valid state where a player declines to draft,
-        // and the opponent is waiting on the answer.
+        // **The whole pool, including cards already taken.** Removing them was what forced a rebuild
+        // per pick, and it also threw away the thing a shared pool is for: you want to see what they
+        // took, not just what is left. Taken cards stay in place and are marked instead — see
+        // RefreshVisuals.
         //
-        // **The title says whose turn it is**, which is the only place that fact is written down:
-        // the pool looks identical on both screens and the cards simply stop responding when it is
-        // not yours, which reads as a broken screen rather than as waiting. It borrowed
-        // `TO_UPGRADE` while the flow was being built and told everyone to choose a card to
-        // upgrade, which is a different game.
-        CardSelectorPrefs prefs = new CardSelectorPrefs(
-            DraftTitle(myTurn), 1, 1)
+        // (1, 1) keeps vanilla's "pick exactly one" shape, but nothing in vanilla's selection flow
+        // actually runs: `DuelDraftScreenPatch` takes the click and submits the pick itself, so the
+        // screen never completes and never has to be rebuilt.
+        CardSelectorPrefs prefs = new CardSelectorPrefs(DraftTitle(), 1, 1)
         {
             Cancelable = false
         };
 
-        NDeckCardSelectScreen screen = NDeckCardSelectScreen.Create(remaining, prefs);
+        NDeckCardSelectScreen screen = NDeckCardSelectScreen.Create(new List<CardModel>(_pool), prefs);
         _screen = screen;
         NOverlayStack.Instance.Push(screen);
-
-        if (!myTurn)
-        {
-            // Waiting: the screen still shows the pool shrinking, which is the whole point of a
-            // shared pool — you watch what they take. `DuelDraftScreenPatch` is what stops the
-            // cards being clickable while it is not your turn.
-            Log.Info($"[SpirePvp] draft: waiting on {_pickerId} ({remaining.Count} left)");
-            return;
-        }
-
-        Log.Info($"[SpirePvp] draft: your pick ({remaining.Count} left)");
-        WaitForPick(screen, remaining);
+        Log.Info($"[SpirePvp] draft: pool shown ({_pool.Count} cards)");
     }
 
     /// <summary>
-    /// The screen's heading, and a missing key must not be able to take the draft down with it.
+    /// Marks who has taken what, and says whose turn it is. Runs on every state change.
     ///
-    /// `LocManager` throws for a key it does not have, and the key ships in the `.pck` while the
-    /// code that reads it ships in the DLL — so a client that rebuilt without re-exporting has the
-    /// call and not the string. That split killed a net message on 2026-08-13 and would throw here
-    /// inside the screen build, i.e. no draft at all. English is the fallback rather than the raw
-    /// key, because `SPIREPVP_DRAFT.yourTurn` on a heading teaches nobody anything.
+    /// **Two marks, because a shared pool has two owners.** Cards you drafted keep vanilla's own
+    /// selection highlight, which is the affirmative "this is yours" the engine already draws.
+    /// Cards the opponent drafted are dimmed instead — gone from your options without being gone
+    /// from the screen, so the pool still reads as a pool and you can see what they built.
+    ///
+    /// Deliberately not a red/blue pair: red means damage everywhere else in this game, and a red
+    /// border on a card someone happily drafted fights that. Highlight-versus-dim also survives
+    /// colour-blindness, which a hue pair on its own does not.
     /// </summary>
-    private static LocString DraftTitle(bool myTurn)
+    private static void RefreshVisuals()
     {
-        string key = myTurn ? "SPIREPVP_DRAFT.yourTurn" : "SPIREPVP_DRAFT.theirTurn";
-
-        // `GetIfExists` rather than the constructor: the constructor throws for a key the pack does
-        // not have, and this runs inside the screen build, so a stale pack would mean no draft at
-        // all rather than a wrong heading.
-        LocString? loc = LocString.GetIfExists("card_selection", key);
-        if (loc != null)
+        if (_screen == null || !GodotObject.IsInstanceValid(_screen))
         {
-            return loc;
+            return;
         }
 
-        Log.Warn($"[SpirePvp] draft: loc key {key} is missing — the .pck is stale. Re-export it; "
-                 + "the heading will read as a card upgrade until you do.");
-        return new LocString("card_selection", "TO_UPGRADE");
+        NCardGrid? grid = _screen._grid;
+        if (grid == null)
+        {
+            return;
+        }
+
+        List<int> mine = LocalId() == HostId() ? _hostPicks : _clientPicks;
+
+        for (int i = 0; i < _pool.Count; i++)
+        {
+            NCard? node = grid.GetCardNode(_pool[i]);
+            if (node == null || !GodotObject.IsInstanceValid(node))
+            {
+                continue;
+            }
+
+            if (mine.Contains(i))
+            {
+                grid.HighlightCard(_pool[i]);
+                node.Modulate = Colors.White;
+            }
+            else if (IsTaken(i))
+            {
+                grid.UnhighlightCard(_pool[i]);
+                node.Modulate = TakenByOpponent;
+            }
+            else
+            {
+                grid.UnhighlightCard(_pool[i]);
+                node.Modulate = Colors.White;
+            }
+        }
+
+        if (_screen._infoLabel != null)
+        {
+            // The status line rather than the title, because the title is fixed at construction and
+            // the whole point of building the screen once is that it is never reconstructed.
+            _screen._infoLabel.Text = _complete
+                ? Text("SPIREPVP_DRAFT.done", "Draft complete - waiting for the arena")
+                : LocalMayPick
+                    ? Text("SPIREPVP_DRAFT.yourTurn", "Your pick")
+                    : Text("SPIREPVP_DRAFT.theirTurn", "Opponent is picking");
+        }
     }
 
-    private static async void WaitForPick(NDeckCardSelectScreen screen, List<CardModel> remaining)
+    /// <summary>How a card the opponent drafted is drawn: still there, plainly not yours.</summary>
+    private static readonly Color TakenByOpponent = new Color(0.45f, 0.45f, 0.5f, 0.85f);
+
+    /// <summary>
+    /// Takes a pick from the click handler. Validates locally only to avoid obvious no-ops — the
+    /// host is still the one that decides, and a pick it does not accept simply changes nothing.
+    /// </summary>
+    public static void SubmitPick(CardModel card)
     {
-        CardModel? chosen;
-        try
-        {
-            chosen = (await screen.CardsSelected()).FirstOrDefault();
-        }
-        catch (OperationCanceledException)
-        {
-            // Normal: EnsureScreen closes and rebuilds this screen whenever the state changes or
-            // something clears the overlay stack, and closing it cancels the pending selection.
-            // The rebuild starts a fresh wait, so there is nothing to recover here.
-            return;
-        }
-        catch (Exception e)
-        {
-            Log.Error($"[SpirePvp] draft: pick screen failed: {e}");
-            return;
-        }
-
-        if (chosen == null)
+        if (!LocalMayPick)
         {
             return;
         }
 
-        int poolIndex = IndexInPool(chosen, remaining);
-        if (poolIndex < 0)
+        int poolIndex = _pool.IndexOf(card);
+        if (poolIndex < 0 || IsTaken(poolIndex))
         {
-            Log.Error($"[SpirePvp] draft: picked {chosen.Id.Entry} but it is not in the pool");
             return;
         }
 
@@ -677,44 +721,10 @@ public static class DuelDraft
             return;
         }
 
-        // A request, not a decision — the host answers with the new state and that is what moves
-        // this client's screen on.
         RunManager.Instance?.NetService?.SendMessage(new DraftPickMessage { poolIndex = poolIndex });
     }
 
-    /// <summary>
-    /// Maps the clicked card back to its pool slot.
-    ///
-    /// **By identity against the list this screen was built from**, not by model id: the pool can
-    /// legitimately hold the same card twice across rarities, and two entries with one id would
-    /// otherwise both resolve to the first slot — a pick that silently takes the wrong card.
-    /// </summary>
-    private static int IndexInPool(CardModel chosen, List<CardModel> remaining)
-    {
-        int offset = remaining.IndexOf(chosen);
-        if (offset < 0)
-        {
-            return -1;
-        }
 
-        int seen = 0;
-        for (int i = 0; i < _pool.Count; i++)
-        {
-            if (IsTaken(i))
-            {
-                continue;
-            }
-
-            if (seen == offset)
-            {
-                return i;
-            }
-
-            seen++;
-        }
-
-        return -1;
-    }
 
     /// <summary>
     /// The draft is over: take what you drafted into your deck, then go to the arena.
@@ -746,25 +756,8 @@ public static class DuelDraft
             return;
         }
 
-        List<int> mine = LocalId() == HostId() ? _hostPicks : _clientPicks;
-        int added = 0;
-        foreach (int index in mine)
-        {
-            if (index < 0 || index >= _pool.Count)
-            {
-                continue;
-            }
-
-            // **Not `ToMutable()` again.** Pool cards are already mutable copies — `ToMutable`
-            // asserts the source is canonical, so a second call on one of these is wrong by
-            // construction. They already carry this player as their owner, which is what the deck
-            // wants anyway.
-            me.Deck.AddInternal(_pool[index]);
-            added++;
-        }
-
-        Log.Warn($"[SpirePvp] draft: took {added} card(s) into the deck "
-                 + $"({me.Deck.Cards.Count} total), heading for the arena");
+        // The cards went in as they were picked (see SyncDeck), so this only reports and moves on.
+        Log.Warn($"[SpirePvp] draft: complete — deck is {me.Deck.Cards.Count} cards, heading for the arena");
 
         DuelRendezvous.ArriveLocal();
     }
@@ -775,6 +768,81 @@ public static class DuelDraft
         {
             NOverlayStack.Instance?.Remove(_screen);
             _screen = null;
+        }
+    }
+
+    /// <summary>
+    /// The screen's heading, and a missing key must not be able to take the draft down with it.
+    ///
+    /// `LocManager` throws for a key it does not have, and the key ships in the `.pck` while the
+    /// code that reads it ships in the DLL — so a client that rebuilt without re-exporting has the
+    /// call and not the string. That split killed a net message on 2026-08-13 and would throw here
+    /// inside the screen build, i.e. no draft at all.
+    /// </summary>
+    private static LocString DraftTitle()
+    {
+        LocString? loc = LocString.GetIfExists("card_selection", "SPIREPVP_DRAFT.title");
+        if (loc != null)
+        {
+            return loc;
+        }
+
+        Log.Warn("[SpirePvp] draft: loc key SPIREPVP_DRAFT.title is missing — the .pck is stale. "
+                 + "Re-export it; the heading will read as a card upgrade until you do.");
+        return new LocString("card_selection", "TO_UPGRADE");
+    }
+
+    /// <summary>Plain text for the status line, with the same stale-pack guard as the heading.</summary>
+    private static string Text(string key, string fallback)
+    {
+        LocString? loc = LocString.GetIfExists("card_selection", key);
+        return loc?.GetFormattedText() ?? fallback;
+    }
+
+    /// <summary>
+    /// Puts our own picks into the deck as they are made, rather than in one lump at the end.
+    ///
+    /// **Asked for on sight — "I'd like to see them being added to my deck as I click them"** — and
+    /// it is also the more honest model: a drafted card is yours the moment the host confirms the
+    /// pick, so the deck should say so. Nothing here can double-add, because `_addedToDeck` counts
+    /// what has already gone in and the pick list only ever grows.
+    ///
+    /// **`InvokeCardAddFinished` is the half that makes it visible.** The top-bar deck counter
+    /// caches its value and only refreshes on the pile's `CardAddFinished` — the same vanilla quirk
+    /// HANDOFF records for cards added by console, where the card is really there and the label is
+    /// simply stale. That is why the deck read 11 after a whole draft.
+    /// </summary>
+    private static void SyncDeck()
+    {
+        RunState? runState = RunManager.Instance?.State;
+        Player? me = runState == null ? null : LocalContext.GetMe(runState.Players);
+        if (me == null)
+        {
+            return;
+        }
+
+        List<int> mine = LocalId() == HostId() ? _hostPicks : _clientPicks;
+        bool added = false;
+
+        while (_addedToDeck < mine.Count)
+        {
+            int index = mine[_addedToDeck];
+            _addedToDeck++;
+
+            if (index < 0 || index >= _pool.Count)
+            {
+                continue;
+            }
+
+            me.Deck.AddInternal(_pool[index]);
+            added = true;
+            Log.Info($"[SpirePvp] draft: {_pool[index].Id.Entry} joined the deck "
+                     + $"({me.Deck.Cards.Count} cards)");
+        }
+
+        if (added)
+        {
+            me.Deck.InvokeCardAddFinished();
         }
     }
 
