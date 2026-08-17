@@ -874,6 +874,36 @@ on 2026-08-14 before anything else was read:
 - **Nothing has been played on v0.111.0.** Confirm `83 patch classes applied cleanly (121 methods)`
   on first launch before trusting any in-game observation.
 
+#### FOUND BY TELEMETRY: the mirror was sending from inside a receive (2026-08-14)
+
+**Five fixes argued about whether the client's character change happened. It did — and went
+nowhere.** That is the fact none of them could see, and the instrumentation added on the fifth
+attempt produced it in three lines:
+
+```
+[Client] SetLocalCharacter -> NECROBINDER ... mirroring=True draft=True => ALLOWED
+[Client] 1=NECROBINDER, 1001(me)=NECROBINDER
+[Host]   1(me)=NECROBINDER, 1001=IRONCLAD
+```
+
+Allowed, applied locally, never seen by the host — which then seeded the run `NECROBINDER and
+IRONCLAD` and the draft refused, so "no draft overlay" and "the multiplayer overlay is lying" were
+the same fault for the fifth time running.
+
+**The cause: the mirror ran from a postfix on `PlayerChanged`, so the client was calling
+`SetLocalCharacter` — which sends `LobbyPlayerChangedCharacterMessage` — from inside its handling
+of a lobby message. A send made from inside a receive does not survive.** `Callable.CallDeferred`
+moves it to the end of the frame, where it is an ordinary send. `_mirroring` is set inside the
+deferred call rather than around the scheduling, or it would be false again by the time the lock
+reads it.
+
+**The methodology note, and it is the expensive one.** Four fixes were reasoned from the decompile,
+each correct about the thing it changed, none of them checked against a log — and the symptom
+survived all four while shifting shape enough to look like a new bug each time. The rule this
+project already had was *read the logs yourself rather than asking for symptoms*; what it did not
+say, and now does: **when a fix is aimed at a mechanism nobody has observed, that is a guess even
+when the reasoning is sound.** The instrumentation cost one round trip and answered it outright.
+
 #### NEXT, and scoped but NOT built: the draft clock needs its own values
 
 Asked for 2026-08-14: *"an act 1 race taking 10 minutes is normal. The clock for draft should be

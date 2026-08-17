@@ -1,4 +1,6 @@
+using System;
 using System.Linq;
+using Godot;
 using HarmonyLib;
 using MegaCrit.Sts2.Core.Entities.Multiplayer;
 using MegaCrit.Sts2.Core.Multiplayer.Game;
@@ -9,7 +11,6 @@ using MegaCrit.Sts2.Core.Nodes.Screens.CustomRun;
 using MegaCrit.Sts2.Core.Nodes.Screens.MainMenu;
 using SpirePvp.Modifiers;
 using MegaCrit.Sts2.Core.Logging;
-using MegaCrit.Sts2.Core.Models;
 using MegaCrit.Sts2.Core.Nodes.Screens.CardSelection;
 using MegaCrit.Sts2.Core.Runs;
 
@@ -322,15 +323,45 @@ public static class DuelDraftMirrorPatch
         }
 
         Log.Warn($"[SpirePvp] draft lobby: mirroring the host — taking {player.character.Id.Entry}");
-        _mirroring = true;
-        try
+
+        // **Deferred out of the message handler, and the telemetry is what showed why.** This runs
+        // from a postfix on `PlayerChanged`, i.e. inside the client's handling of a lobby message,
+        // and `SetLocalCharacter` sends one. The logs had it exactly:
+        //
+        //     [Client] SetLocalCharacter -> NECROBINDER ... => ALLOWED
+        //     [Client] 1=NECROBINDER, 1001(me)=NECROBINDER
+        //     [Host]   1(me)=NECROBINDER, 1001=IRONCLAD
+        //
+        // Allowed, applied locally, and never seen by the host — a send made from inside a receive
+        // does not survive. Four fixes argued about *whether* the change happened; none of them
+        // could see that it happened and went nowhere, which is the one thing the instrumentation
+        // was added to answer.
+        //
+        // `CallDeferred` puts it at the end of the frame, outside the handler, where it is an
+        // ordinary send. `_mirroring` is set inside the deferred call rather than around the
+        // scheduling, or it would be false again by the time the lock is consulted.
+        CharacterModel character = player.character;
+        Callable.From(() =>
         {
-            screen.SelectCharacter(button, player.character);
-        }
-        finally
-        {
-            _mirroring = false;
-        }
+            if (!GodotObject.IsInstanceValid(screen) || !GodotObject.IsInstanceValid(button))
+            {
+                return;
+            }
+
+            _mirroring = true;
+            try
+            {
+                screen.SelectCharacter(button, character);
+            }
+            catch (Exception e)
+            {
+                Log.Error($"[SpirePvp] draft lobby: mirror failed: {e}");
+            }
+            finally
+            {
+                _mirroring = false;
+            }
+        }).CallDeferred();
     }
 }
 
