@@ -561,6 +561,16 @@ because two concurrent builds fight over the same output files. Flags: `-NoBuild
 (the plain Custom lobby), `-Fast` (standard host), `-Setup` (now a no-op),
 `-Fullscreen`, `-Width <px>`, `-ClientId <n>`. Verify the run with `.\scripts\check-log.ps1`.
 
+`check-log.ps1` grew three options on 2026-08-14, because the mod now logs enough that a full dump
+buries the line you want:
+
+- **`-Compare`** prints the last lobby roster each peer holds and says whether they **AGREE**. That
+  one line is what five character-mirror fixes failed to establish; the history is still available
+  under `-Filter`.
+- **`-Filter <regex>`** narrows the mod lines. The patch count is never filtered out, since it is
+  the line that decides whether anything else in the log means anything.
+- **`-Draft`** is shorthand for `-Filter "draft|lobby telemetry"`.
+
 Both launchers **rotate the log** rather than truncating it, keeping the last five runs as
 `logs/host.<timestamp>.log`. `--log-file` truncates on open, and losing the previous run cost a
 real investigation on 2026-08-06 — the host's half of the run being diagnosed was already gone.
