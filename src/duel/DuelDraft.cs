@@ -1,6 +1,7 @@
 using System;
 using System.Collections.Generic;
 using System.Linq;
+using System.Reflection;
 using Godot;
 using MegaCrit.Sts2.Core.Commands;
 using MegaCrit.Sts2.Core.Context;
@@ -394,10 +395,9 @@ public static class DuelDraft
     /// **Filtered against what the player already has.** Relics are not stackable in general, and a
     /// pool offering the starter relic back is a wasted slot at best.
     ///
-    /// Note the deliberate gap: a duel has no map, so rest-site, shop and map-event relics are dead
-    /// weight here. They are *not* filtered, because doing it by enumerating models is the
-    /// hand-maintained list this project rejected for the AoE fix, and the honest filter — on which
-    /// hook a relic listens to — wants its own pass. A dead relic is a bad pick, not a broken match.
+    /// **Map-only relics are filtered out, by what they listen to rather than by name** — see
+    /// <see cref="IsDeadInADuel"/>. A duel has no map, shop, rest site or event, so a relic whose
+    /// every override is about those is a wasted slot in a ten-card pool.
     /// </summary>
     private static List<RelicModel> BuildRelicPool(RunState runState, Player drafter)
     {
@@ -410,6 +410,7 @@ public static class DuelDraft
                 .GetUnlockedRelics(runState.UnlockState)
                 .Concat(ModelDb.RelicPool<SharedRelicPool>().GetUnlockedRelics(runState.UnlockState))
                 .Where(r => !held.Contains(r.Id.Entry))
+                .Where(r => !IsDeadInADuel(r))
                 .GroupBy(r => r.Id.Entry)
                 .Select(g => g.First())
                 .ToList();
@@ -428,6 +429,91 @@ public static class DuelDraft
 
         return pool;
     }
+
+    /// <summary>
+    /// Whether a relic can do nothing at all in a duel, decided by the hooks it overrides.
+    ///
+    /// **By behaviour, not by name.** Enumerating "the rest site relics" is the hand-maintained list
+    /// the AoE fix rejected on principle: it is wrong the day the game adds a relic, and nothing
+    /// tells you. What is actually true of a dead relic is that *everything it overrides is about a
+    /// place a duel never goes* — a map, a shop, a rest site, an event, a floor transition. That is
+    /// a question reflection can answer and a list cannot.
+    ///
+    /// **Conservative in the direction that matters.** A relic is only excluded when it overrides at
+    /// least one hook and **every** one of them is map-only. A relic that overrides nothing is kept,
+    /// because plenty work through properties rather than hooks and a silent stat relic is fine; a
+    /// relic that overrides one combat hook and five map hooks is kept, because the one combat hook
+    /// is the whole point of it. **A dead relic is a bad pick; a missing good relic is a worse
+    /// pool.**
+    ///
+    /// The result is cached per type: the pool is rebuilt on a broadcast and reflection over a few
+    /// hundred relics is not something to redo on a timer.
+    /// </summary>
+    private static bool IsDeadInADuel(RelicModel relic)
+    {
+        Type type = relic.GetType();
+        if (_deadRelicCache.TryGetValue(type, out bool cached))
+        {
+            return cached;
+        }
+
+        bool dead;
+        try
+        {
+            List<string> overridden = type
+                .GetMethods(BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic
+                            | BindingFlags.DeclaredOnly)
+                .Where(m => m.IsVirtual && m.GetBaseDefinition().DeclaringType != type)
+                .Select(m => m.Name)
+                .Distinct()
+                .ToList();
+
+            dead = overridden.Count > 0 && overridden.All(MapOnlyHooks.Contains);
+        }
+        catch (Exception e)
+        {
+            // Reflection failing is not a reason to shrink someone's relic pool.
+            Log.Warn($"[SpirePvp] draft: could not inspect {relic.Id.Entry}, keeping it: {e.Message}");
+            dead = false;
+        }
+
+        _deadRelicCache[type] = dead;
+        if (dead)
+        {
+            Log.Info($"[SpirePvp] draft: {relic.Id.Entry} does nothing outside a map — not offered");
+        }
+
+        return dead;
+    }
+
+    private static readonly Dictionary<Type, bool> _deadRelicCache = new();
+
+    /// <summary>
+    /// Hooks that only ever fire somewhere a duel does not go.
+    ///
+    /// Deliberately a list of *hooks* rather than of relics: hooks are the engine's own vocabulary
+    /// for "when does this happen", they change far less often than the relic roster, and a hook
+    /// added by a game update simply is not on this list, which fails toward keeping a relic.
+    /// </summary>
+    private static readonly HashSet<string> MapOnlyHooks = new()
+    {
+        "AfterActEntered",
+        "AfterMapGenerated",
+        "AfterRestSiteHeal",
+        "AfterRestSiteSmith",
+        "AfterRoomEntered",
+        "BeforeRoomEntered",
+        "ModifyExtraRestSiteHealText",
+        "ModifyGeneratedMap",
+        "ModifyGeneratedMapLate",
+        "ModifyMerchantCardCreationResults",
+        "ModifyMerchantCardPool",
+        "ModifyMerchantCardRarity",
+        "ModifyMerchantPrice",
+        "ModifyNextEvent",
+        "ModifyOddsIncreaseForUnrolledRoomType",
+        "ModifyRestSiteHealAmount"
+    };
 
     /// <summary>Host only: apply a pick, whoever asked for it, then tell everyone.</summary>
     private static void OnPickRequest(DraftPickMessage message, ulong senderId)

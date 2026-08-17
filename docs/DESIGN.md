@@ -877,12 +877,13 @@ Two ordering rules the round turned up, both worth keeping:
    crafting, `NUnlockPotionsScreen` is the timeline) and `NChooseARelicSelection` takes a
    `RelicModel`. Either build a minimal grid from the pieces `DuelLobbyPanel` already uses, or wrap
    potions in a display-only shim for the relic row. A surface decision, not a logic one.
-2. **Pool filtering for relics.** Co-op-only cards already have machinery
-   (`RaceNoCoopCardsPatch`) and the card pool inherits it. Relics need it for a different reason: a
-   duel has no map, so rest-site, shop and map-event relics are dead weight. Filter on the hook a
-   relic listens to rather than by enumerating models — the AoE fix explicitly rejected
-   hand-maintaining a 70-model list. A dead relic is a bad pick, not a broken match, which is why
-   this is second rather than first.
+2. ~~**Pool filtering for relics.**~~ **Done 2026-08-14** (`DuelDraft.IsDeadInADuel`), and by hook
+   rather than by name: a relic is excluded only when it overrides at least one hook and *every* one
+   of them is in the map/shop/rest/event family. Conservative on purpose — a relic overriding
+   nothing is kept, since many work through properties, and one combat hook among five map hooks is
+   enough to keep it. A dead relic is a bad pick; a missing good relic is a worse pool. The list is
+   of hooks, not models, so a relic added by a game update is kept by default rather than silently
+   dropped.
 3. **The map screen is behind the draft**, reachable if the overlay is ever dismissed. It should not
    be interactable in a draft run.
 
