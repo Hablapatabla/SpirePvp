@@ -100,6 +100,25 @@ public class DuelConsoleCmd : AbstractConsoleCmd
                 $"Race progress debug HUD {(on ? "on" : "off")}.");
         }
 
+        // **A dev shortcut through the draft, and it is local-only like every other mod command.**
+        // A full draft is 24 clicks across two rounds before a duel can even start, which is a long
+        // way to walk to reach the thing being tested. This takes the local player's remaining picks
+        // for the running round, in pool order, and submits them one per tick.
+        //
+        // It picks *for one player only*, so the opponent still drafts normally and the alternation
+        // is untouched — both sides typing it is simply a fast draft, not a desync. The host still
+        // arbitrates every pick, which is the property that makes automating clicks safe here where
+        // automating anything in the duel would not be.
+        if (mode == "draft")
+        {
+            bool on = args.Length < 2 || args[1].ToLowerInvariant() != "off";
+            DuelDraft.AutoPick = on;
+            return new CmdResult(success: true,
+                on
+                    ? "Auto-drafting your picks in pool order. `duel draft off` to stop."
+                    : "Auto-draft off.");
+        }
+
         if (mode == "start")
         {
             return StartDuelRoom();

@@ -125,6 +125,16 @@ public static class DuelDraft
     /// </summary>
     private static readonly TimeSpan RebroadcastAfter = TimeSpan.FromSeconds(1);
 
+    /// <summary>
+    /// Dev shortcut: take our own picks automatically, in pool order (`duel draft`).
+    ///
+    /// Local-only and one player at a time, so the host still arbitrates every pick and the
+    /// alternation is untouched — this is a fast typist, not a second code path into the draft.
+    /// That distinction is the whole reason it is safe, and it is the one `duel now` got wrong
+    /// twice before being routed back through the real rendezvous.
+    /// </summary>
+    public static bool AutoPick { get; set; }
+
     /// <summary>Whether a draft is running. Read by the patches that keep the map out of the way.</summary>
     public static bool IsDrafting => CurrentPoolSize > 0 && !_complete;
 
@@ -133,9 +143,6 @@ public static class DuelDraft
 
     /// <summary>How many each player takes in the running round.</summary>
     private static int CurrentPicksEach => _stage == Stage.Relics ? RelicPicksEach : PicksEach;
-
-    /// <summary>Who picked first — and therefore who moves *second*.</summary>
-    public static ulong FirstPickerId => _firstPickerId;
 
     /// <summary>
     /// True once a draft has been set up for this run, and it stays true after the draft ends.
@@ -169,6 +176,7 @@ public static class DuelDraft
         _screenDirty = false;
         _appliedPicks = 0;
         _awaitingAck = false;
+        AutoPick = false;
         CloseBackdrop();
         _lastBroadcast = DateTime.MinValue;
         CloseScreen();
@@ -511,6 +519,14 @@ public static class DuelDraft
         // a tick and not a push at the moment the state arrives.
         EnsureScreen();
 
+        // One pick per tick while auto-drafting, so the alternation still runs and both screens
+        // still show the pool shrinking — a burst submitted at once would be refused for every pick
+        // but the first anyway, since the host hands the turn back only after it accepts one.
+        if (AutoPick && LocalMayPick)
+        {
+            AutoPickOne();
+        }
+
         // The backdrop deliberately outlives the draft — it carries the deck review too, which is
         // the gap that was black before — but it must not follow anyone into the arena. Taken down
         // on the phase rather than on the last pick, because the phase is the condition that
@@ -628,6 +644,30 @@ public static class DuelDraft
         // present the top screen properly now that the map is shut.
         NOverlayStack.Instance?.ShowOverlays();
         RefreshVisuals();
+    }
+
+    /// <summary>Takes the first thing left in the pool, for `duel draft`.</summary>
+    private static void AutoPickOne()
+    {
+        for (int i = 0; i < CurrentPoolSize; i++)
+        {
+            if (IsTaken(i))
+            {
+                continue;
+            }
+
+            Log.Info($"[SpirePvp] draft: auto-picking index {i}");
+            if (RunManager.Instance?.NetService.Type == NetGameType.Host)
+            {
+                TryPick(LocalId(), i);
+            }
+            else
+            {
+                RunManager.Instance?.NetService?.SendMessage(new DraftPickMessage { poolIndex = i });
+            }
+
+            return;
+        }
     }
 
     /// <summary>The client has the state, so stop repeating it.</summary>
