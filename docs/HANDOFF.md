@@ -24,12 +24,20 @@ and disconnect handling.
 
 ## What is unplayed right now, most important first
 
-| What | Risk |
-|---|---|
-| **The relic draft round** (2026-08-14) | Whole round is new. Watch the hand-off between rounds — the finished round is broadcast *before* its pick lists are cleared, and getting that backwards drops the last picks |
-| **The remote-marker fix** | Compares by id when vanilla's reference check misses. Only ever adds a marker, so it cannot break a lobby that already worked |
-| **Lobby label restore** | Open a duel lobby, back out, open plain Custom: modifier names must read in full |
-| **Draft clock + presets** | Draft lobby should show seconds, and Blitz/Rapid should set 30s/2min and 1min/3min |
+Everything below landed on 2026-08-14 in one unsupervised batch. **Test the relic round first** — it
+is the only item that can break a match rather than look wrong.
+
+| What | How you know | Risk |
+|---|---|---|
+| **The relic draft round** | Cards, then 10 relics 5 each, then the duel. `duel draft` auto-takes your picks | Whole round is new. The round hand-off is the delicate part: the finished round is broadcast *before* its pick lists are cleared, and reversing that drops the last picks |
+| **Map-only relics filtered** | Rest-site and shop relics should not appear in a pool | By hook, not by name. Fails toward keeping a relic, so the worst case is a dead pick |
+| **`duel draft`** | Auto-takes your remaining picks, one per tick | Local-only, host still arbitrates. Both players may type it |
+| **Draft clock + presets** | Draft lobby shows seconds; Blitz 30s/2min, Rapid 1min/3min | Two clock rows exist and one is hidden by format |
+| **Remote character marker** | Host's marker visible on the client | Only ever *adds* a marker, so it cannot break a lobby that already worked |
+| **Lobby label restore** | Duel lobby → back out → plain Custom: names read in full | Cosmetic |
+
+**Confirmed from the logs rather than assumed:** the character mirror now agrees across peers,
+including on Random — `check-log.ps1 -Compare` reports `peers AGREE`.
 
 **Not built: the potion round.** The loop, the message and the grant path are all in place; what is
 missing is a screen, because vanilla has no potion picker. See the task note — it is a surface
