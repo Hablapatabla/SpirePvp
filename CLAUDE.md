@@ -1,8 +1,12 @@
 # SpirePvp — agent orientation
 
 1v1 PvP mod for Slay the Spire 2 (Godot 4.5.1 .NET, official mod loader, Harmony ships with the
-game). Two players race identical-seed runs through Act 1, then duel — under one of two turn
-models, paced real-time or batched turn-based, with chess clocks over both.
+game). Two players build a deck and then duel, under one of two turn models — paced real-time or
+batched turn-based — with chess clocks over both.
+
+**Two ways to build the deck, picked in the lobby.** *Act 1 Race*: both players race identical-seed
+runs through Act 1 and converge on an arena. *Draft*: no race at all, a mirror match drafting cards
+and relics from a shared pool. Everything after that point is shared between them.
 
 **Read first:** `docs/HANDOFF.md` — current state, how to run two local clients, console
 commands, architecture tour, and the traps that cost real time. Then `README.md` (toolchain,
@@ -14,7 +18,10 @@ OS-neutral.
 the decompile was regenerated and `dotnet build` stayed green on 2026-08-14, so no patch target
 moved — but nothing has been *played* on it yet. Confirm the patch-count line on first launch.
 
-**Current state (2026-08-11):** **M1–M6 done and playtested** against v0.110.1 on two local
+**Current state (2026-08-14):** M1–M9 done and playtested; M10 (draft) built, partly played.
+Historical detail below is kept because the reasoning is still load-bearing.
+
+**M1–M6 done and playtested** against v0.110.1 on two local
 clients over ENet. The whole loop runs: lobby modifiers → race Act 1 on a mirrored seed →
 arena rendezvous → deck review → duel → result screen, with split race/duel clocks, checksums
 live, and back-to-back matches in one process. Matches also end by **resignation** (abandoning
