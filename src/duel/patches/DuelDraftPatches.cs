@@ -295,15 +295,16 @@ public static class DuelDraftMirrorPatch
             return;
         }
 
-        // **Never mirror the random-character placeholder.** It is not a character — it resolves to
-        // one later — so copying it puts the client on a placeholder that will resolve
-        // independently, i.e. to a different character, which is the opposite of a mirror. Seen in
-        // the client's log as `taking RANDOM_CHARACTER` before it took the real one.
-        if (player.character.Id.Entry == "RANDOM_CHARACTER")
-        {
-            Log.Info("[SpirePvp] draft lobby: host is on random — waiting for it to resolve");
-            return;
-        }
+        // **Random is mirrored like any other pick, and that is deliberate.** A guard here used to
+        // skip it, on the theory that a placeholder resolves independently on each client and so
+        // copying it is the opposite of a mirror. That theory was wrong, and `DuelRandomCharacterPatch`
+        // already says why: `StartRunLobby.BeginRunLocally` resolves `RandomCharacter` from an `Rng`
+        // seeded off the **run seed**, so both clients land on the same character with nothing
+        // crossing the wire. Two players on Random are therefore already a mirror.
+        //
+        // Skipping it was also the visible bug: the host moved to Random and the client stayed on
+        // whatever it held, because nothing else was ever going to arrive — in a Custom lobby the
+        // resolution never travels as a `PlayerChanged` at all, since vanilla throws on one.
 
         if (lobby.LocalPlayer.character != null
             && lobby.LocalPlayer.character.Id.Equals(player.character.Id))
