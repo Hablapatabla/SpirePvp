@@ -8,7 +8,15 @@
 # that instance never relaunched, which otherwise looks identical to a patch that stopped
 # applying.
 #
-#   --errors   Show full error and exception lines rather than a count.
+#   --errors        Show full error and exception lines rather than a count.
+#   --filter REGEX  Only show mod lines matching REGEX. The mod logs a lot now — a draft alone
+#                   prints a line per pick per peer — so a full dump buries what you opened it for.
+#                   The patch count is never filtered out: it decides whether anything else in the
+#                   log means anything.
+#   --draft         Shorthand for --filter 'draft|lobby telemetry'.
+#   --compare       Print the last lobby roster each peer holds and say whether they agree. That one
+#                   line is what five character-mirror fixes failed to establish. The run is seeded
+#                   from the host's copy, so on a disagreement the client's screen is the liar.
 
 set -euo pipefail
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
@@ -16,7 +24,18 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 . "$SCRIPT_DIR/sts2.sh"
 
 show_errors=0
-[ "${1:-}" = "--errors" ] && show_errors=1
+filter=""
+compare=0
+while [ $# -gt 0 ]; do
+    case "$1" in
+        --errors)  show_errors=1 ;;
+        --draft)   filter='draft|lobby telemetry' ;;
+        --filter)  shift; filter="${1:-}" ;;
+        --compare) compare=1 ;;
+        *)         echo "unknown option: $1" >&2; exit 2 ;;
+    esac
+    shift
+done
 
 dll="$(sts2_path)/SlayTheSpire2.app/Contents/MacOS/mods/SpirePvp/SpirePvp.dll"
 if [ -f "$dll" ]; then
@@ -43,7 +62,15 @@ for entry in "${logs[@]}"; do
         echo "  STALE: log predates the installed DLL — this instance has not been relaunched."
     fi
 
-    grep -F "[SpirePvp]" "$path" | sed 's/^/  /' || true
+    if [ -n "$filter" ]; then
+        total=$(grep -cF "[SpirePvp]" "$path" || true)
+        shown=$(grep -F "[SpirePvp]" "$path" | grep -cE "$filter|applied cleanly|PATCH FAILED" || true)
+        grep -F "[SpirePvp]" "$path" | grep -E "$filter|applied cleanly|PATCH FAILED" | sed 's/^/  /' || true
+        hidden=$(( ${total:-0} - ${shown:-0} ))
+        [ "$hidden" -gt 0 ] && echo "  ($hidden more mod line(s) hidden by --filter)"
+    else
+        grep -F "[SpirePvp]" "$path" | sed 's/^/  /' || true
+    fi
 
     errs=$(grep -cE "\[ERROR\]|Exception|StateDivergence" "$path" || true)
     if [ "${errs:-0}" -eq 0 ]; then
