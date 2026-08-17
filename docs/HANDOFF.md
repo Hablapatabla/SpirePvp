@@ -1,10 +1,39 @@
-# Handoff — state of the mod as of 2026-08-12
+# Handoff — state of the mod as of 2026-08-14
 
-Written for someone (human or agent) picking this up cold, on any OS. Everything below was
-built and playtested against **Slay the Spire 2 v0.110.1**, on two local clients connected
-over ENet. **The game is now v0.111.0** (`41cef1ea`, released 2026-08-13) — see the START HERE
-section: the decompile was refreshed and the build is green, so nothing below is known stale,
-but nothing below has been *played* on v0.111.0 either.
+Written for someone (human or agent) picking this up cold, on any OS. Built against **Slay the
+Spire 2 v0.111.0** (`41cef1ea`), on two local clients connected over ENet. Most of the reasoning
+below was written against v0.110.1; the decompile was refreshed on 2026-08-14 and the build stayed
+green, so no patch target moved.
+
+## The one-screen summary
+
+**Two modes now.** A match is configured in the Duel lobby and picks a *format* first:
+
+- **Act 1 Race** (M1–M9, playtested to death): both players race the same seeded map, converge on
+  an arena node after the Act 1 boss, review decks, duel.
+- **Draft** (M10, built 2026-08-14, **partly playtested**): no race at all. Mirror match, host picks
+  the character and the client is given it. 15 cards (5 per rarity), alternating, 7 each; then 10
+  relics, 5 each. Whoever drafts first moves second. Then deck review and the same duel.
+
+Both formats then share everything: two turn models (paced real-time, batched turn-based), chess
+clocks, checksums, the arena, the result screen, badges, stats, rematch, resignation, agreed draws
+and disconnect handling.
+
+**Patch count: 89 classes.** Confirm `N patch classes applied cleanly` on every launch — if it says
+`PATCH FAILED`, duelling refuses to start and in-game results mean nothing.
+
+## What is unplayed right now, most important first
+
+| What | Risk |
+|---|---|
+| **The relic draft round** (2026-08-14) | Whole round is new. Watch the hand-off between rounds — the finished round is broadcast *before* its pick lists are cleared, and getting that backwards drops the last picks |
+| **The remote-marker fix** | Compares by id when vanilla's reference check misses. Only ever adds a marker, so it cannot break a lobby that already worked |
+| **Lobby label restore** | Open a duel lobby, back out, open plain Custom: modifier names must read in full |
+| **Draft clock + presets** | Draft lobby should show seconds, and Blitz/Rapid should set 30s/2min and 1min/3min |
+
+**Not built: the potion round.** The loop, the message and the grant path are all in place; what is
+missing is a screen, because vanilla has no potion picker. See the task note — it is a surface
+decision, not a logic one.
 
 Read order: this file → `CLAUDE.md` → `README.md` → `docs/DESIGN.md`.
 Platform setup: `docs/MAC_SETUP.md` is macOS-specific but its *reasoning* is portable — the

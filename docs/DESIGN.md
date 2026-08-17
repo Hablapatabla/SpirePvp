@@ -748,7 +748,7 @@ mechanic. Note `HittableEnemies` is **not** patchable — it has no acting-playe
   playable and can be compared by feel rather than argument; per-round planning timer for
   model B; decide whether one model ships or both do as a lobby option.
 
-## 7b. M10 — Draft mode ("Pokemon draft style"). Proposed 2026-08-13 by Lucas, unbuilt
+## 7b. M10 — Draft mode ("Pokemon draft style"). Proposed 2026-08-13, **built 2026-08-14**
 
 **A second game mode, not a variant of the first: no race at all, just a duel.** Both players are
 shown a pool of roughly 10-15 random cards and draft from it alternately; then they fight. Mirror
@@ -812,7 +812,7 @@ where the turn model only chooses how the duel inside it works. **It must not ma
 `DuelMatch.HasTurnModel` stays the single test for that, since it is asked from inside seeding and
 from inside Neow's option generation, and a second marker is a second thing to keep in sync.
 
-### BUILT 2026-08-14: cards only, unplayed
+### BUILT 2026-08-14: cards and relics
 
 The card half is in and registered. `DuelDraft` is the whole of it, plus two patches.
 
@@ -849,24 +849,42 @@ timer until a `DraftAckMessage` comes back. Safe only because the state is compl
 pick, so the narrower predicate would have silently fallen back to arrival order and undone the
 compensation rule.
 
+### The relic round, added the same day
+
+Ten in the pool, five each, on the same alternating loop — the rounds are the same code with a
+different pool, which is what makes a third round cheap. Relics come from **the character's pool
+plus the shared pool**, minus anything already held: a duel has no shop, chest or boss reward, so
+the draft is the only source there is and one pool would delete half the relic game.
+
+**Granted through `RelicCmd.Obtain`**, never `AddRelicInternal`. Obtain records the choice, clears
+the grab bags so a relic cannot be offered twice, animates it in and awaits `AfterObtained` — which
+is how a relic with an on-pickup effect applies at all.
+
+**Initiative alternates between rounds**, so one coin flip does not hand the same player first pick
+in every round.
+
+Two ordering rules the round turned up, both worth keeping:
+
+- **Broadcast the finished round before clearing its picks.** Peers apply their own picks *from the
+  broadcast*, so advancing first publishes an empty list and the round's picks reach nobody.
+- **Apply picks before testing for completion**, or the last pick of the last round is dropped.
+
 ### What is left
 
-1. **Relics and potions.** 10 relics choose 5, then 4 potions choose 2, on the same alternating
-   loop. Relics reuse `NChooseARelicSelection.ShowScreen(relics)` + `RelicsSelected()` — but **not**
-   via `RelicSelectCmd`, which routes through `PlayerChoiceSynchronizer`, i.e. the mechanism the
-   full-state design exists to avoid. **Potions have no vanilla pick screen**, and `_relicRow`
-   suggests the relic screen is a row that may not take 10. Both want a surface decision first.
+1. **The potion round.** 4 in the pool, 2 each. The loop, the message and the grant
+   (`Player.AddPotionInternal`, `CharacterModel.PotionPool`) are all in place — the round is about
+   thirty lines. **What is missing is a screen**: vanilla has no potion picker (`NPotionLab` is
+   crafting, `NUnlockPotionsScreen` is the timeline) and `NChooseARelicSelection` takes a
+   `RelicModel`. Either build a minimal grid from the pieces `DuelLobbyPanel` already uses, or wrap
+   potions in a display-only shim for the relic row. A surface decision, not a logic one.
 2. **Pool filtering for relics.** Co-op-only cards already have machinery
-   (`RaceNoCoopCardsPatch`), and the card pool inherits it. Relics need the same treatment for a
-   different reason: a duel has no map, so rest-site, shop and map-event relics are dead at best.
-   Filter on the hook a relic listens to rather than by enumerating models — the AoE fix explicitly
-   rejected hand-maintaining a 70-model list.
-3. **The mirror is assumed, not enforced.** Both players being the same character is what makes one
-   pool fair, and the pool is built from the *local* player's character — so two different
-   characters would silently draft from two different pools. The lobby needs to force the client's
-   character to the host's.
-4. **The map screen is behind the draft**, reachable if the overlay is ever dismissed. It should
-   not be interactable in a draft run.
+   (`RaceNoCoopCardsPatch`) and the card pool inherits it. Relics need it for a different reason: a
+   duel has no map, so rest-site, shop and map-event relics are dead weight. Filter on the hook a
+   relic listens to rather than by enumerating models — the AoE fix explicitly rejected
+   hand-maintaining a 70-model list. A dead relic is a bad pick, not a broken match, which is why
+   this is second rather than first.
+3. **The map screen is behind the draft**, reachable if the overlay is ever dismissed. It should not
+   be interactable in a draft run.
 
 ### The original open questions, kept for the reasoning
 

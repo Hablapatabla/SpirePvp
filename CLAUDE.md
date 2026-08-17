@@ -76,9 +76,24 @@ back to vanilla's empty list. **Note the trap it turns on: at hook time the runn
 just absent, it is often the *other* duelist's**, so resolving the actor from
 `CurrentlyRunningAction` alone would have applied your poison to your own side. See HANDOFF.
 
+**M10 draft mode is built (2026-08-14), cards and relics.** A match now picks a *format* first:
+**Act 1 Race** or **Draft**. A draft skips the race entirely — mirror match, host picks the
+character and the client is given it, 15 cards (5 per rarity) drafted 7 each, then 10 relics drafted
+5 each, then the same deck review and duel. Whoever drafts first moves second. The potion round is
+not built: the loop and the grant path are there, but vanilla has no potion picker and the screen is
+a surface decision. See DESIGN §7b.
+
+**Two rules the draft added, both general:**
+- **Full state, never deltas, for anything both peers must agree on.** `DraftStateMessage` carries
+  the whole draft every broadcast. A draft is a shared ordered sequence of decisions, which is what
+  desynced this project twice; full state has no position for the peers to disagree about, and it
+  makes a retry free.
+- **`NetMessageBus` does not buffer for an unregistered handler** — it drops and logs. Every other
+  announcement here is separated from arming by a whole race, so the margin never mattered; a draft
+  begins at run launch and has none. The host repeats until acked.
+
 **Remaining:** M8.5 slice 3 — the opponent's unsubmitted queue on the wire, which is what makes the
-paced mode readable rather than merely slower. See HANDOFF for the playtest order and three
-unconfirmed observations.
+paced mode readable rather than merely slower. See HANDOFF for the playtest order.
 
 **The one idea that explains most of the code:** the duel never breaks card logic — it breaks
 every place the engine encodes "enemy" as a *side* rather than a *relationship*. Both duelists
@@ -89,7 +104,7 @@ side comparison before suspecting the mechanic. DESIGN §7 has the symptom → c
 - `dotnet build` must stay green; it auto-installs the mod into the local game.
 - **Never use `Harmony.PatchAll`.** It throws on the first bad target and silently abandons the
   rest. `SpirePvpInit` patches per class and logs a count — confirm `N patch classes applied
-  cleanly` in the log on every launch, or in-game results are meaningless. **83 as of 2026-08-14** (121 methods) — `DuelModifierMinimumPatch` added one, and the AoE fix removed `DuelAoeProbePatch` and added `DuelAoeTargetingPatch` and `DuelHookListenerScopePatch`. Note the count is per *class*, not per patch: a class holding
+  cleanly` in the log on every launch, or in-game results are meaningless. **89 as of 2026-08-14** — `DuelModifierMinimumPatch` added one, and the AoE fix removed `DuelAoeProbePatch` and added `DuelAoeTargetingPatch` and `DuelHookListenerScopePatch`. Note the count is per *class*, not per patch: a class holding
   methods still counts once, so grouping patches by concern does not move it.
 - **The engine assumes the party is standing together, and in a race it is not.** This is the
   single most productive thing to suspect when a race-phase room misbehaves — it has now
