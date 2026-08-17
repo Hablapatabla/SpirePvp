@@ -86,28 +86,47 @@ public static class DuelHostFlow
     };
 
     /// <summary>
-    /// Named time controls, on chess conventions — bullet, blitz, rapid, and none.
+    /// Named time controls, on chess conventions — blitz, rapid, and none.
     ///
-    /// **Clocks only.** A preset deliberately does not touch the turn model: that is a different
-    /// decision about what kind of game this is, not how long it lasts, and conflating them would
-    /// mean picking Rapid silently changed the rules. It also means a preset can never leave the
-    /// lobby without a turn model, which is the one modifier that marks the run as PvP at all.
+    /// **Format-aware, because the first bank means different things.** In a race it is the deadline
+    /// for reaching the arena and is measured in minutes; in a draft it is how long you have to pick
+    /// and is measured in seconds. A single set of pairs could only be right for one of them, and
+    /// was: a draft lobby's presets set race clocks that were not even on screen.
     ///
-    /// Bullet is the pair that makes flagging reachable inside a single test run, which is why it
-    /// stays in the real list rather than behind a dev flag — it is a legitimate time control as
-    /// well as the only practical way to exercise the clock.
+    /// Draft values from Lucas, 2026-08-14: **Blitz is a 30-second draft and a 2-minute duel; Rapid
+    /// is a 1-minute draft and a 3-minute duel.** Note the duel half differs by format too — a
+    /// drafted deck is smaller and more deliberate than a raced one, so its duel is given more room
+    /// than the race blitz allows.
+    ///
+    /// **Clocks only, still.** A preset does not touch the turn model or the format: those are
+    /// decisions about what game is being played, not how long it lasts, and conflating them would
+    /// mean picking Rapid silently changed the rules.
     /// </summary>
-    public static IReadOnlyList<(string LocKey, ModifierModel Race, ModifierModel Duel)> Presets =>
-        new List<(string, ModifierModel, ModifierModel)>
-        {
-            ("SPIREPVP_PRESET.blitz",
-                ModelDb.Modifier<RaceClockTen>().ToMutable(),
-                ModelDb.Modifier<DuelClockOne>().ToMutable()),
-            ("SPIREPVP_PRESET.rapid",
-                ModelDb.Modifier<RaceClockFifteen>().ToMutable(),
-                ModelDb.Modifier<DuelClockThree>().ToMutable()),
-            ("SPIREPVP_PRESET.untimed",
-                ModelDb.Modifier<RaceClockNone>().ToMutable(),
-                ModelDb.Modifier<DuelClockNone>().ToMutable())
-        };
+    public static IReadOnlyList<(string LocKey, ModifierModel FirstBank, ModifierModel Duel)> PresetsFor(
+        bool draft) =>
+        draft
+            ? new List<(string, ModifierModel, ModifierModel)>
+            {
+                ("SPIREPVP_PRESET.blitz",
+                    ModelDb.Modifier<DraftClockThirty>().ToMutable(),
+                    ModelDb.Modifier<DuelClockTwo>().ToMutable()),
+                ("SPIREPVP_PRESET.rapid",
+                    ModelDb.Modifier<DraftClockSixty>().ToMutable(),
+                    ModelDb.Modifier<DuelClockThree>().ToMutable()),
+                ("SPIREPVP_PRESET.untimed",
+                    ModelDb.Modifier<DraftClockNone>().ToMutable(),
+                    ModelDb.Modifier<DuelClockNone>().ToMutable())
+            }
+            : new List<(string, ModifierModel, ModifierModel)>
+            {
+                ("SPIREPVP_PRESET.blitz",
+                    ModelDb.Modifier<RaceClockTen>().ToMutable(),
+                    ModelDb.Modifier<DuelClockOne>().ToMutable()),
+                ("SPIREPVP_PRESET.rapid",
+                    ModelDb.Modifier<RaceClockFifteen>().ToMutable(),
+                    ModelDb.Modifier<DuelClockThree>().ToMutable()),
+                ("SPIREPVP_PRESET.untimed",
+                    ModelDb.Modifier<RaceClockNone>().ToMutable(),
+                    ModelDb.Modifier<DuelClockNone>().ToMutable())
+            };
 }

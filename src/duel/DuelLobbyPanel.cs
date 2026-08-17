@@ -43,13 +43,12 @@ public static class DuelLobbyPanel
 {
     private const string PanelName = "SpirePvpDuelPanel";
 
-    /// <summary>The three decisions a match is made of, in the order they are made.</summary>
     /// <summary>
-    /// The race clock's heading, kept so the format row can retitle it. Null until the panel is
-    /// built, and cleared with the panel — the screen is reused across lobbies, so a stale node
-    /// here would be a freed `MegaLabel` the next lobby tried to write to.
+    /// The two clock rows, kept so the format can show one and hide the other.
+    ///
+    /// Cleared with the panel: the screen is reused across lobbies, so a stale reference here would
+    /// be a freed node the next lobby writes to.
     /// </summary>
-    /// <summary>The two clock rows, kept so the format can show one and hide the other.</summary>
     private static (MegaLabel Heading, Control Row)? _raceClockRow;
 
     private static (MegaLabel Heading, Control Row)? _draftClockRow;
@@ -342,7 +341,9 @@ public static class DuelLobbyPanel
 
         List<NRunModifierTickbox> chips = new List<NRunModifierTickbox>();
 
-        foreach ((string locKey, ModifierModel race, ModifierModel duel) in DuelHostFlow.Presets)
+        bool draftFormat = list.GetModifiersTickedOn().Any(m => m is MatchFormatDraft);
+        foreach ((string locKey, ModifierModel race, ModifierModel duel)
+                 in DuelHostFlow.PresetsFor(draftFormat))
         {
             NRunModifierTickbox? chip = MakeChip(row, Loc(locKey));
             if (chip == null)
@@ -449,13 +450,20 @@ public static class DuelLobbyPanel
     private static void SyncPresetRow(NCustomRunModifiersList list)
     {
         List<ModifierModel> ticked = list.GetModifiersTickedOn().ToList();
-        System.Type? race = ticked.FirstOrDefault(m => m is RaceClockModifier)?.GetType();
+        bool draftFormat = ticked.Any(m => m is MatchFormatDraft);
+
+        // **The first bank is whichever clock the format actually uses.** In a race that is the race
+        // clock, in a draft the draft clock; the chips stand for one pair or the other, so reading
+        // the wrong one would light no preset at all in a draft lobby.
+        System.Type? first = ticked
+            .FirstOrDefault(m => draftFormat ? m is DraftClockModifier : m is RaceClockModifier)
+            ?.GetType();
         System.Type? duel = ticked.FirstOrDefault(m => m is DuelClockModifier)?.GetType();
 
-        foreach ((NRunModifierTickbox chip, System.Type presetRace, System.Type presetDuel)
+        foreach ((NRunModifierTickbox chip, System.Type presetFirst, System.Type presetDuel)
                  in _presetChips)
         {
-            chip.IsTicked = race == presetRace && duel == presetDuel;
+            chip.IsTicked = first == presetFirst && duel == presetDuel;
         }
     }
 
