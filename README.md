@@ -1,14 +1,35 @@
 # Spire PvP
 
-1v1 competitive Slay the Spire 2. Two players get the same map, same path options, and same Neow bonus; race through Act 1 (and maybe grab the Act 2 ancient bonus), then duel. Chess-clock turns for blitz-style play.
+1v1 competitive Slay the Spire 2. Two players build a deck, then fight each other with it — under a
+chess clock, in a shared arena, with the same rules the single-player game already has.
 
 ## Status
 
-**The full loop works and is playable end to end** (playtested through 2026-08-11, two local clients): main menu → **Duel** → lobby with presets → race Act 1 on a mirrored seed → arena node → rendezvous → deck review → duel → result screen, with desync detection live. No blocking issues.
+**Playable end to end, in two formats**, on two local clients or over Steam.
 
-The clock is two banks — a race deadline and a fresh duel bank — configured by preset (Blitz 10/1, Rapid 15/3, No clock) or by hand. A match can also end by **resignation** (abandoning is a loss and a win for the opponent) or by **agreed draw**. The result screen shows the match's own statistics and badges, compared against your opponent rather than scored as a run.
+**Act 1 Race** (playtested extensively): main menu → **Duel** → lobby → both players race the *same
+seeded map* through Act 1, with the same path options and the same Neow bonus → an arena node placed
+after the Act 1 boss → deck review → duel → result screen.
 
-Remaining: rematch, and the turn-based turn model (M8). See `docs/HANDOFF.md`.
+**Draft** (new 2026-08-14, partly playtested): no race at all. A mirror match — the host picks the
+character and the client is given it — drafting from a shared pool: 15 cards, 5 of each rarity,
+alternating, 7 each; then 10 relics, 5 each. Whoever drafts first moves second. Then the same deck
+review and duel.
+
+Both formats share everything after the deck is built:
+
+- **Two turn models.** *Real-time*, paced so a fast clicker cannot bury a thoughtful one, and
+  *turn-based*, where both players plan privately, lock in, and the round resolves interleaved.
+- **Two clocks.** A first bank — the race deadline, or the draft timer — and a fresh duel bank.
+  Configured by preset (Blitz, Rapid, No clock) or by hand.
+- **Ways to end other than dying.** Winning on the clock, resignation (abandoning is a loss and a
+  win for the opponent), an agreed draw, and a disconnect. A desync voids the match as a draw.
+- **A result screen** with the match's own statistics and badges, compared against your opponent
+  rather than scored as a run — and a **Rematch** button that replays the same seed without
+  returning to the menu.
+
+Desync detection is live throughout. Remaining: the draft's potion round, and showing an opponent's
+unsubmitted queue in real-time mode. See `docs/HANDOFF.md`.
 
 ## Playing with a friend
 

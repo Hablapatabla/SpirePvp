@@ -486,6 +486,15 @@ public static class DuelDraft
         return dead;
     }
 
+    /// <summary>
+    /// Answers keyed by relic *type*, and **deliberately not cleared between runs**.
+    ///
+    /// Everything else in this class is released in <see cref="Reset"/>, because mod state is static
+    /// and the run it belongs to is not — the rule this project has been caught by most. This one is
+    /// the exception and it is worth saying why: the answer is a property of the relic class itself,
+    /// which cannot change while the process lives. Clearing it would only pay for the same
+    /// reflection again on the next match.
+    /// </summary>
     private static readonly Dictionary<Type, bool> _deadRelicCache = new();
 
     /// <summary>
