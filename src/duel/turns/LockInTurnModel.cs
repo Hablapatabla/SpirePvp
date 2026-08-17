@@ -904,7 +904,15 @@ public sealed class LockInTurnModel : IPlanningTurnModel
     /// </summary>
     private void CloseIfNothingLeftToDo()
     {
-        Player? me = LocalContext.GetMe(RunManager.Instance?.State?.Players);
+        // `GetMe` does not take a null list, and the run can be gone by the time a turn boundary
+        // reaches this — teardown is exactly when it fires.
+        IReadOnlyList<Player>? players = RunManager.Instance?.State?.Players;
+        if (players == null)
+        {
+            return;
+        }
+
+        Player? me = LocalContext.GetMe(players);
         if (me?.PlayerCombatState == null || me.Potions.Any() || me.PlayerCombatState.HasCardsToPlay())
         {
             return;

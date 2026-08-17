@@ -376,6 +376,15 @@ public static class DuelRematch
             // and act assets, finalizes starting relics, launches, swaps the scene and enters act
             // 0, all in an order this has no business re-deciding. The four `RunManager` calls
             // above are already one re-derivation more than is comfortable.
+            // Null only if the game node is gone, which means the process is on its way out and
+            // there is no rematch to start. Guarded rather than asserted: this runs inside a catch
+            // that would otherwise report a shutdown as a rematch failure.
+            if (NGame.Instance == null)
+            {
+                Log.Warn("[SpirePvp] rematch: no NGame — the game is shutting down, abandoning");
+                return;
+            }
+
             await NGame.Instance.StartRun(fresh);
 
             Log.Warn("[SpirePvp] rematch: under way");
