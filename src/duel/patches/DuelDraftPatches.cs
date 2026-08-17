@@ -1,4 +1,5 @@
 using System;
+using System.Collections.Generic;
 using System.Linq;
 using Godot;
 using HarmonyLib;
@@ -445,5 +446,61 @@ public static class DuelDraftRelicPatch
         }
 
         return false;
+    }
+}
+
+/// <summary>
+/// Makes a remote player's character marker appear when vanilla's reference comparison misses it.
+///
+/// Reported 2026-08-14: *"host indicator isn't showing at all on client side in lobby select."*
+///
+/// `NCustomRunScreen.RefreshButtonSelectionForPlayer` decides which button carries a remote
+/// player's marker with
+///
+///     else if (player.character == item.Character)
+///
+/// — **reference equality between `CharacterModel` instances**. That holds whenever both sides are
+/// the same canonical model out of `ModelDb`, and fails the moment one of them is not: a mutable
+/// copy, or an instance rebuilt from a lobby message, is a different object with the same identity.
+/// This is the same trap `DuelHostFlow` documents for `ModifierModel.IsEquivalent`, where a
+/// canonical preset silently matched no tickbox and the lobby came up empty with no error anywhere.
+///
+/// So this postfix asks the question vanilla meant: **compare by `Id`.** It only ever *adds* a
+/// marker, and only when the reference pass left the player without one, so a lobby where vanilla
+/// already worked is untouched.
+///
+/// It also logs what it saw, because the failure mode is an absent marker and an absent log line —
+/// the combination this project has repeatedly mistaken for a patch that never applied.
+/// </summary>
+[HarmonyPatch(typeof(NCustomRunScreen), "RefreshButtonSelectionForPlayer")]
+public static class DuelLobbyRemoteMarkerPatch
+{
+    public static void Postfix(NCustomRunScreen __instance, StartRunLobbyPlayer player)
+    {
+        StartRunLobby? lobby = __instance._lobby;
+        if (lobby == null || player.id == lobby.LocalPlayer.id || player.character == null)
+        {
+            return;
+        }
+
+        List<NCharacterSelectButton> buttons = __instance._charButtonContainer.GetChildren()
+            .OfType<NCharacterSelectButton>()
+            .ToList();
+
+        bool marked = buttons.Any(b => b.RemoteSelectedPlayers.Contains(player.id));
+        if (marked)
+        {
+            return;
+        }
+
+        NCharacterSelectButton? match = buttons.FirstOrDefault(
+            b => b._character != null && b._character.Id.Equals(player.character.Id));
+
+        Log.Warn($"[SpirePvp] lobby telemetry: remote marker for {player.id} "
+                 + $"({player.character.Id.Entry}) was not placed by vanilla — "
+                 + $"{(match == null ? "and no button matches by id either" : "placing it by id")}. "
+                 + $"buttons: {string.Join(",", buttons.Select(b => b._character?.Id.Entry ?? "?"))}");
+
+        match?.OnRemotePlayerSelected(player.id);
     }
 }
