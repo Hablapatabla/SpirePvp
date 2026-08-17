@@ -53,6 +53,14 @@ public static class DuelLobbyPanel
 
     private static (MegaLabel Heading, Control Row)? _draftClockRow;
 
+    /// <summary>
+    /// What each promoted tickbox's label said before <see cref="CompactForRow"/> rewrote it.
+    ///
+    /// Cleared in <see cref="Remove"/> along with the panel, so it cannot hold freed nodes or leak
+    /// across lobbies.
+    /// </summary>
+    private static readonly Dictionary<NRunModifierTickbox, string> _originalLabels = new();
+
     private static readonly (string LocKey, System.Type Group)[] Groups =
     {
         // **First, because it is the largest decision on the screen.** The turn model chooses how
@@ -88,11 +96,11 @@ public static class DuelLobbyPanel
     /// vanilla's own nodes, moved into our rows and moved back here, so the list ends up holding
     /// exactly what it started with.
     ///
-    /// **Known incomplete:** `CompactForRow` shortens a tickbox's label for display in a row, and
-    /// this does not restore the original text — the strings are not kept anywhere. A Custom lobby
-    /// entered after a duel will show correct, working, slightly-abbreviated modifier names until
-    /// the screen is rebuilt. Worth closing by stashing the original text on the tickbox when it is
-    /// compacted; recorded rather than silently left.
+    /// **The label restore closes the last hole in the invariant** (2026-08-14). `CompactForRow`
+    /// rewrites a tickbox's label to its short form for the row, and nothing used to put the full
+    /// one back — so a Custom lobby opened after a duel showed correct, working, abbreviated names.
+    /// The originals are stashed as they are overwritten and restored here, along with the size
+    /// flag the row layout sets.
     /// </summary>
     public static void Remove(NCustomRunScreen screen)
     {
@@ -117,6 +125,18 @@ public static class DuelLobbyPanel
                 continue;
             }
 
+            // Put the full name back on the way home. Vanilla's list has no headings, so the
+            // abbreviated form that reads well in a row is ambiguous there — "10 min" without a
+            // "Race clock" above it does not say which clock.
+            if (_originalLabels.TryGetValue(tickbox, out string? original)
+                && tickbox._label != null
+                && GodotObject.IsInstanceValid(tickbox._label))
+            {
+                tickbox._label.Text = original;
+            }
+
+            tickbox.SizeFlagsHorizontal = Control.SizeFlags.Fill;
+
             tickbox.GetParent()?.RemoveChild(tickbox);
             container.AddChildSafely(tickbox);
             returned++;
@@ -126,6 +146,7 @@ public static class DuelLobbyPanel
         // freed nodes the next lobby writes to.
         _raceClockRow = null;
         _draftClockRow = null;
+        _originalLabels.Clear();
 
         panel.QueueFree();
         Log.Info($"[SpirePvp] duel lobby: panel removed, {returned} tickbox(es) returned to Custom");
@@ -545,6 +566,19 @@ public static class DuelLobbyPanel
         string title = shortLabel.Exists()
             ? shortLabel.GetFormattedText()
             : modifier.Title.GetFormattedText();
+
+        // **Stash the original before overwriting it.** The screen is cached and reused, so a
+        // Custom lobby opened after a duel gets these same tickboxes back — and until 2026-08-14
+        // it got them still wearing the duel's abbreviated names, since nothing kept the text they
+        // arrived with. That was the last hole in the invariant Lucas set: nothing outside the duel
+        // button, the lobby and the run itself should be able to change.
+        //
+        // Keyed on the node rather than stored on it: `NRunModifierTickbox` has nowhere to put a
+        // string of ours, and a dictionary keyed by instance is released with the panel.
+        if (!_originalLabels.ContainsKey(tickbox))
+        {
+            _originalLabels[tickbox] = label.Text;
+        }
 
         label.Text = $"[color={colour}]{title}[/color]";
         tickbox.TooltipText = modifier.Description.GetFormattedText();
