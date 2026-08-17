@@ -653,8 +653,20 @@ public record struct DraftStateMessage : INetMessage
 
     public bool ShouldBuffer => true;
 
-    /// <summary>The pool in fixed order. Indices into this list are what every pick names.</summary>
+    /// <summary>
+    /// Which round of the draft this is: 0 cards, 1 relics, 2 potions, 3 done.
+    ///
+    /// **Each round is an independent alternating draft over its own pool**, so the pick lists below
+    /// are the *current* round's and are cleared when the host advances. That keeps one code path
+    /// for three rounds and means a peer joining mid-state still needs only the last message.
+    /// </summary>
+    public int stage;
+
+    /// <summary>The card pool in fixed order. Indices into this list are what a card pick names.</summary>
     public List<SerializableCard> pool;
+
+    /// <summary>The relic pool, same contract, used when <see cref="stage"/> is the relic round.</summary>
+    public List<SerializableRelic> relicPool;
 
     /// <summary>Pool indices taken by the host, in pick order.</summary>
     public List<int> hostPicks;
@@ -672,7 +684,9 @@ public record struct DraftStateMessage : INetMessage
 
     public void Serialize(PacketWriter writer)
     {
+        writer.WriteInt(stage);
         writer.WriteList<SerializableCard>(pool ?? new List<SerializableCard>());
+        writer.WriteList<SerializableRelic>(relicPool ?? new List<SerializableRelic>());
         WriteIndices(writer, hostPicks);
         WriteIndices(writer, clientPicks);
         writer.WriteULong(pickerId);
@@ -682,7 +696,9 @@ public record struct DraftStateMessage : INetMessage
 
     public void Deserialize(PacketReader reader)
     {
+        stage = reader.ReadInt();
         pool = reader.ReadList<SerializableCard>();
+        relicPool = reader.ReadList<SerializableRelic>();
         hostPicks = ReadIndices(reader);
         clientPicks = ReadIndices(reader);
         pickerId = reader.ReadULong();

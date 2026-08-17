@@ -11,6 +11,8 @@ using MegaCrit.Sts2.Core.Nodes.Screens.CustomRun;
 using MegaCrit.Sts2.Core.Nodes.Screens.MainMenu;
 using SpirePvp.Modifiers;
 using MegaCrit.Sts2.Core.Logging;
+using MegaCrit.Sts2.Core.Nodes.Relics;
+using MegaCrit.Sts2.Core.Nodes.Screens;
 using MegaCrit.Sts2.Core.Nodes.Screens.CardSelection;
 using MegaCrit.Sts2.Core.Runs;
 
@@ -407,5 +409,41 @@ public static class DuelDraftCharacterLockPatch
                  + $"=> {(allowed ? "ALLOWED" : "BLOCKED")}");
 
         return allowed;
+    }
+}
+
+/// <summary>
+/// The relic round takes the click itself, exactly as the card round does.
+///
+/// `NChooseARelicSelection.SelectHolder` completes the screen and hands the relic back through
+/// `RelicsSelected()`. That is right for a boss reward — one choice, then the screen is done — and
+/// wrong for a draft, where the same screen has to survive the opponent's turn and where the host
+/// decides whether a pick is legal at all.
+///
+/// So the click becomes a request and vanilla's completion never runs. The screen is rebuilt from
+/// the survivors when the host's next state arrives, which is also what makes a pick visible to
+/// both players.
+///
+/// A string target for the same reason as the card one: `SelectHolder` is private, and while the
+/// publicizer exposes private members the parameter type keeps `nameof` from being usable here
+/// without pulling in the holder type. Listed with the others in HANDOFF.
+/// </summary>
+[HarmonyPatch(typeof(NChooseARelicSelection), "SelectHolder")]
+public static class DuelDraftRelicPatch
+{
+    public static bool Prefix(NRelicBasicHolder relicHolder)
+    {
+        if (!DuelDraft.IsDraftRun)
+        {
+            return true;
+        }
+
+        RelicModel? model = relicHolder?.Relic?.Model;
+        if (model != null)
+        {
+            DuelDraft.SubmitRelicPick(model);
+        }
+
+        return false;
     }
 }

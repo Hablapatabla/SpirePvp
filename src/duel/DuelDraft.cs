@@ -2,6 +2,7 @@ using System;
 using System.Collections.Generic;
 using System.Linq;
 using Godot;
+using MegaCrit.Sts2.Core.Commands;
 using MegaCrit.Sts2.Core.Context;
 using MegaCrit.Sts2.Core.Entities.Cards;
 using MegaCrit.Sts2.Core.Entities.Players;
@@ -9,9 +10,11 @@ using MegaCrit.Sts2.Core.Helpers;
 using MegaCrit.Sts2.Core.Localization;
 using MegaCrit.Sts2.Core.Logging;
 using MegaCrit.Sts2.Core.Models;
+using MegaCrit.Sts2.Core.Models.RelicPools;
 using MegaCrit.Sts2.Core.Multiplayer.Game;
 using MegaCrit.Sts2.Core.Nodes.Cards;
 using MegaCrit.Sts2.Core.Nodes.Screens.CardSelection;
+using MegaCrit.Sts2.Core.Nodes.Screens;
 using MegaCrit.Sts2.Core.Nodes.Screens.Map;
 using MegaCrit.Sts2.Core.Nodes.Screens.Overlays;
 using MegaCrit.Sts2.Core.Runs;
@@ -61,6 +64,26 @@ public static class DuelDraft
     /// </summary>
     private const int PicksEach = 7;
 
+    /// <summary>Relics shown, and taken — 10 in the pool, 5 each, drafted to exhaustion.</summary>
+    private const int RelicPoolSize = 10;
+
+    private const int RelicPicksEach = 5;
+
+    /// <summary>
+    /// Which round is running. Each is an independent alternating draft over its own pool, which is
+    /// what lets three rounds share one loop, one message and one set of turn rules.
+    /// </summary>
+    private enum Stage
+    {
+        Cards = 0,
+        Relics = 1,
+        Complete = 3
+    }
+
+    private static Stage _stage = Stage.Cards;
+
+    private static List<RelicModel> _relicPool = new();
+
     private static bool _armed;
 
     private static List<CardModel> _pool = new();
@@ -88,8 +111,11 @@ public static class DuelDraft
     /// <summary>Set whenever the state changed, so the next tick rebuilds the screen for it.</summary>
     private static bool _screenDirty;
 
-    /// <summary>How many of our own picks have already reached the deck. See SyncDeck.</summary>
-    private static int _addedToDeck;
+    /// <summary>
+    /// How many of our own picks in the running round have already been applied. See ApplyOwnPicks.
+    /// Reset when a round advances, since the pick list is reset with it.
+    /// </summary>
+    private static int _appliedPicks;
 
     /// <summary>
     /// How long the host waits before repeating an unacknowledged draft state.
@@ -100,7 +126,13 @@ public static class DuelDraft
     private static readonly TimeSpan RebroadcastAfter = TimeSpan.FromSeconds(1);
 
     /// <summary>Whether a draft is running. Read by the patches that keep the map out of the way.</summary>
-    public static bool IsDrafting => _pool.Count > 0 && !_complete;
+    public static bool IsDrafting => CurrentPoolSize > 0 && !_complete;
+
+    /// <summary>How many entries the running round's pool holds.</summary>
+    private static int CurrentPoolSize => _stage == Stage.Relics ? _relicPool.Count : _pool.Count;
+
+    /// <summary>How many each player takes in the running round.</summary>
+    private static int CurrentPicksEach => _stage == Stage.Relics ? RelicPicksEach : PicksEach;
 
     /// <summary>Who picked first — and therefore who moves *second*.</summary>
     public static ulong FirstPickerId => _firstPickerId;
@@ -113,7 +145,7 @@ public static class DuelDraft
     /// is exactly when it happens, would have fallen back to arrival order and silently undone the
     /// compensation rule. Ask "is this a draft run", not "is a draft on screen".
     /// </summary>
-    public static bool IsDraftRun => _pool.Count > 0;
+    public static bool IsDraftRun => _pool.Count > 0 || _relicPool.Count > 0;
 
     /// <summary>
     /// Who takes the opening initiative: **whoever did not pick first**.
@@ -127,13 +159,15 @@ public static class DuelDraft
     public static void Reset()
     {
         _pool = new List<CardModel>();
+        _relicPool = new List<RelicModel>();
+        _stage = Stage.Cards;
         _hostPicks.Clear();
         _clientPicks.Clear();
         _pickerId = 0;
         _firstPickerId = 0;
         _complete = false;
         _screenDirty = false;
-        _addedToDeck = 0;
+        _appliedPicks = 0;
         _awaitingAck = false;
         CloseBackdrop();
         _lastBroadcast = DateTime.MinValue;
@@ -342,6 +376,51 @@ public static class DuelDraft
         return card;
     }
 
+    /// <summary>
+    /// The relic pool: the character's own relics plus the shared ones, minus anything they hold.
+    ///
+    /// **Both pools, because a duel has no shop, no chest and no boss reward.** In a normal run a
+    /// player meets shared relics constantly and character relics rarely; a draft is the only source
+    /// there is, so offering only one pool would silently delete half the relic game.
+    ///
+    /// **Filtered against what the player already has.** Relics are not stackable in general, and a
+    /// pool offering the starter relic back is a wasted slot at best.
+    ///
+    /// Note the deliberate gap: a duel has no map, so rest-site, shop and map-event relics are dead
+    /// weight here. They are *not* filtered, because doing it by enumerating models is the
+    /// hand-maintained list this project rejected for the AoE fix, and the honest filter — on which
+    /// hook a relic listens to — wants its own pass. A dead relic is a bad pick, not a broken match.
+    /// </summary>
+    private static List<RelicModel> BuildRelicPool(RunState runState, Player drafter)
+    {
+        List<RelicModel> pool = new List<RelicModel>();
+        try
+        {
+            HashSet<string> held = drafter.Relics.Select(r => r.Id.Entry).ToHashSet();
+
+            List<RelicModel> available = drafter.Character.RelicPool
+                .GetUnlockedRelics(runState.UnlockState)
+                .Concat(ModelDb.RelicPool<SharedRelicPool>().GetUnlockedRelics(runState.UnlockState))
+                .Where(r => !held.Contains(r.Id.Entry))
+                .GroupBy(r => r.Id.Entry)
+                .Select(g => g.First())
+                .ToList();
+
+            Random rng = new Random();
+            foreach (RelicModel relic in available.OrderBy(_ => rng.Next()).Take(RelicPoolSize))
+            {
+                pool.Add(relic.ToMutable());
+            }
+        }
+        catch (Exception e)
+        {
+            Log.Error($"[SpirePvp] draft: could not build a relic pool: {e}");
+            return new List<RelicModel>();
+        }
+
+        return pool;
+    }
+
     /// <summary>Host only: apply a pick, whoever asked for it, then tell everyone.</summary>
     private static void OnPickRequest(DraftPickMessage message, ulong senderId)
     {
@@ -373,7 +452,7 @@ public static class DuelDraft
             return;
         }
 
-        if (poolIndex < 0 || poolIndex >= _pool.Count || IsTaken(poolIndex))
+        if (poolIndex < 0 || poolIndex >= CurrentPoolSize || IsTaken(poolIndex))
         {
             Log.Warn($"[SpirePvp] draft: ignoring pick {poolIndex} from {pickerId} — out of range "
                      + "or already taken");
@@ -383,14 +462,25 @@ public static class DuelDraft
         bool byHost = pickerId == HostId();
         (byHost ? _hostPicks : _clientPicks).Add(poolIndex);
 
-        Log.Warn($"[SpirePvp] draft: {pickerId} took {_pool[poolIndex].Id.Entry} "
+        string taken = _stage == Stage.Relics
+            ? _relicPool[poolIndex].Id.Entry
+            : _pool[poolIndex].Id.Entry;
+
+        Log.Warn($"[SpirePvp] draft [{_stage}]: {pickerId} took {taken} "
                  + $"(host {_hostPicks.Count}, client {_clientPicks.Count})");
 
-        if (_hostPicks.Count >= PicksEach && _clientPicks.Count >= PicksEach)
+        if (_hostPicks.Count >= CurrentPicksEach && _clientPicks.Count >= CurrentPicksEach)
         {
-            _complete = true;
+            // **The finished round is broadcast before it is torn down, and that ordering is
+            // load-bearing.** `AdvanceStage` clears the pick lists, and the peers apply their own
+            // picks *from the broadcast* — so advancing first would publish an empty list and the
+            // last round's picks would reach nobody's deck. Two sends, and the first one is the
+            // one that pays for the round.
             _pickerId = 0;
-            Log.Warn("[SpirePvp] draft: complete — the fifteenth card goes unclaimed by design");
+            Broadcast();
+            ApplyStateLocally();
+
+            AdvanceStage();
         }
         else
         {
@@ -488,9 +578,20 @@ public static class DuelDraft
             map.Close();
         }
 
-        bool alive = _screen != null
-                     && GodotObject.IsInstanceValid(_screen)
-                     && _screen.IsInsideTree();
+        bool alive = _stage == Stage.Relics
+            ? _relicScreen != null
+              && GodotObject.IsInstanceValid(_relicScreen)
+              && _relicScreen.IsInsideTree()
+            : _screen != null
+              && GodotObject.IsInstanceValid(_screen)
+              && _screen.IsInsideTree();
+
+        // A relic round redraws on every pick rather than marking in place, so a state change is a
+        // rebuild here where it is only a repaint for cards.
+        if (_stage == Stage.Relics && _screenDirty)
+        {
+            alive = false;
+        }
 
         if (alive)
         {
@@ -541,11 +642,56 @@ public static class DuelDraft
         Log.Warn($"[SpirePvp] draft: {senderId} acknowledged the pool — drafting");
     }
 
+    /// <summary>
+    /// Host only: this round is finished, so set up the next one.
+    ///
+    /// **Initiative alternates between rounds.** Whoever picked second in the cards round picks
+    /// first in the relics round, which stops one player leading every round off a single coin
+    /// flip — the same reasoning M9 applies to turns inside a duel, and it costs one line because
+    /// the round's first picker is already a field.
+    ///
+    /// The pick lists are cleared rather than kept per round: each peer has already applied its own
+    /// picks from the broadcast (see ApplyOwnPicks), so the lists have done their job and a fresh
+    /// round wants fresh indices into a fresh pool.
+    /// </summary>
+    private static void AdvanceStage()
+    {
+        RunState? runState = RunManager.Instance?.State;
+        Player? me = runState == null ? null : LocalContext.GetMe(runState.Players);
+
+        _firstPickerId = Opponent(_firstPickerId);
+        _pickerId = _firstPickerId;
+        _hostPicks.Clear();
+        _clientPicks.Clear();
+        _appliedPicks = 0;
+
+        if (_stage == Stage.Cards && runState != null && me != null)
+        {
+            _relicPool = BuildRelicPool(runState, me);
+            if (_relicPool.Count > 0)
+            {
+                _stage = Stage.Relics;
+                Log.Warn($"[SpirePvp] draft: cards done — {_relicPool.Count} relic(s) up, "
+                         + $"{_firstPickerId} picks first");
+                return;
+            }
+
+            Log.Warn("[SpirePvp] draft: no relics available, skipping the relic round");
+        }
+
+        _stage = Stage.Complete;
+        _complete = true;
+        _pickerId = 0;
+        Log.Warn("[SpirePvp] draft: all rounds complete");
+    }
+
     private static void Broadcast()
     {
         RunManager.Instance?.NetService?.SendMessage(new DraftStateMessage
         {
+            stage = (int)_stage,
             pool = _pool.Select(c => c.ToSerializable()).ToList(),
+            relicPool = _relicPool.Select(r => r.ToSerializable()).ToList(),
             hostPicks = new List<int>(_hostPicks),
             clientPicks = new List<int>(_clientPicks),
             pickerId = _pickerId,
@@ -578,6 +724,18 @@ public static class DuelDraft
         // fresh `CardModel` instances every pick — new nodes, a new screen, and a re-registration of
         // fifteen cards with the run each time. The pool is fixed for the whole draft; only the
         // picks and the turn move.
+        _stage = (Stage)message.stage;
+
+        // The relic pool arrives when the round changes, so it is adopted whenever it is new rather
+        // than only once — unlike the cards, which exist from the first broadcast.
+        if (_relicPool.Count != (message.relicPool?.Count ?? 0))
+        {
+            _relicPool = (message.relicPool ?? new List<SerializableRelic>())
+                .Select(RelicModel.FromSerializable)
+                .Where(r => r != null)
+                .ToList()!;
+        }
+
         if (_pool.Count == 0)
         {
             _pool = (message.pool ?? new List<SerializableCard>())
@@ -604,6 +762,11 @@ public static class DuelDraft
     /// <summary>Redraw for whatever the state now says, on either peer.</summary>
     private static void ApplyStateLocally()
     {
+        // **Applied before the completion check, not after it.** Anything picked in the round that
+        // just ended has to reach its owner before the draft is declared over, or the last card and
+        // the last relic of a match would be dropped on the floor.
+        ApplyOwnPicks();
+
         if (_complete)
         {
             Finish();
@@ -613,7 +776,6 @@ public static class DuelDraft
         // Marked rather than pushed: the screen is built by EnsureScreen on the next tick, which is
         // what makes it survive the run's own act-entry sequence clearing screens underneath it.
         _screenDirty = true;
-        SyncDeck();
     }
 
     /// <summary>
@@ -627,6 +789,12 @@ public static class DuelDraft
     private static void ShowScreen()
     {
         CloseScreen();
+
+        if (_stage == Stage.Relics)
+        {
+            ShowRelicScreen();
+            return;
+        }
 
         if (_pool.Count == 0 || NOverlayStack.Instance == null)
         {
@@ -657,6 +825,73 @@ public static class DuelDraft
     }
 
     /// <summary>
+    /// The relic round's screen: vanilla's own choose-a-relic row, showing only what is left.
+    ///
+    /// **Unlike the card grid this one is rebuilt per pick**, and that is a deliberate difference
+    /// rather than an oversight. `NChooseARelicSelection` builds its row from the list it is handed
+    /// and has no per-relic marking to borrow — there is no relic equivalent of `HighlightCard` —
+    /// so "keep them all and mark the taken ones" has nothing to mark with. Ten picks of a shrinking
+    /// row is a far smaller cost than inventing a relic grid, and the row visibly shortening is
+    /// itself a readable signal of what has gone.
+    ///
+    /// `ShowScreen` rather than `RelicSelectCmd.FromChooseARelicScreen`: the command routes the pick
+    /// through `PlayerChoiceSynchronizer`, which is the exact mechanism the full-state design exists
+    /// to stay away from.
+    /// </summary>
+    private static void ShowRelicScreen()
+    {
+        List<RelicModel> remaining = new List<RelicModel>();
+        for (int i = 0; i < _relicPool.Count; i++)
+        {
+            if (!IsTaken(i))
+            {
+                remaining.Add(_relicPool[i]);
+            }
+        }
+
+        if (remaining.Count == 0)
+        {
+            Log.Warn("[SpirePvp] draft: no relics left to show");
+            return;
+        }
+
+        ShowBackdrop();
+        _relicScreen = NChooseARelicSelection.ShowScreen(remaining);
+        Log.Info($"[SpirePvp] draft [relics]: {remaining.Count} left, "
+                 + $"{(LocalMayPick ? "your pick" : "waiting on " + _pickerId)}");
+    }
+
+    private static NChooseARelicSelection? _relicScreen;
+
+    /// <summary>
+    /// Submits a relic pick. Called by `DuelDraftRelicPatch` when a holder is clicked.
+    ///
+    /// Resolved by identity against the pool, so two copies of one relic id could never collapse
+    /// onto the same slot — the same reason the card pick resolves by position rather than by id.
+    /// </summary>
+    public static void SubmitRelicPick(RelicModel relic)
+    {
+        if (!LocalMayPick || _stage != Stage.Relics)
+        {
+            return;
+        }
+
+        int poolIndex = _relicPool.IndexOf(relic);
+        if (poolIndex < 0 || IsTaken(poolIndex))
+        {
+            return;
+        }
+
+        if (RunManager.Instance?.NetService.Type == NetGameType.Host)
+        {
+            TryPick(LocalId(), poolIndex);
+            return;
+        }
+
+        RunManager.Instance?.NetService?.SendMessage(new DraftPickMessage { poolIndex = poolIndex });
+    }
+
+    /// <summary>
     /// Marks who has taken what, and says whose turn it is. Runs on every state change.
     ///
     /// **Two marks, because a shared pool has two owners.** Cards you drafted keep vanilla's own
@@ -670,6 +905,12 @@ public static class DuelDraft
     /// </summary>
     private static void RefreshVisuals()
     {
+        if (_stage == Stage.Relics)
+        {
+            // The relic row has no marking to refresh — it is rebuilt with the survivors instead.
+            return;
+        }
+
         if (_screen == null || !GodotObject.IsInstanceValid(_screen))
         {
             return;
@@ -854,6 +1095,16 @@ public static class DuelDraft
             NOverlayStack.Instance?.Remove(_screen);
             _screen = null;
         }
+
+        if (_relicScreen != null)
+        {
+            if (GodotObject.IsInstanceValid(_relicScreen))
+            {
+                NOverlayStack.Instance?.Remove(_relicScreen);
+            }
+
+            _relicScreen = null;
+        }
     }
 
     /// <summary>
@@ -889,7 +1140,7 @@ public static class DuelDraft
     ///
     /// **Asked for on sight — "I'd like to see them being added to my deck as I click them"** — and
     /// it is also the more honest model: a drafted card is yours the moment the host confirms the
-    /// pick, so the deck should say so. Nothing here can double-add, because `_addedToDeck` counts
+    /// pick, so the deck should say so. Nothing here can double-add, because `_appliedPicks` counts
     /// what has already gone in and the pick list only ever grows.
     ///
     /// **`InvokeCardAddFinished` is the half that makes it visible.** The top-bar deck counter
@@ -897,7 +1148,7 @@ public static class DuelDraft
     /// HANDOFF records for cards added by console, where the card is really there and the label is
     /// simply stale. That is why the deck read 11 after a whole draft.
     /// </summary>
-    private static void SyncDeck()
+    private static void ApplyOwnPicks()
     {
         RunState? runState = RunManager.Instance?.State;
         Player? me = runState == null ? null : LocalContext.GetMe(runState.Players);
@@ -907,12 +1158,30 @@ public static class DuelDraft
         }
 
         List<int> mine = LocalId() == HostId() ? _hostPicks : _clientPicks;
-        bool added = false;
+        bool addedCard = false;
 
-        while (_addedToDeck < mine.Count)
+        while (_appliedPicks < mine.Count)
         {
-            int index = mine[_addedToDeck];
-            _addedToDeck++;
+            int index = mine[_appliedPicks];
+            _appliedPicks++;
+
+            if (_stage == Stage.Relics)
+            {
+                if (index < 0 || index >= _relicPool.Count)
+                {
+                    continue;
+                }
+
+                // **`RelicCmd.Obtain`, not `AddRelicInternal`.** Obtain is the real grant: it records
+                // the choice, removes the relic from the grab bags so it cannot be offered again,
+                // animates it into the inventory and awaits `AfterObtained` — which is how a relic
+                // with an on-pickup effect actually applies it. Reaching past it to the internal add
+                // is the same shortcut that made draft cards render as True Grit.
+                RelicModel relic = _relicPool[index];
+                TaskHelper.RunSafely(RelicCmd.Obtain(relic, me));
+                Log.Info($"[SpirePvp] draft: {relic.Id.Entry} obtained");
+                continue;
+            }
 
             if (index < 0 || index >= _pool.Count)
             {
@@ -920,12 +1189,12 @@ public static class DuelDraft
             }
 
             me.Deck.AddInternal(_pool[index]);
-            added = true;
+            addedCard = true;
             Log.Info($"[SpirePvp] draft: {_pool[index].Id.Entry} joined the deck "
                      + $"({me.Deck.Cards.Count} cards)");
         }
 
-        if (added)
+        if (addedCard)
         {
             me.Deck.InvokeCardAddFinished();
         }
