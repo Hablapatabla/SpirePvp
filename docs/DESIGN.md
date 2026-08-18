@@ -789,7 +789,9 @@ what corrupted a duel on 2026-08-12. Rules that follow from that history:
 ### DECIDED 2026-08-14 (Lucas). The six questions below are answered; kept for the reasoning.
 
 **Format.** Card pool **15 — 5 common, 5 uncommon, 5 rare**, one shared pool, alternating picks,
-**7 each and the 15th discarded**. Then a **relic draft: 10 in the pool, 5 each**. Then a **potion
+**7 each and the 15th discarded**. Then a **relic draft: 8 in the pool, 4 each** (ten was the first
+number and played as a few too many — a duel is a handful of turns, and five permanent relics each is
+more advantage than that many turns can express).  Then a **potion
 draft: 4 in the pool, 2 each**. Both pools drafted to exhaustion, so those two split evenly and only
 the card round has a remainder.
 
@@ -799,7 +801,7 @@ extra card would be a second payment for the same thing. Discarding keeps the de
 keeps the pool at 15, so denial still matters for every pick.
 
 **Loadout.** The character's **normal starting deck plus the drafted cards**, and the character's
-**starter relic plus the 5 drafted**. A floor means a bad draft is weak rather than unplayable, and
+**starter relic plus the 4 drafted**. A floor means a bad draft is weak rather than unplayable, and
 in a mirror match both sides get the identical floor, so it costs no fairness. The drafted cards are
 the whole of the difference between the two decks.
 
@@ -851,7 +853,7 @@ compensation rule.
 
 ### The relic round, added the same day
 
-Ten in the pool, five each, on the same alternating loop — the rounds are the same code with a
+Eight in the pool, four each, on the same alternating loop — the rounds are the same code with a
 different pool, which is what makes a third round cheap. Relics come from **the character's pool
 plus the shared pool**, minus anything already held: a duel has no shop, chest or boss reward, so
 the draft is the only source there is and one pool would delete half the relic game.

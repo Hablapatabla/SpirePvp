@@ -85,8 +85,8 @@ just absent, it is often the *other* duelist's**, so resolving the actor from
 
 **M10 draft mode is built (2026-08-14), cards and relics.** A match now picks a *format* first:
 **Act 1 Race** or **Draft**. A draft skips the race entirely — mirror match, host picks the
-character and the client is given it, 15 cards (5 per rarity) drafted 7 each, then 10 relics drafted
-5 each, then the same deck review and duel. Whoever drafts first moves second. The potion round is
+character and the client is given it, 15 cards (5 per rarity) drafted 7 each, then 8 relics drafted
+4 each, then the same deck review and duel. Whoever drafts first moves second. The potion round is
 not built: the loop and the grant path are there, but vanilla has no potion picker and the screen is
 a surface decision. See DESIGN §7b.
 
@@ -111,7 +111,7 @@ side comparison before suspecting the mechanic. DESIGN §7 has the symptom → c
 - `dotnet build` must stay green; it auto-installs the mod into the local game.
 - **Never use `Harmony.PatchAll`.** It throws on the first bad target and silently abandons the
   rest. `SpirePvpInit` patches per class and logs a count — confirm `N patch classes applied
-  cleanly` in the log on every launch, or in-game results are meaningless. **89 as of 2026-08-14** — `DuelModifierMinimumPatch` added one, and the AoE fix removed `DuelAoeProbePatch` and added `DuelAoeTargetingPatch` and `DuelHookListenerScopePatch`. Note the count is per *class*, not per patch: a class holding
+  cleanly` in the log on every launch, or in-game results are meaningless. **91 as of 2026-08-17** (127 methods, confirmed against a live log) — `DuelModifierMinimumPatch` added one, and the AoE fix removed `DuelAoeProbePatch` and added `DuelAoeTargetingPatch` and `DuelHookListenerScopePatch`. Note the count is per *class*, not per patch: a class holding
   methods still counts once, so grouping patches by concern does not move it.
 - **The engine assumes the party is standing together, and in a race it is not.** This is the
   single most productive thing to suspect when a race-phase room misbehaves — it has now

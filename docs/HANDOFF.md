@@ -12,8 +12,8 @@ green, so no patch target moved.
 - **Act 1 Race** (M1–M9, playtested to death): both players race the same seeded map, converge on
   an arena node after the Act 1 boss, review decks, duel.
 - **Draft** (M10, built 2026-08-14, **partly playtested**): no race at all. Mirror match, host picks
-  the character and the client is given it. 15 cards (5 per rarity), alternating, 7 each; then 10
-  relics, 5 each. Whoever drafts first moves second. Then deck review and the same duel.
+  the character and the client is given it. 15 cards (5 per rarity), alternating, 7 each; then 8
+  relics, 4 each. Whoever drafts first moves second. Then deck review and the same duel.
 
 Both formats then share everything: two turn models (paced real-time, batched turn-based), chess
 clocks, checksums, the arena, the result screen, badges, stats, rematch, resignation, agreed draws
@@ -33,12 +33,18 @@ showed the portrait.
 
 ## What is unplayed right now, most important first
 
-Everything below landed on 2026-08-14 in one unsupervised batch. **Test the relic round first** — it
-is the only item that can break a match rather than look wrong.
+Everything below landed on 2026-08-14 in one unsupervised batch.
+
+**CLOSED 2026-08-17: the relic round is played and clean.** Read out of `host.20260817T203523.log`
+and its client, which ran a draft end to end: 15 cards drafted 7 each, then **8 relics 4 each**, then
+the arena. All eight picks appear on both peers in the same order, each peer logs `obtained` for its
+own four and none for the other's, and both reach `draft: complete — deck is 18 cards`. That is the
+divergence case tested — the earlier failure was a reset only the host performed, leaving the client
+applying nothing, and there is nothing left unapplied here. The pool is 8/4 rather than the 10/5 this
+table used to claim; DESIGN §7b still says 10/5 and is stale.
 
 | What | How you know | Risk |
 |---|---|---|
-| **The relic draft round** | Cards, then 10 relics 5 each, then the duel. `duel draft` auto-takes your picks | Whole round is new. The round hand-off is the delicate part: the finished round is broadcast *before* its pick lists are cleared, and reversing that drops the last picks |
 | **Map-only relics filtered** | Rest-site and shop relics should not appear in a pool | By hook, not by name. Fails toward keeping a relic, so the worst case is a dead pick |
 | **`duel draft`** | Auto-takes your remaining picks, one per tick | Local-only, host still arbitrates. Both players may type it |
 | **Draft clock + presets** | Draft lobby shows seconds; Blitz 30s/2min, Rapid 1min/3min | Two clock rows exist and one is hidden by format |
@@ -889,7 +895,7 @@ Checked 2026-08-13: `%APPDATA%\SlayTheSpire2\steam\<steamid64>\settings.save` ha
 `SpirePvp: is_enabled = false` — switched off so an unmodded friend could be played with, which is the
 right thing to do and the wrong state to start a duel in. A disabled mod logs
 `Skipping loading mod SpirePvp` and **loads nothing at all while looking entirely normal**. Turn it
-back on from the Mods screen first, and confirm `83 patch classes applied cleanly (121 methods)` in
+back on from the Mods screen first, and confirm `91 patch classes applied cleanly (127 methods)` in
 the log before trusting anything in the session.
 
 **2. Both players' mod lists must match, or the join is refused outright.** `JoinFlow` compares
