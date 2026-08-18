@@ -7,6 +7,7 @@ using MegaCrit.Sts2.Core.Helpers;
 using MegaCrit.Sts2.Core.Localization;
 using MegaCrit.Sts2.Core.Nodes.CommonUi;
 using MegaCrit.Sts2.Core.Models;
+using MegaCrit.Sts2.Core.Multiplayer.Game;
 using MegaCrit.Sts2.Core.Logging;
 using MegaCrit.Sts2.Core.Nodes.Screens.CustomRun;
 using MegaCrit.Sts2.Core.Nodes.Screens.MainMenu;
@@ -148,6 +149,10 @@ public static class DuelLobbyPanel
         _draftClockRow = null;
         _originalLabels.Clear();
 
+        // The lock lives on the screen rather than in the panel, so freeing the panel does not
+        // take it — and the screen is reused, which would leave a plain Custom lobby dimmed.
+        screen.GetNodeOrNull<Control>(CharLockName)?.QueueFree();
+
         panel.QueueFree();
         Log.Info($"[SpirePvp] duel lobby: panel removed, {returned} tickbox(es) returned to Custom");
     }
@@ -184,6 +189,7 @@ public static class DuelLobbyPanel
             // the preset row still needs re-syncing. This runs on every ModifiersChanged.
             SyncPresetRow(list);
             SyncClockRows(list);
+            SyncCharacterLock(screen, list);
             Patches.DuelDraftMirrorPatch.MirrorNow(screen);
             return;
         }
@@ -311,6 +317,7 @@ public static class DuelLobbyPanel
 
         SyncPresetRow(list);
         SyncClockRows(list);
+        SyncCharacterLock(screen, list);
         Patches.DuelDraftMirrorPatch.MirrorNow(screen);
 
         Log.Warn($"[SpirePvp] duel lobby: promoted {promoted.Count} duel modifier(s) into " +
@@ -448,6 +455,88 @@ public static class DuelLobbyPanel
     /// rather than only when the lobby is opened — the same hook `SyncPresetRow` uses, and the
     /// answer to "can the lobby menu change while you are in it".
     /// </summary>
+    private const string CharLockName = "SpirePvpCharacterLock";
+
+    /// <summary>
+    /// Dims the client's character row in a draft lobby and says why.
+    ///
+    /// **The lock existed before this and was invisible**, which is the worst version of it: the
+    /// buttons simply stopped responding, and a client with no idea a draft mirrors the host reads
+    /// that as the lobby being broken. Asked for 2026-08-14 — *"so the client can't be confused as
+    /// to what's going on"*.
+    ///
+    /// Gated on the **format**, not the turn model. A draft is what forces the mirror, because one
+    /// shared pool is only fair if both duelists play the same character; a race match under
+    /// turn-based rules still lets each side pick whatever they like.
+    ///
+    /// **Parented to the screen and positioned over the row, rather than added to it.**
+    /// `_charButtonContainer` lays its children out — dropping a panel in would be dropping in a
+    /// sixth character slot. So it sits on the screen with the row's rect copied onto it each
+    /// refresh, which also keeps it correct when the window is resized.
+    ///
+    /// A plain Godot `Label`, deliberately not a `MegaLabel`: those throw on every layout pass
+    /// without a theme font override, which is a documented trap two rows up in `Heading`.
+    /// </summary>
+    private static void SyncCharacterLock(NCustomRunScreen screen, NCustomRunModifiersList list)
+    {
+        Control? row = screen._charButtonContainer;
+        if (row == null || !GodotObject.IsInstanceValid(row))
+        {
+            return;
+        }
+
+        bool locked = screen._lobby != null
+                      && screen._lobby.NetService.Type == NetGameType.Client
+                      && list.GetModifiersTickedOn().Any(m => m is MatchFormatDraft);
+
+        Control? existing = screen.GetNodeOrNull<Control>(CharLockName);
+
+        if (!locked)
+        {
+            // Removed rather than hidden: the screen is cached and reused, and a hidden node with
+            // stale geometry is one more thing the next lobby has to remember to fix.
+            existing?.QueueFree();
+            return;
+        }
+
+        if (existing == null)
+        {
+            ColorRect panel = new ColorRect
+            {
+                Name = CharLockName,
+                Color = new Color(0f, 0f, 0f, 0.55f),
+
+                // Swallows the clicks the buttons would otherwise still receive. The real refusal
+                // is `DuelDraftCharacterLockPatch` on `SetLocalCharacter` — this is the half that
+                // makes it legible, not the half that makes it true.
+                MouseFilter = Control.MouseFilterEnum.Stop
+            };
+
+            Label label = new Label
+            {
+                Name = "Text",
+                Text = Loc("SPIREPVP_LOBBY.characterLocked"),
+                HorizontalAlignment = HorizontalAlignment.Center,
+                VerticalAlignment = VerticalAlignment.Center,
+                AutowrapMode = TextServer.AutowrapMode.WordSmart,
+                MouseFilter = Control.MouseFilterEnum.Ignore
+            };
+            label.SetAnchorsAndOffsetsPreset(Control.LayoutPreset.FullRect);
+            label.AddThemeFontSizeOverride("font_size", 34);
+            label.AddThemeColorOverride("font_color", StsColors.cream);
+
+            panel.AddChildSafely(label);
+            screen.AddChildSafely(panel);
+            existing = panel;
+            Log.Info("[SpirePvp] duel lobby: character selection locked for the client (draft)");
+        }
+
+        // Copied every refresh: the row's rect is not known until the screen has laid out, and a
+        // one-shot copy at creation lands on a zero-sized rect.
+        existing.GlobalPosition = row.GlobalPosition;
+        existing.Size = row.Size;
+    }
+
     private static void SyncClockRows(NCustomRunModifiersList list)
     {
         bool draft = list.GetModifiersTickedOn().Any(m => m is MatchFormatDraft);
