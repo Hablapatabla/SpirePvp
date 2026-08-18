@@ -12,6 +12,7 @@ using MegaCrit.Sts2.Core.Nodes.Screens.CustomRun;
 using MegaCrit.Sts2.Core.Nodes.Screens.MainMenu;
 using SpirePvp.Modifiers;
 using MegaCrit.Sts2.Core.Logging;
+using MegaCrit.Sts2.Core.Nodes.Multiplayer;
 using MegaCrit.Sts2.Core.Nodes.Relics;
 using MegaCrit.Sts2.Core.Nodes.Screens;
 using MegaCrit.Sts2.Core.Nodes.Screens.CardSelection;
@@ -584,13 +585,27 @@ public static class DuelDraftRandomRollPatch
             return false;
         }
 
-        Log.Warn($"[SpirePvp] draft lobby: rolling Random now — {rolled._character.Id.Entry}. "
-                 + "A draft cannot use the run-start resolution, so it happens at the click.");
+        Log.Warn($"[SpirePvp] draft lobby: rolling Random now — {rolled._character.Id.Entry}, "
+                 + "shown as ? until the run starts.");
+
+        // **The random button keeps the marker; the lobby gets the real character.** `SelectCharacter`
+        // takes the button and the model as *independent* arguments — it sets `_selectedButton` from
+        // one and calls `SetLocalCharacter` with the other — so handing it the Random button and the
+        // rolled model does exactly what Random should look like: the selection sits on `?` while
+        // the run underneath is already committed.
+        //
+        // That is the whole point of rolling early. The roll has to happen now for the mirror to
+        // work at all, and the player asked for Random precisely so they would *not* know; revealing
+        // it in the lobby would answer the question they chose not to ask.
+        NCharacterSelectButton? randomButton = __instance._charButtonContainer.GetChildren()
+            .OfType<NCharacterSelectButton>()
+            .FirstOrDefault(b => b._character != null
+                                 && b._character.Id.Entry == "RANDOM_CHARACTER");
 
         _rolling = true;
         try
         {
-            __instance.SelectCharacter(rolled, rolled._character);
+            __instance.SelectCharacter(randomButton ?? rolled, rolled._character);
         }
         finally
         {
@@ -598,5 +613,45 @@ public static class DuelDraftRandomRollPatch
         }
 
         return false;
+    }
+}
+
+/// <summary>
+/// Hides the character in a draft lobby's player list, so a mirror stays a surprise.
+///
+/// **The lobby announced what the character select was hiding.** `NRemoteLobbyPlayer.RefreshVisuals`
+/// writes `_character.Title` under each player's name, so a screenshot of a draft lobby read "Test
+/// Host — The Necrobinder / 1001 — The Necrobinder" while the character row was showing `?`. The
+/// concealment was real and the caption underneath it gave the answer away.
+///
+/// It matters most for Random. The roll has to happen at the click for the mirror to work at all
+/// (see <see cref="DuelDraftRandomRollPatch"/>), and a player who picks Random is asking *not* to
+/// know — revealing it two lines below the button answers the question they chose not to ask.
+///
+/// **Blanket for the whole draft lobby, rather than only for a rolled character.** Whether the host
+/// pressed Random is local knowledge the client does not have, so a conditional here would show
+/// different text on the two screens. A draft is a mirror, so the only thing this hides from the
+/// host is a choice they just made themselves, and it hides from the client something they genuinely
+/// should not see yet. The icon goes with it — a portrait says the name as loudly as the label.
+/// </summary>
+[HarmonyPatch(typeof(NRemoteLobbyPlayer), "RefreshVisuals")]
+public static class DuelDraftHideCharacterPatch
+{
+    public static void Postfix(NRemoteLobbyPlayer __instance)
+    {
+        if (!DuelDraftMirrorPatch.DraftLobbyActive)
+        {
+            return;
+        }
+
+        __instance._characterLabel?.SetTextAutoSize("?");
+        __instance._nameplateLabel?.SetTextAutoSize("?");
+
+        if (__instance._characterIcon != null)
+        {
+            // Dimmed rather than blanked: an empty slot reads as a player who has not chosen, and
+            // they have — that is the whole point of the "?".
+            __instance._characterIcon.Modulate = new Color(0.15f, 0.15f, 0.18f, 1f);
+        }
     }
 }

@@ -501,37 +501,16 @@ public static class DuelLobbyPanel
 
         if (existing == null)
         {
-            // **Opaque, not a tint, and that is the feature rather than the styling.** Lucas,
-            // 2026-08-14: *"it'd be nice if it was just ? for both ... so you don't know until you
-            // load in."* A translucent panel still showed which button was selected, and since the
-            // client is forced onto the host's character that selection was announcing the host's
-            // pick — the client's own indicator gave away the thing the host had not revealed.
-            //
-            // Covering the row entirely turns a locked control into a sealed envelope: neither
-            // player learns the character until the run starts, which makes the host's choice a
-            // decision rather than a broadcast.
             ColorRect panel = new ColorRect
             {
                 Name = CharLockName,
-                Color = new Color(0.06f, 0.05f, 0.08f, 1f),
+                Color = new Color(0f, 0f, 0f, 0.55f),
 
                 // Swallows the clicks the buttons would otherwise still receive. The real refusal
                 // is `DuelDraftCharacterLockPatch` on `SetLocalCharacter` — this is the half that
                 // makes it legible, not the half that makes it true.
                 MouseFilter = Control.MouseFilterEnum.Stop
             };
-
-            Label mark = new Label
-            {
-                Name = "Mark",
-                Text = "?",
-                HorizontalAlignment = HorizontalAlignment.Center,
-                VerticalAlignment = VerticalAlignment.Center,
-                MouseFilter = Control.MouseFilterEnum.Ignore
-            };
-            mark.SetAnchorsAndOffsetsPreset(Control.LayoutPreset.FullRect);
-            mark.AddThemeFontSizeOverride("font_size", 96);
-            mark.AddThemeColorOverride("font_color", StsColors.cream);
 
             Label label = new Label
             {
@@ -546,12 +525,6 @@ public static class DuelLobbyPanel
             label.AddThemeFontSizeOverride("font_size", 34);
             label.AddThemeColorOverride("font_color", StsColors.cream);
 
-            // The caption sits under the mark rather than centred with it, so the "?" reads as the
-            // answer being withheld and the sentence as the reason.
-            label.SetAnchorsAndOffsetsPreset(Control.LayoutPreset.BottomWide);
-            label.OffsetTop = -46;
-
-            panel.AddChildSafely(mark);
             panel.AddChildSafely(label);
             screen.AddChildSafely(panel);
             existing = panel;
