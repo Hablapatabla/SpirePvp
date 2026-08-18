@@ -3,7 +3,7 @@
   "DUEL_MP.description": "Race a friend through Act 1 on the same seed, then fight them in the arena.",
   "SPIREPVP_LOBBY.duelSpeed": "Fast mode",
   "SPIREPVP_LOBBY.matchFormat": "Match",
-  "SPIREPVP_LOBBY.characterLocked": "Mirror match - you play the host's character",
+  "SPIREPVP_LOBBY.characterLocked": "Mirror match - the character is revealed when the run starts",
   "SPIREPVP_LOBBY.turnModel": "Turn model",
   "SPIREPVP_LOBBY.raceClock": "Race clock",
   "SPIREPVP_LOBBY.draftClock": "Draft clock",
