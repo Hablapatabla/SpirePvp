@@ -22,6 +22,15 @@ and disconnect handling.
 **Patch count: 89 classes.** Confirm `N patch classes applied cleanly` on every launch — if it says
 `PATCH FAILED`, duelling refuses to start and in-game results mean nothing.
 
+## Read `docs/DRAFT_LOBBY.md` before touching the draft lobby
+
+The character mirror was fixed six times on 2026-08-14 and the lobby ended worse than it started —
+each fix correct about the thing it changed, none of them aimed at a stated requirement. That
+document has the requirements (R1–R5), a test for each, and the design that makes concealing a
+Random roll actually work. **R4 is deliberately unimplemented** rather than half-implemented: Random
+shows the character it rolled, which is honest, where the three reverted attempts hid the name and
+showed the portrait.
+
 ## What is unplayed right now, most important first
 
 Everything below landed on 2026-08-14 in one unsupervised batch. **Test the relic round first** — it
