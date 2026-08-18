@@ -57,4 +57,12 @@ up cold, and a pointer to where the reasoning already lives.
    *judgement* layer on top — the things that technically function but should not be offered because
    of how they play against a person. Needs a pass with the deck and pools in front of you.
 
+   - **The draft's boss/Ancient tier specifically.** It is sourced from `EventRelicPool`'s ~100
+     Ancient relics (see `BuildRelicPool`) because the character pools hold none. That pool mixes
+     genuine boss relics (Ectoplasm) with event- and Neow-flavoured Ancient relics that read oddly
+     as a duel "boss" pick (Lucas flagged Silver Crucible 2026-08-18, wondering if it was a Neow
+     artifact — it is not; the draft skips Neow, and Silver Crucible is just an Ancient relic the
+     tier offered). The question for this pass is which of those hundred actually belong in a duel's
+     top tier, and it is a curated judgement, not a hook.
+
 <!-- Add balance items here as they surface during bug/UX work. Keep the "not here" test in mind. -->
