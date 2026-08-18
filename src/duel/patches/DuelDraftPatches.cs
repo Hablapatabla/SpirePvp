@@ -413,29 +413,63 @@ public static class DuelDraftMirrorPatch
 [HarmonyPatch(typeof(StartRunLobby), nameof(StartRunLobby.SetLocalCharacter))]
 public static class DuelDraftCharacterLockPatch
 {
+    /// <summary>Set while this patch is re-entering `SetLocalCharacter` with a rolled character.</summary>
+    private static bool _mirroringForRandom;
+
     public static bool Prefix(StartRunLobby __instance, CharacterModel character)
     {
-        bool mirroring = DuelDraftMirrorPatch.IsMirroring;
+        bool mirroring = DuelDraftMirrorPatch.IsMirroring || _mirroringForRandom;
         bool client = __instance.NetService.Type == NetGameType.Client;
         bool draft = DuelDraftMirrorPatch.DraftLobbyActive;
         bool allowed = mirroring || !client || !draft;
 
-        // **Random is refused outright in a draft lobby, on either peer, and this is a race that
-        // cannot be won any other way.** The host's Random resolves *as the run starts* — the
-        // resolution and the run beginning are the same moment:
+        // **Random is kept for drafts, but resolved when it is picked rather than at run start.**
         //
-        //     PlayerChanged 1 = SILENT                (the host's roll, at run start)
-        //     SetLocalCharacter -> SILENT ... ALLOWED (the client mirrors it)
+        // Left alone it cannot be mirrored at all: the host's roll lands *as the run begins* —
+        //
+        //     PlayerChanged 1 = SILENT                 (the host's roll, at run start)
+        //     SetLocalCharacter -> SILENT ... ALLOWED  (the client mirrors it)
         //     Player 1001 tried to change character while run was already starting! Ignoring
         //
-        // So no amount of reordering lets the mirror land, and both peers rolling separately is
-        // two rolls rather than one. A mirror draft loses nothing by dropping Random: both sides
-        // play the same character either way, so the only thing it randomises is *which* — and
-        // that is a coin the host can flip themselves.
-        if (draft && character != null && character.Id.Entry == "RANDOM_CHARACTER")
+        // — and both peers rolling separately is two rolls, measured the same evening (host
+        // IRONCLAD, client SILENT). Refusing it outright was the first answer and Lucas asked to
+        // keep the option, which is fair: the button is wanted, only its timing is unusable.
+        //
+        // So a draft turns Random into "roll now": the host picks a real character immediately and
+        // that travels as an ordinary pick, which the mirror already handles. The player gets what
+        // they asked for — a character they did not choose — and the race disappears entirely,
+        // because by run start there is nothing left to resolve.
+        //
+        // Client-side it stays refused, but the button is hidden there anyway by the lock.
+        if (draft && !mirroring && character != null && character.Id.Entry == "RANDOM_CHARACTER")
         {
-            Log.Warn("[SpirePvp] draft lobby: refusing Random — a draft resolves it at run start, "
-                     + "which is too late for the other player to match it. Pick a character.");
+            CharacterModel? rolled = ModelDb.AllCharacters
+                .Where(c => c.Id.Entry != "RANDOM_CHARACTER")
+                .OrderBy(_ => Guid.NewGuid())
+                .FirstOrDefault();
+
+            if (rolled == null)
+            {
+                Log.Warn("[SpirePvp] draft lobby: Random picked but no character to roll — refusing");
+                return false;
+            }
+
+            Log.Warn($"[SpirePvp] draft lobby: rolling Random now — {rolled.Id.Entry}. A draft "
+                     + "cannot use the run-start resolution, so it happens at the click instead.");
+
+            // Re-entered through the same method so the roll is an ordinary pick: it syncs, the
+            // client mirrors it, and nothing downstream knows Random was involved. `mirroring`
+            // carries it past this guard on the way back in.
+            _mirroringForRandom = true;
+            try
+            {
+                __instance.SetLocalCharacter(rolled);
+            }
+            finally
+            {
+                _mirroringForRandom = false;
+            }
+
             return false;
         }
 

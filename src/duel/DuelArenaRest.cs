@@ -84,6 +84,17 @@ public static class DuelArenaRest
             return;
         }
 
+        // **A draft has nothing to heal from.** The rest exists so a bruising race does not decide
+        // the duel before it starts; a draft run never leaves the campfire, so both duelists arrive
+        // untouched and this can only fire as a heal-for-nothing. Reported 2026-08-14 as
+        // "some weird heal went through?" — measured as `healed 1 80 -> 80 / 80`, a number popping
+        // over a duelist who had taken no damage at all.
+        if (DuelDraft.IsDraftRun)
+        {
+            Log.Info("[SpirePvp] arena rest: skipped — a draft arrives at full health");
+            return;
+        }
+
         Player? me = LocalContext.GetMe(state);
         if (me == null || me.Creature.IsDead)
         {

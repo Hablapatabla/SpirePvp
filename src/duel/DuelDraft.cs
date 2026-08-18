@@ -484,7 +484,18 @@ public static class DuelDraft
                 .Distinct()
                 .ToList();
 
-            dead = overridden.Count > 0 && overridden.All(MapOnlyHooks.Contains);
+            // **Anything that touches the merchant is out, whatever else it does.** Lucas, after
+            // drafting Orrery and finding it did nothing: *"maybe no shop relics at all is the
+            // right choice here."* Agreed, and by category rather than by judging relics one at a
+            // time — a duel has no gold, no shop and no card removal, so value routed through them
+            // is dead by construction, and a category is stable where a per-relic verdict rots the
+            // day the roster changes.
+            //
+            // This is stricter than the all-map-only test below on purpose: a relic that is half
+            // combat and half shop is a weakened pick in a ten-relic pool, and there are plenty of
+            // whole ones to offer instead.
+            dead = overridden.Any(MerchantHooks.Contains)
+                   || (overridden.Count > 0 && overridden.All(MapOnlyHooks.Contains));
         }
         catch (Exception e)
         {
@@ -520,6 +531,17 @@ public static class DuelDraft
     /// for "when does this happen", they change far less often than the relic roster, and a hook
     /// added by a game update simply is not on this list, which fails toward keeping a relic.
     /// </summary>
+    /// <summary>
+    /// Hooks that only mean anything in a shop. Overriding one is enough to be dropped.
+    /// </summary>
+    private static readonly HashSet<string> MerchantHooks = new()
+    {
+        "ModifyMerchantCardCreationResults",
+        "ModifyMerchantCardPool",
+        "ModifyMerchantCardRarity",
+        "ModifyMerchantPrice"
+    };
+
     private static readonly HashSet<string> MapOnlyHooks = new()
     {
         "AfterActEntered",
