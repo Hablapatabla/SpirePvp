@@ -414,12 +414,9 @@ public static class DuelDraftMirrorPatch
 [HarmonyPatch(typeof(StartRunLobby), nameof(StartRunLobby.SetLocalCharacter))]
 public static class DuelDraftCharacterLockPatch
 {
-    /// <summary>Set while this patch is re-entering `SetLocalCharacter` with a rolled character.</summary>
-    private static bool _mirroringForRandom;
-
     public static bool Prefix(StartRunLobby __instance, CharacterModel character)
     {
-        bool mirroring = DuelDraftMirrorPatch.IsMirroring || _mirroringForRandom;
+        bool mirroring = DuelDraftMirrorPatch.IsMirroring;
         bool client = __instance.NetService.Type == NetGameType.Client;
         bool draft = DuelDraftMirrorPatch.DraftLobbyActive;
         bool allowed = mirroring || !client || !draft;
