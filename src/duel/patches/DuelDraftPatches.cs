@@ -549,6 +549,11 @@ public static class DuelLobbyRemoteMarkerPatch
 /// both indicators wrong — the host's marker stayed on Random while the client's moved to the
 /// rolled character. `SelectCharacter` owns the button visuals *and* calls into the lobby, so doing
 /// it here keeps the two in step by construction.
+///
+/// **This prefix is now the backstop rather than the usual path** — see
+/// <see cref="DuelDraftRandomClickPatch"/>, which takes the click one level higher because a second
+/// Random click never reached this method at all. Kept, and kept logging, so the next log says
+/// which of the two paths a click actually travelled.
 /// </summary>
 [HarmonyPatch(typeof(NCustomRunScreen), nameof(NCustomRunScreen.SelectCharacter))]
 public static class DuelDraftRandomRollPatch
@@ -565,23 +570,48 @@ public static class DuelDraftRandomRollPatch
             return true;
         }
 
-        List<NCharacterSelectButton> buttons = __instance._charButtonContainer.GetChildren()
+        Log.Warn("[SpirePvp] draft lobby: Random reached SelectCharacter — the backstop path fired");
+        RollAndSelect(__instance);
+        return false;
+    }
+
+    /// <summary>
+    /// Picks a character that is not the one already selected, and puts the lobby on it.
+    ///
+    /// **The current selection is excluded on purpose.** Lucas asked for Random to be a re-roll you
+    /// can lean on — click it again, get someone else — and over five characters a plain roll
+    /// repeats often enough to read as the button having failed. Excluding the incumbent makes
+    /// every click visibly do something, which is the whole of what the control is for.
+    /// </summary>
+    public static void RollAndSelect(NCustomRunScreen screen)
+    {
+        CharacterModel? current = screen._selectedButton?._character;
+
+        List<NCharacterSelectButton> buttons = screen._charButtonContainer.GetChildren()
             .OfType<NCharacterSelectButton>()
-            .Where(b => b._character != null && b._character.Id.Entry != "RANDOM_CHARACTER")
+            .Where(b => b._character != null
+                        && b._character.Id.Entry != "RANDOM_CHARACTER"
+                        && !b.IsLocked)
             .ToList();
 
-        NCharacterSelectButton? rolled = buttons
+        List<NCharacterSelectButton> candidates = buttons
+            .Where(b => current == null || b._character.Id.Entry != current.Id.Entry)
+            .ToList();
+
+        // Falling back to the whole list keeps a one-character lobby working rather than silently
+        // refusing: with nobody else to roll, re-picking the incumbent is the honest answer.
+        NCharacterSelectButton? rolled = (candidates.Count > 0 ? candidates : buttons)
             .OrderBy(_ => Guid.NewGuid())
             .FirstOrDefault();
 
         if (rolled?._character == null)
         {
             Log.Warn("[SpirePvp] draft lobby: Random clicked but there is nothing to roll — ignoring");
-            return false;
+            return;
         }
 
-        Log.Warn($"[SpirePvp] draft lobby: rolling Random now — {rolled._character.Id.Entry}, "
-                 + "shown as ? until the run starts.");
+        Log.Warn($"[SpirePvp] draft lobby: rolling Random now — {rolled._character.Id.Entry} "
+                 + $"(was {current?.Id.Entry ?? "nothing"})");
 
         // **The roll is shown, not concealed — for now, and deliberately.** Concealing it was
         // attempted three ways in one session and each attempt leaked somewhere else: the marker
@@ -595,13 +625,54 @@ public static class DuelDraftRandomRollPatch
         _rolling = true;
         try
         {
-            __instance.SelectCharacter(rolled, rolled._character);
+            screen.SelectCharacter(rolled, rolled._character);
         }
         finally
         {
             _rolling = false;
         }
+    }
+}
 
+/// <summary>
+/// Takes the Random button's click at the button, so a second click re-rolls.
+///
+/// **Reported 2026-08-17: you have to click Random, then a real character, before Random works
+/// again.** The log says why, and says it by *absence* — a second Random click produces no
+/// `rolling Random now` line at all, so <see cref="DuelDraftRandomRollPatch"/> never ran:
+///
+///     draft lobby: rolling Random now — REGENT      (clicked Random)
+///     lobby telemetry: PlayerChanged 1 = DEFECT     (clicked Defect by hand — no roll line)
+///     draft lobby: rolling Random now — NECROBINDER (clicked Random, works again)
+///
+/// `NCharacterSelectButton.Select` opens with `if (!_isSelected)`, so the click is swallowed one
+/// level above `SelectCharacter` and nothing downstream can see it. Exactly which term leaves the
+/// Random button believing it is still selected does not matter, and chasing it would be the
+/// fourth display-layer fix in a file that already has a document explaining why those fail: the
+/// gate is above us, so take the click above the gate.
+///
+/// Same shape as `CombatState.GetOpponentsOf` over `HittableEnemies`, and as moving the character
+/// lock down from `SelectCharacter` to `SetLocalCharacter` — patch the point that actually carries
+/// the decision, not the one that happens to be nearby.
+///
+/// Guarded on `IsRandom` and a live draft lobby, so every other character button and every
+/// non-draft screen keeps vanilla's behaviour untouched. The delegate cast is the second guard:
+/// `NCharacterSelectScreen` builds these buttons too and has its own dedicated random button.
+/// </summary>
+[HarmonyPatch(typeof(NCharacterSelectButton), nameof(NCharacterSelectButton.Select))]
+public static class DuelDraftRandomClickPatch
+{
+    public static bool Prefix(NCharacterSelectButton __instance)
+    {
+        if (!__instance.IsRandom
+            || __instance.IsLocked
+            || !DuelDraftMirrorPatch.DraftLobbyActive
+            || __instance._delegate is not NCustomRunScreen screen)
+        {
+            return true;
+        }
+
+        DuelDraftRandomRollPatch.RollAndSelect(screen);
         return false;
     }
 }

@@ -853,10 +853,19 @@ compensation rule.
 
 ### The relic round, added the same day
 
-Eight in the pool, four each, on the same alternating loop — the rounds are the same code with a
+Eight in the pool, four each — **2 boss, 2 rare, 2 uncommon, 2 common** — on the same alternating loop — the rounds are the same code with a
 different pool, which is what makes a third round cheap. Relics come from **the character's pool
 plus the shared pool**, minus anything already held: a duel has no shop, chest or boss reward, so
 the draft is the only source there is and one pool would delete half the relic game.
+
+**The rarity split is fixed rather than shuffled** (2026-08-17). An unweighted draw over the whole
+pool is mostly commons, so the picks that actually shape a duel arrive by luck or not at all; Lucas
+drew a boss relic in the first played round and it was the most interesting pick in it. Two of each
+tier also gives denial something to bite on — there are only two boss relics and your opponent wants
+one. Boss relics are `RelicRarity.Ancient` in StS2; there is no `Boss` member. A tier that comes up
+short tops up from the rest of the pool rather than shortening it, because the round splits the pool
+evenly and drafts it to exhaustion — seven relics is a round where one player gets four picks and the
+other three.
 
 **Granted through `RelicCmd.Obtain`**, never `AddRelicInternal`. Obtain records the choice, clears
 the grab bags so a relic cannot be offered twice, animates it in and awaits `AfterObtained` — which

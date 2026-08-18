@@ -4,8 +4,8 @@ Written 2026-08-14 after a session that fixed the same lobby six times and ended
 started. The fixes were each reasonable and none of them was aimed at a stated requirement, so they
 overlapped, contradicted each other, and leaked information in a different place every time.
 
-**Read this before touching `DuelDraftMirrorPatch`, `DuelDraftRandomRollPatch` or the character lock
-in `DuelLobbyPanel`.**
+**Read this before touching `DuelDraftMirrorPatch`, `DuelDraftRandomRollPatch`,
+`DuelDraftRandomClickPatch` or the character lock in `DuelLobbyPanel`.**
 
 ---
 
@@ -58,21 +58,33 @@ players, their connection and their ready state.
 **Test:** both players appear in the lobby list at all times, with ready state, in every combination
 of format and character.
 
-### R4 — Concealment applies only to Random, and then completely
+### R4 — Random is a re-roll, and it is not concealed
 
-If the host picks a character deliberately, there is nothing to hide and both peers show it normally.
-If the host picks **Random**, neither player learns the character until the run starts — and that
-means *every* surface, together: the selected button, the name in the player list, and the portrait.
+**WITHDRAWN AND REPLACED 2026-08-17 (Lucas).** R4 used to require that a Random pick be hidden from
+both players until the run started. It is now the opposite requirement, and the change is a
+*decision*, not a defeat: concealment was attempted three ways in one session, each attempt leaked
+somewhere else, and the design that would actually work (below) needs the lobby to genuinely hold
+Random on both peers with the real character decided at run creation — research nobody has done.
+Lucas's call: *"that seems to have been ultra painful and we never really got there. instead let's
+just have it so clicking random will assign both players to a random character."*
 
-**A partial concealment is a defect, not a partial feature.** The failure mode to test for is a
-surface that leaks while another hides.
+So Random is an ordinary control with an obvious meaning: **it picks someone, visibly, for both
+players, and pressing it again picks someone else.**
 
-**Test:** with Random picked, no screenshot of either lobby identifies the character. With a
-character picked, both lobbies name it plainly.
+- Clicking Random rolls a real character and both players' selection markers move to it.
+- Clicking Random **again** rolls again, every time, with no intervening click on a real character.
+- The roll never returns the character already selected, so every press visibly changes something.
 
-### R5 — Concealment ends when the run starts
+**Test:** click Random five times in a row on the host. The character changes on every click, both
+players' markers follow it every time, and the log shows five `rolling Random now` lines.
 
-The reveal is the run loading. Nothing after that point should still be hiding anything.
+**The old concealment design is kept below** because it is still the only design that would work if
+concealment is ever wanted again. Do not attempt it by patching display surfaces.
+
+### R5 — Nothing is concealed, so nothing has to be revealed
+
+Trivially satisfied by R4's replacement, and kept as a numbered requirement so a future concealment
+attempt has to argue with it rather than around it.
 
 ---
 
@@ -119,9 +131,18 @@ Implemented and believed correct:
 - **R3** — restored. The remote-marker suppression added for concealment has been reverted.
 - **R5** — trivially true, since nothing is concealed.
 
-**Not implemented: R4.** Random rolls at the click and the rolled character is shown. This is a known
-gap, deliberately left visible rather than half-hidden. The three reverted attempts are in the git
-history around `ef2a14d`..`ccc9f53` if the reasoning is wanted.
+**R4 as rewritten (2026-08-17):** Random rolls at the click, the rolled character is shown, and the
+roll excludes the incumbent so a repeat press always changes the character. The three reverted
+concealment attempts are in the git history around `ef2a14d`..`ccc9f53` if the reasoning is wanted.
+
+**The re-roll needed a second patch, and the log named the level.** A second Random click produced
+*no log line at all* — `DuelDraftRandomRollPatch` never ran, because
+`NCharacterSelectButton.Select` opens with `if (!_isSelected)` and swallowed the click one level
+above `NCustomRunScreen.SelectCharacter`. `DuelDraftRandomClickPatch` takes the click at the button
+instead. Note what was *not* done: no attempt to work out which term left the Random button
+believing it was still selected. The gate is above us, so the click is taken above the gate — the
+same move as `GetOpponentsOf` over `HittableEnemies`. The old prefix is kept as a backstop and logs
+when it fires, so the next log says which path a click travelled.
 
 ## Also open in this area
 

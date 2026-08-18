@@ -78,6 +78,15 @@ public static class DuelDraft
     private const int RelicPicksEach = 4;
 
     /// <summary>
+    /// How many of each rarity the relic pool holds — 2 boss, 2 rare, 2 uncommon, 2 common.
+    ///
+    /// Asked for 2026-08-17 after a boss relic turned up in a draft and played as the most
+    /// interesting pick of the round. See <see cref="BuildRelicPool"/> for why the shape is fixed
+    /// rather than left to a shuffle.
+    /// </summary>
+    private const int PerRelicRarity = 2;
+
+    /// <summary>
     /// Which round is running. Each is an independent alternating draft over its own pool, which is
     /// what lets three rounds share one loop, one message and one set of turn rules.
     /// </summary>
@@ -448,10 +457,58 @@ public static class DuelDraft
                 .ToList();
 
             Random rng = new Random();
-            foreach (RelicModel relic in available.OrderBy(_ => rng.Next()).Take(RelicPoolSize))
+
+            // **Two of each tier, rather than eight off the top of a shuffle.** Lucas drew a boss
+            // relic on 2026-08-17 and it was the best pick of the round — which is the argument:
+            // an unweighted shuffle over the whole pool is mostly commons, so the picks that
+            // actually shape a duel turn up by luck or not at all. Fixing the shape makes every
+            // draft offer the same *kind* of decision, which is also what makes denial mean
+            // something — there are only two boss relics and your opponent wants one too.
+            //
+            // Boss relics are `RelicRarity.Ancient` in StS2 (Black Star, Astrolabe, Sozu); there is
+            // no `Boss` member. Shop is already excluded above, by declaration rather than by hook.
+            RelicRarity[] tiers =
             {
-                pool.Add(relic.ToMutable());
+                RelicRarity.Ancient,
+                RelicRarity.Rare,
+                RelicRarity.Uncommon,
+                RelicRarity.Common,
+            };
+
+            List<RelicModel> shuffled = available.OrderBy(_ => rng.Next()).ToList();
+            HashSet<string> taken = new HashSet<string>();
+
+            foreach (RelicRarity tier in tiers)
+            {
+                foreach (RelicModel relic in shuffled.Where(r => r.Rarity == tier).Take(PerRelicRarity))
+                {
+                    pool.Add(relic.ToMutable());
+                    taken.Add(relic.Id.Entry);
+                }
             }
+
+            // **A short tier tops up from whatever is left rather than shortening the pool.** The
+            // round splits the pool evenly and drafts it to exhaustion, so eight is not cosmetic —
+            // seven relics is a round where one player picks four and the other three. A character
+            // whose unlocks leave it one Ancient short should get an extra Rare, not a rigged draft.
+            if (pool.Count < RelicPoolSize)
+            {
+                Log.Info($"[SpirePvp] draft: only {pool.Count} relic(s) from the rarity split — "
+                         + "topping up from the rest of the pool");
+
+                foreach (RelicModel relic in shuffled
+                             .Where(r => !taken.Contains(r.Id.Entry))
+                             .Take(RelicPoolSize - pool.Count))
+                {
+                    pool.Add(relic.ToMutable());
+                }
+            }
+
+            // Shuffled again so the grid does not read as four tidy rarity pairs in a fixed order.
+            pool = pool.OrderBy(_ => rng.Next()).ToList();
+
+            Log.Info("[SpirePvp] draft: relic pool by rarity — "
+                     + string.Join(", ", pool.Select(r => $"{r.Id.Entry}({r.Rarity})")));
         }
         catch (Exception e)
         {
