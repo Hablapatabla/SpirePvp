@@ -420,6 +420,25 @@ public static class DuelDraftCharacterLockPatch
         bool draft = DuelDraftMirrorPatch.DraftLobbyActive;
         bool allowed = mirroring || !client || !draft;
 
+        // **Random is refused outright in a draft lobby, on either peer, and this is a race that
+        // cannot be won any other way.** The host's Random resolves *as the run starts* — the
+        // resolution and the run beginning are the same moment:
+        //
+        //     PlayerChanged 1 = SILENT                (the host's roll, at run start)
+        //     SetLocalCharacter -> SILENT ... ALLOWED (the client mirrors it)
+        //     Player 1001 tried to change character while run was already starting! Ignoring
+        //
+        // So no amount of reordering lets the mirror land, and both peers rolling separately is
+        // two rolls rather than one. A mirror draft loses nothing by dropping Random: both sides
+        // play the same character either way, so the only thing it randomises is *which* — and
+        // that is a coin the host can flip themselves.
+        if (draft && character != null && character.Id.Entry == "RANDOM_CHARACTER")
+        {
+            Log.Warn("[SpirePvp] draft lobby: refusing Random — a draft resolves it at run start, "
+                     + "which is too late for the other player to match it. Pick a character.");
+            return false;
+        }
+
         // **Every character change, on either peer, allowed or not.** This is the line that answers
         // the question four fixes could not: whether a change the client makes ever becomes real.
         // It prints on the way *in*, so a change that is allowed here and still missing from the

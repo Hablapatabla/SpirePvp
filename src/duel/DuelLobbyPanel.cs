@@ -489,6 +489,18 @@ public static class DuelLobbyPanel
                       && screen._lobby.NetService.Type == NetGameType.Client
                       && list.GetModifiersTickedOn().Any(m => m is MatchFormatDraft);
 
+        // **Random is not offered in a draft**, because it cannot be honoured: the host's roll
+        // resolves at run start, too late for the other player to match. Hidden as well as refused,
+        // so it is never a button that does nothing when pressed.
+        Control? randomButton =
+            screen._charButtonContainer.GetNodeOrNull<Control>(
+                Patches.DuelRandomCharacterButtonPatch.ButtonName);
+        if (randomButton != null && GodotObject.IsInstanceValid(randomButton))
+        {
+            bool draftLobby = list.GetModifiersTickedOn().Any(m => m is MatchFormatDraft);
+            randomButton.Visible = !draftLobby;
+        }
+
         Control? existing = screen.GetNodeOrNull<Control>(CharLockName);
 
         if (!locked)
