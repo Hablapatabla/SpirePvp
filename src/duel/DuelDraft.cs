@@ -19,6 +19,7 @@ using MegaCrit.Sts2.Core.Nodes.Screens.CardSelection;
 using MegaCrit.Sts2.Core.Nodes.Screens;
 using MegaCrit.Sts2.Core.Nodes.Screens.Map;
 using MegaCrit.Sts2.Core.Nodes.Screens.Overlays;
+using MegaCrit.Sts2.Core.Random;
 using MegaCrit.Sts2.Core.Runs;
 using MegaCrit.Sts2.Core.CardSelection;
 using MegaCrit.Sts2.Core.Saves.Runs;
@@ -308,20 +309,69 @@ public static class DuelDraft
             return;
         }
 
-        // **Not the run RNG.** `State.Rng` is the shared deterministic stream both sims consume in
-        // lockstep; drawing from it on the host only is precisely how a seeded stream diverges.
-        // This result is *broadcast*, so it needs no determinism at all — an ordinary Random is
-        // both correct and impossible to get wrong.
-        _firstPickerId = new Random().Next(2) == 0 ? me.NetId : opponent.NetId;
+        // **Not the run RNG, but off the same seed.** `State.Rng` is the shared deterministic
+        // stream both sims consume in lockstep, and drawing from it on the host only is precisely
+        // how a seeded stream diverges. A *side* stream — <see cref="DraftRng"/> — has neither
+        // problem: it is derived from the seed and consumed by nobody else.
+        //
+        // The old `new Random()` was defensible on its own terms, because this result is broadcast
+        // and so never needed determinism to agree. What it could not give is reproducibility, and
+        // who picks first is half of what a seed is supposed to reproduce.
+        //
+        // **Ordered by run slot, not by who is hosting.** `Begin` is host-only, so `me` is whoever
+        // opened the lobby; keying off that would hand first pick to a different seat when the two
+        // players swap host duties on the same seed. Slots are the run's own ordering, which is why
+        // `Rng(Player, ModelId, ...)` uses them too.
+        List<Player> bySlot = new List<Player> { me, opponent }
+            .OrderBy(p => runState.GetPlayerSlotIndex(p))
+            .ToList();
+        _firstPickerId = DraftRng(runState, "first_picker").NextBool()
+            ? bySlot[0].NetId
+            : bySlot[1].NetId;
         _pickerId = _firstPickerId;
         _complete = false;
 
-        Log.Warn($"[SpirePvp] draft: pool of {_pool.Count} built, {_firstPickerId} picks first "
-                 + $"(and therefore moves second)");
+        // **The seed is on this line because it is the thing being claimed.** "Same seed, same
+        // characters, same run" is only checkable from a log if the log says which seed it was —
+        // and the card ids below are what you diff between two runs that claim the same one. The
+        // relic pool has printed its ids since 2026-08-17; the card pool never did, which is why
+        // the question had to be answered by staring at two screens.
+        Log.Warn($"[SpirePvp] draft: pool of {_pool.Count} built from seed "
+                 + $"'{runState.Rng.StringSeed}' (hashed {runState.Rng.Seed}), "
+                 + $"{_firstPickerId} picks first (and therefore moves second)");
+
+        Log.Info("[SpirePvp] draft: card pool — "
+                 + string.Join(", ", _pool.Select(c => $"{c.Id.Entry}({c.Rarity})")));
 
         _awaitingAck = true;
         Broadcast();
         ApplyStateLocally();
+    }
+
+    /// <summary>
+    /// A named side stream off the run seed, for everything the draft rolls.
+    ///
+    /// **The invariant this exists to hold: same seed, same characters, same run.** Every draft
+    /// roll used to be a bare `new Random()`, which was safe — the results are broadcast, so the
+    /// two peers could not disagree about them — and wrong in the way nobody was checking: the
+    /// same seed and the same character produced a different pool every time, so a seed named
+    /// nothing and a rematch replayed only the map.
+    ///
+    /// **A side stream, not `RunState.Rng`.** The run's own RNGs are consumed in lockstep by both
+    /// simulations; taking draws from one of them on the host alone is exactly how a seeded stream
+    /// diverges, and this project has paid for that already. `new Rng(seed, name)` is vanilla's
+    /// idiom for the same problem — `SpoilsActMap` takes `"spoils_map"`, `MapSelectionSynchronizer`
+    /// takes `"map_point_selection"`, and `RunRngSet` builds its whole set this way. The stream is
+    /// derived from the seed and consumed by nobody else, so it is reproducible without being
+    /// shared.
+    ///
+    /// **One stream per purpose.** Cards, relics and the first-picker flip each take their own, so
+    /// adding a roll to one of them does not shift the others — the potion round, when it lands,
+    /// must take a fourth rather than borrowing one of these.
+    /// </summary>
+    private static Rng DraftRng(RunState runState, string purpose)
+    {
+        return new Rng(runState.Rng.Seed, "spirepvp_draft_" + purpose);
     }
 
     /// <summary>
@@ -351,7 +401,15 @@ public static class DuelDraft
             return pool;
         }
 
-        Random rng = new Random();
+        // **Sorted before it is shuffled, and that is not redundant.** A shuffle by random key is
+        // a permutation *of the input order* — the Nth candidate gets the Nth draw — so the same
+        // seed over a differently-ordered candidate list yields a different pool. `AllCards` is a
+        // hardcoded array today, but `ModHelper.ConcatModelsFromMods` appends whatever other mods
+        // contribute, in their load order. Canonicalising here makes the pool a function of the
+        // seed, the character and the unlock set, and of nothing else.
+        available = available.OrderBy(c => c.Id.Entry, StringComparer.Ordinal).ToList();
+
+        Rng rng = DraftRng(runState, "cards");
         foreach (CardRarity rarity in new[] { CardRarity.Common, CardRarity.Uncommon, CardRarity.Rare })
         {
             List<CardModel> ofRarity = available.Where(c => c.Rarity == rarity).ToList();
@@ -363,7 +421,7 @@ public static class DuelDraft
 
             // Shuffle then take, rather than sampling with replacement: a pool with the same card
             // twice reads as a bug even when it is not, and denial stops meaning anything.
-            foreach (CardModel card in ofRarity.OrderBy(_ => rng.Next()).Take(PerRarity))
+            foreach (CardModel card in ofRarity.OrderBy(_ => rng.NextInt()).Take(PerRarity))
             {
                 pool.Add(Register(card.ToMutable(), drafter, runState));
             }
@@ -479,7 +537,12 @@ public static class DuelDraft
                 .Select(g => g.First())
                 .ToList();
 
-            Random rng = new Random();
+            // Canonicalised before the shuffle for the same reason as the card pool: a shuffle by
+            // random key permutes the input order, and this list is three concatenated pools whose
+            // contents mods can extend.
+            available = available.OrderBy(r => r.Id.Entry, StringComparer.Ordinal).ToList();
+
+            Rng rng = DraftRng(runState, "relics");
 
             // **Two of each tier, rather than eight off the top of a shuffle.** Lucas drew a boss
             // relic on 2026-08-17 and it was the best pick of the round — which is the argument:
@@ -498,7 +561,7 @@ public static class DuelDraft
                 RelicRarity.Common,
             };
 
-            List<RelicModel> shuffled = available.OrderBy(_ => rng.Next()).ToList();
+            List<RelicModel> shuffled = available.OrderBy(_ => rng.NextInt()).ToList();
             HashSet<string> taken = new HashSet<string>();
 
             foreach (RelicRarity tier in tiers)
@@ -528,7 +591,7 @@ public static class DuelDraft
             }
 
             // Shuffled again so the grid does not read as four tidy rarity pairs in a fixed order.
-            pool = pool.OrderBy(_ => rng.Next()).ToList();
+            pool = pool.OrderBy(_ => rng.NextInt()).ToList();
 
             // The candidate count per tier, because "is this actually random" is a question this
             // pool has already answered wrong once. A tier with two candidates and two slots is not

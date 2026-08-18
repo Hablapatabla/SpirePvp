@@ -111,7 +111,7 @@ side comparison before suspecting the mechanic. DESIGN §7 has the symptom → c
 - `dotnet build` must stay green; it auto-installs the mod into the local game.
 - **Never use `Harmony.PatchAll`.** It throws on the first bad target and silently abandons the
   rest. `SpirePvpInit` patches per class and logs a count — confirm `N patch classes applied
-  cleanly` in the log on every launch, or in-game results are meaningless. **93 as of 2026-08-17** (`DuelDraftRandomClickPatch` and `DuelMapLockPatch` added; 91/127 was confirmed against a live log before them) — `DuelModifierMinimumPatch` added one, and the AoE fix removed `DuelAoeProbePatch` and added `DuelAoeTargetingPatch` and `DuelHookListenerScopePatch`. Note the count is per *class*, not per patch: a class holding
+  cleanly` in the log on every launch, or in-game results are meaningless. **92 classes / 128 methods, read out of `logs/host.20260818T114613.log` on 2026-08-18** (this line said 93 and HANDOFF said 89; both were guesses, and the log is the only thing that knows) — `DuelModifierMinimumPatch` added one, and the AoE fix removed `DuelAoeProbePatch` and added `DuelAoeTargetingPatch` and `DuelHookListenerScopePatch`. Note the count is per *class*, not per patch: a class holding
   methods still counts once, so grouping patches by concern does not move it.
 - **The engine assumes the party is standing together, and in a race it is not.** This is the
   single most productive thing to suspect when a race-phase room misbehaves — it has now
@@ -148,5 +148,12 @@ side comparison before suspecting the mechanic. DESIGN §7 has the symptom → c
 - Both players must run identical mod versions (net message ids are positional). Debug builds
   stamp the git commit into the mod version so the engine's own mod-match gate enforces this;
   `-c Release` keeps the clean semver for Workshop publishing.
+- **Same seed, same characters, same run.** Anything the mod rolls must come off the run seed —
+  `new Rng(runState.Rng.Seed, "some_name")`, a named *side* stream, never a draw from
+  `RunState.Rng` (which both sims consume in lockstep) and never a bare `new Random()`. Being
+  broadcast makes a roll *agree*; it does not make it *reproducible*, and the draft pools were
+  `new Random()` for four days on exactly that reasoning. Sort the candidate list canonically
+  before shuffling, too — a shuffle by random key is a permutation of the input order. See
+  DESIGN §7b.
 - Anything that decides an outcome is host-authoritative — clients display, the host decides.
   Two clients concluding the same thing independently is how the sim desyncs.

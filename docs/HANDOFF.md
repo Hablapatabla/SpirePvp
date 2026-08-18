@@ -19,8 +19,10 @@ Both formats then share everything: two turn models (paced real-time, batched tu
 clocks, checksums, the arena, the result screen, badges, stats, rematch, resignation, agreed draws
 and disconnect handling.
 
-**Patch count: 89 classes.** Confirm `N patch classes applied cleanly` on every launch — if it says
-`PATCH FAILED`, duelling refuses to start and in-game results mean nothing.
+**Patch count: 92 classes / 128 methods.** Read out of `logs/host.20260818T114613.log`, not
+restated — this file said 89 and `CLAUDE.md` said 93, and both were wrong in different directions.
+Confirm `N patch classes applied cleanly` on every launch — if it says `PATCH FAILED`, duelling
+refuses to start and in-game results mean nothing.
 
 ## Read `docs/DRAFT_LOBBY.md` before touching the draft lobby
 
@@ -880,6 +882,64 @@ Keep that split if you extend this.
 ---
 
 ## Immediate next step
+
+### START HERE — 2026-08-18: the draft is seeded (UNPLAYED)
+
+**Reported by Lucas mid-playtest: the same seed with the same character gave different card and
+relic rewards.** The invariant he asked for is the right one and is now the stated rule —
+**same seed, same characters, same run.**
+
+Every roll in `DuelDraft` was a bare `new Random()`: the card pool, the relic pool, and the
+first-picker coin flip. **Be precise about what was wrong with that, because it was not a desync.**
+The pool is built on the host and broadcast, so the two peers have never disagreed about it, and
+the comment sitting over the coin flip correctly argued that a broadcast result needs no
+determinism *to agree*. What it could not give is reproducibility, which nobody had asked for until
+now.
+
+Fixed with vanilla's own idiom — `new Rng(runState.Rng.Seed, name)`, a **side stream off the run
+seed** rather than a draw from `RunState.Rng`. The distinction is the whole thing: the run's own
+RNGs are consumed in lockstep by both simulations, so drawing from one on the host alone is exactly
+how a seeded stream diverges; a named side stream is derived from the seed and read by nobody else.
+`SpoilsActMap`, `MapSelectionSynchronizer`, `RunRngSet` and this mod's own `DuelRematch` all do it
+this way. Three streams, one per purpose, so adding a roll to one does not shift the others.
+
+**The second half of the fix, which is the part worth remembering.** Seeding the stream is not
+enough: `OrderBy(_ => rng.NextInt())` is a permutation *of the input order* — the Nth candidate
+gets the Nth draw — so the same seed over a differently-ordered candidate list still produces a
+different pool. Both candidate lists are now sorted by `Id.Entry` first. A pool is a function of
+the seed, the character and the unlock set, and of nothing else. (**The unlock set is per profile**
+and is the one input that can still differ between two machines. It cannot desync anything, since
+the host sends the pool — but "same seed, same run" holds *across machines* only if both profiles
+have the same unlocks.)
+
+**New telemetry, because the claim has to be checkable from a log.** The draft line now names the
+seed, and the card pool prints its ids the way the relic pool has since 2026-08-17:
+
+    draft: pool of 15 built from seed 'MPHL3J94NALV' (hashed …), 1 picks first (and therefore moves second)
+    draft: card pool — …
+    draft: relic pool by rarity — …
+
+Diffing those three lines between two runs is the whole test.
+
+**Playtest — one specific thing.** Host a Duel lobby, pick **Match: Draft**, and **type a seed into
+the seed box** rather than letting it auto-generate (the log line `seed 'XXXX'` shows an empty
+`Seed:` in the lobby telemetry when it was generated). Play a draft, note the pool. Then start a
+second match on **the same seed and the same character** and compare. Watch for:
+
+| What | How you know |
+|---|---|
+| The card pool repeats | `draft: card pool — …` identical between the two runs, same order |
+| The relic pool repeats | `draft: relic pool by rarity — …` identical, same order |
+| First pick repeats | `N picks first` names the same seat |
+| A *different* seed still varies | Change one character of the seed; all three lines should change |
+| Patch count | `92 patch classes applied cleanly (128 methods)` — this change adds no patch class |
+
+**One decision is deliberately left open, and it needs Lucas.** A rematch relaunches on the same
+seed, so a redrafted rematch now offers the **identical pool** and gives first pick to the **same
+seat**. The pool repeating is the point — both players have already seen it, which is the same
+argument DESIGN §5b made for replaying the same map. First pick repeating is a fairness coin flip,
+not content, and strict alternation across rematches would be a rematch counter mixed into the
+`first_picker` stream. Left unchanged rather than half-changed. See DESIGN §7b.
 
 ### FIXED: the energy display, both halves (2026-08-13, UNPLAYED)
 

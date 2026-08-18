@@ -897,6 +897,55 @@ Two ordering rules the round turned up, both worth keeping:
   broadcast*, so advancing first publishes an empty list and the round's picks reach nobody.
 - **Apply picks before testing for completion**, or the last pick of the last round is dropped.
 
+### The draft is seeded (2026-08-18)
+
+**The invariant, stated so it can be tested: same seed, same characters, same run.** Lucas ran the
+same seed with the same character twice and got two different card pools and two different relic
+pools. He was right to call it — a seed that does not name the run is not a seed, and until this
+was fixed the Rematch button replayed only the map.
+
+Every roll in `DuelDraft` was a bare `new Random()`. That was **safe** and it is worth being
+precise about why, because the fix is not "it was desyncing": the pool is built on the host and
+*broadcast*, so the two peers have never disagreed about it. What a `new Random()` cannot give is
+reproducibility, and nothing in the draft was asking for it.
+
+The fix is vanilla's own idiom, `new Rng(seed, name)` — a **side stream off the run seed**, not a
+draw from `RunState.Rng`. That distinction is the whole design:
+
+| | `RunState.Rng.UpFront` etc. | `new Rng(RunState.Rng.Seed, name)` |
+|---|---|---|
+| Derived from the seed | yes | yes |
+| Consumed in lockstep by both sims | **yes** | no — nobody else reads it |
+| Safe to draw from on the host alone | **no**, this is how a seeded stream diverges | yes |
+
+`SpoilsActMap` takes `"spoils_map"`, `MapSelectionSynchronizer` takes `"map_point_selection"`,
+`RunRngSet` builds its entire set this way, and `DuelRematch` already used it for `"act_selection"`.
+`DuelDraft.DraftRng` now takes three: `spirepvp_draft_cards`, `spirepvp_draft_relics` and
+`spirepvp_draft_first_picker` — **one stream per purpose**, so adding a roll to one does not shift
+the others. The potion round must take a fourth rather than borrowing one of these.
+
+**Seeding the stream was half the fix.** A shuffle by random key is a permutation *of the input
+order* — the Nth candidate gets the Nth draw — so the same seed over a differently-ordered
+candidate list still yields a different pool. `AllCards` is a hardcoded array, but
+`ModHelper.ConcatModelsFromMods` appends whatever other mods contribute in their load order, and
+the relic list is three pools concatenated. Both candidate lists are now sorted by `Id.Entry`
+before the shuffle, which makes a pool a function of **the seed, the character and the unlock
+set**, and of nothing else.
+
+**The unlock set is the remaining input, and it is per profile.** Two players with different
+unlocks would compute different candidate lists from the same seed. It does not desync anything —
+the host builds the pool and sends it — but "same seed, same run" holds across *machines* only if
+the unlock states match. Worth knowing before a Steam session; `unlock all` on both dev profiles is
+already the standing advice for a different reason.
+
+**What this changes about Rematch, deliberately and worth a decision.** A rematch relaunches on the
+same seed (§5b), so a redrafted match now offers the **identical pool** and gives first pick to the
+**same seat**. The pool repeating is the point — both players have already seen it, exactly the
+argument §5b made for replaying the same map. First pick repeating is less obviously right, since
+it is a fairness coin flip rather than content: strict alternation across rematches would be a
+rematch counter mixed into the `first_picker` stream. **Left as-is pending a call**, rather than
+half-changed.
+
 ### What is left
 
 1. **The potion round.** 4 in the pool, 2 each. The loop, the message and the grant
