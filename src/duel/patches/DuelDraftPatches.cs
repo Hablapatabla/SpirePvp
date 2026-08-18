@@ -508,22 +508,41 @@ public static class DuelLobbyRemoteMarkerPatch
             .OfType<NCharacterSelectButton>()
             .ToList();
 
+        // **In a draft, no remote marker at all.** The mirror means both players are on the same
+        // character, so the marker carries no information anyone is missing — and it carries the one
+        // thing the lobby is deliberately hiding. With Random rolled at the click, the selection sits
+        // on `?` while this dropped a player dot under the *rolled* character, so the row showed two
+        // highlighted buttons and the second one answered the question the first was concealing.
+        //
+        // Cleared rather than skipped: the marker may already be on a button from before the format
+        // was switched to Draft, and leaving it would be the same leak with an older cause.
+        if (DuelDraftMirrorPatch.DraftLobbyActive)
+        {
+            foreach (NCharacterSelectButton button in buttons)
+            {
+                if (button.RemoteSelectedPlayers.Contains(player.id))
+                {
+                    button.OnRemotePlayerDeselected(player.id);
+                }
+            }
+
+            return;
+        }
+
         NCharacterSelectButton? holder =
             buttons.FirstOrDefault(b => b.RemoteSelectedPlayers.Contains(player.id));
 
         NCharacterSelectButton? match = buttons.FirstOrDefault(
             b => b._character != null && b._character.Id.Equals(player.character.Id));
 
-        // **Logged whether or not it did anything, and the previous version was not.** It returned
-        // silently when vanilla had already placed a marker, so a run producing zero lines was
-        // indistinguishable between "vanilla placed it every time" and "this never ran" — the exact
-        // ambiguity that has repeatedly been mistaken here for a patch that failed to apply. It
-        // produced zero lines, the icon was still missing, and that told us nothing.
+        // **Logged whether or not it did anything.** An earlier version returned silently when
+        // vanilla had already placed a marker, so a run producing zero lines was indistinguishable
+        // between "vanilla placed it every time" and "this never ran" — the ambiguity this project
+        // has repeatedly mistaken for a patch that failed to apply.
         Log.Warn($"[SpirePvp] lobby telemetry: remote marker for {player.id} "
                  + $"({player.character.Id.Entry}) — vanilla put it on "
                  + $"{holder?._character?.Id.Entry ?? "NOTHING"}, id match is "
-                 + $"{match?._character?.Id.Entry ?? "NOTHING"}, buttons: "
-                 + $"{string.Join(",", buttons.Select(b => b._character?.Id.Entry ?? "?"))}");
+                 + $"{match?._character?.Id.Entry ?? "NOTHING"}");
 
         if (holder == null)
         {
