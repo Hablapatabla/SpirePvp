@@ -108,6 +108,16 @@ public static class DuelResultQuotes
                 {
                     DuelEndReason.AgreedDraw => ("drawAgreed", "You agreed to a draw."),
                     DuelEndReason.Desync => ("drawDesync", "The match desynced. No result."),
+
+                    // **A disconnect can now draw, and without this case it read as a race
+                    // timeout** — the exact false claim the note above warns about, arriving as
+                    // the third draw reason within a day of the note being written. A drop is
+                    // drawn whenever the two machines have no agreed board to read from: outside
+                    // the duel there is no shared HP, and inside it the two can be level. See
+                    // `DuelDisconnect.DecideAfterSilence`.
+                    DuelEndReason.Disconnect =>
+                        ("drawDisconnect", "The connection died with nobody ahead."),
+
                     _ => ("drawRaceExpired",
                           "Time ran out before either of you reached the arena.")
                 };
@@ -119,6 +129,16 @@ public static class DuelResultQuotes
                     DuelEndReason.Resign => ("lostResign", "You resigned."),
                     DuelEndReason.RaceDeath =>
                         ("lostRaceDeath", "You died before reaching the arena."),
+
+                    // **Losing to a disconnect is new and is not `lostHp`.** Until 2026-08-18 a
+                    // drop only ever won you the match, because whoever remained was awarded it;
+                    // now an accidental drop is settled on the HP both machines agreed on, so the
+                    // player who was behind loses one. Falling through to `lostHp` would tell them
+                    // their opponent won the duel, which is the wrong story about a duel that was
+                    // never finished.
+                    DuelEndReason.Disconnect =>
+                        ("lostDisconnect", "The connection died while you were behind."),
+
                     _ => ("lostHp", "Your opponent won the duel.")
                 };
         }

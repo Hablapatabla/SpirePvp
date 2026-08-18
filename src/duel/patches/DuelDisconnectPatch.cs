@@ -73,7 +73,14 @@ public static class DuelDisconnectPatch
         DuelDisconnect.NoteClientDropReason(info.GetReason());
     }
 
-    /// <summary>The peer went away while we are still playing. We win — unless the sim came apart.</summary>
+    /// <summary>
+    /// The peer went away while we are still playing.
+    ///
+    /// Three endings, and which one depends entirely on *why* — see `DuelDisconnect.IsDeliberate`.
+    /// A divergence is a void draw, a chosen departure is an outright win, and an accident opens
+    /// the wait window and is decided at the end of it by whatever both machines can still agree
+    /// on. Only the middle one is safe to award here and now.
+    /// </summary>
     [HarmonyPatch(typeof(RunManager), nameof(RunManager.RemotePlayerDisconnected))]
     [HarmonyPostfix]
     public static void AfterRemotePlayerDisconnected(RunManager __instance, ulong playerId)
@@ -99,7 +106,19 @@ public static class DuelDisconnectPatch
             return;
         }
 
-        DuelDisconnect.Declare($"opponent {playerId} announced a disconnect mid-match");
+        // **A chosen departure is the only one that can be awarded on the spot**, because it is the
+        // only one where the other side knows it left and will not also be claiming the win.
+        if (reason != null && DuelDisconnect.IsDeliberate(reason.Value))
+        {
+            DuelDisconnect.Declare($"opponent {playerId} left deliberately ({reason})");
+            return;
+        }
+
+        // Everything else — a timeout, a network error, or no reason at all — is an accident, and
+        // an accident opens the window instead of deciding. A null reason lands here on purpose:
+        // `RunLobby` stashes nothing when the player was already out of its list, and "we do not
+        // know why they went" is not grounds for awarding anybody a match.
+        DuelDisconnect.NotePeerLinkGone(playerId, reason);
     }
 
     /// <summary>

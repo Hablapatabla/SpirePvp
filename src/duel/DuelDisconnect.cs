@@ -1,5 +1,6 @@
 using System.Linq;
 using Godot;
+using MegaCrit.Sts2.Core.Combat;
 using MegaCrit.Sts2.Core.Context;
 using MegaCrit.Sts2.Core.Entities.Multiplayer;
 using MegaCrit.Sts2.Core.Entities.Players;
@@ -47,15 +48,24 @@ public static class DuelDisconnect
     /// <summary>
     /// How long the notice sits on screen before the match is awarded.
     ///
-    /// **Five seconds, because there is nothing to wait for.** This was thirty, with a "wait one
-    /// more minute" button, on the assumption that a window let a dropped player come back. It
-    /// does not: rejoining is not implemented in the game (see `docs/PLAYTEST_LIST.md`), so the
-    /// window could only ever delay a result that was already decided. A countdown long enough to
-    /// hope on is worse than a short one — it implies a return that cannot happen.
+    /// **Twenty-five seconds, so the whole wait is thirty — restored 2026-08-18 at Lucas's
+    /// request, and the reversal is deliberate.** It was cut to five on 2026-08-12 with a sound
+    /// argument: rejoining is not implemented, so the window could only ever delay a result that
+    /// was already decided, and a countdown long enough to hope on implies a return that cannot
+    /// happen.
     ///
-    /// What is left is a moment to read what happened before the screen changes.
+    /// What changed is not the argument but the plan. Native reconnect is now something this
+    /// project intends to build, and five seconds is not a window a returning player could ever
+    /// beat — so it would have to be undone the moment reconnect lands, and every match played in
+    /// between is played under a rule we already know we are going to change. Thirty seconds is
+    /// also the number this route was originally playtested at (`docs/PLAYTEST_LIST.md`:
+    /// `forfeit in 24s`, declared at 30s).
+    ///
+    /// The arithmetic is deliberate: <see cref="SilenceBeforeNoticeMs"/> is the 5s of quiet before
+    /// the curtain goes up, and this is the countdown drawn on it. 5 + 25 = 30s from the last
+    /// packet to the result.
     /// </summary>
-    public const ulong ForfeitWindowMs = 5_000;
+    public const ulong ForfeitWindowMs = 25_000;
 
     /// <summary>
     /// How long a peer may be quiet before any of this starts.
@@ -76,13 +86,21 @@ public static class DuelDisconnect
     private static ulong? _forfeitAtMs;
 
     /// <summary>
-    /// When our own connection died, if it did — the client's route into the same wait.
+    /// When the link died, if it did — the route into the wait for anyone with no stats left.
     ///
     /// Needed because the two sides learn of a disappearance through different channels and only
-    /// one of them leaves anything to measure. A host watching a client reads heartbeat silence;
-    /// a client whose host vanishes gets a single `LocalPlayerDisconnected`, and the peer's stats
-    /// are torn down with the connection, so there is no silence left to time. This timestamp is
-    /// what gives that side a clock of its own.
+    /// one of them leaves anything to measure. Heartbeat silence is measured from
+    /// `ConnectionStats.LastReceivedTime`; a *reported* drop tears those stats down with the
+    /// connection, so there is no silence left to time. This timestamp is what gives that side a
+    /// clock of its own.
+    ///
+    /// **Both sides can be that side, which is the 2026-08-18 correction.** This was written as
+    /// "when our own connection died", i.e. the client's route, because on ENet the host is never
+    /// told anything and always falls through to heartbeat silence. The Steam transport *does*
+    /// report a drop, so over Steam the host arrives through `RemotePlayerDisconnected` with the
+    /// peer's stats already gone — and before this the host therefore skipped the window entirely
+    /// and decided on the spot. Net effect: the countdown had never once been shown to a host in a
+    /// Steam match. See <see cref="NotePeerLinkGone"/>.
     /// </summary>
     private static ulong? _connectionLostAtMs;
 
@@ -102,6 +120,22 @@ public static class DuelDisconnect
 
     /// <summary>Records the reason. Called from the prefix that runs before the event fires.</summary>
     public static void NoteClientDropReason(NetError reason) => _lastClientDropReason = reason;
+
+    /// <summary>
+    /// Whether a departure was somebody's decision rather than an accident.
+    ///
+    /// **The distinction decides who wins, so it is asked in one place.** A deliberate departure is
+    /// safe to score as an outright win because only one side ever sees it — the leaver knows it
+    /// left, and the announcement goes out before the link closes, so there is no second claimant.
+    /// An accident has no such guarantee: a partition is symmetric, both sides remain, and both
+    /// would claim it. See <see cref="DecideAfterSilence"/>.
+    ///
+    /// Written as a predicate rather than repeated at each site because this project has already
+    /// paid for the other shape — a phase test standing in for "has the duel bank been granted"
+    /// was fixed in one file and left standing in another, where it decided a match result.
+    /// </summary>
+    public static bool IsDeliberate(NetError reason) =>
+        reason is NetError.Quit or NetError.HostAbandoned or NetError.Kicked;
 
     /// <summary>
     /// Reads the reason and forgets it, so a later disconnect cannot inherit this one.
@@ -148,7 +182,7 @@ public static class DuelDisconnect
             return;
         }
 
-        if (reason is NetError.Quit or NetError.HostAbandoned or NetError.Kicked)
+        if (IsDeliberate(reason))
         {
             Declare($"the opponent left deliberately ({reason})");
             return;
@@ -156,6 +190,27 @@ public static class DuelDisconnect
 
         _connectionLostAtMs ??= Time.GetTicksMsec();
         Log.Warn($"[SpirePvp] lost the connection mid-match ({reason}) — opening the wait window");
+    }
+
+    /// <summary>
+    /// The transport told us the peer's link is gone. Opens the same wait as every other route.
+    ///
+    /// **This is the host's Steam route, and it had no window at all.** `RemotePlayerDisconnected`
+    /// used to go straight to <see cref="Declare"/>, which was invisible on the dev rig for a
+    /// reason worth keeping: ENet never reports a hard drop, so on two local clients the host only
+    /// ever learns of a departure through heartbeat silence — which *does* run the countdown. Over
+    /// Steam the drop is reported, so the host took this route instead and awarded the match
+    /// instantly. Measured 2026-08-18: `Player ... disconnected from host. Reason: Timeout`, with
+    /// no curtain and no countdown on the host's screen at any point.
+    ///
+    /// Timed from a stamp rather than from `ConnectionStats`, because the stats are disposed with
+    /// the connection — the same reason the client's route needs one.
+    /// </summary>
+    public static void NotePeerLinkGone(ulong playerId, NetError? reason)
+    {
+        _connectionLostAtMs ??= Time.GetTicksMsec();
+        Log.Warn($"[SpirePvp] opponent {playerId}'s link is gone ({reason?.ToString() ?? "no reason given"})"
+                 + $" — opening the {ForfeitWindowMs / 1000}s wait window");
     }
 
     /// <summary>
@@ -199,20 +254,87 @@ public static class DuelDisconnect
     }
 
     /// <summary>
-    /// Ends the match in our favour because the opponent is gone.
+    /// Ends the match in our favour because the opponent chose to go.
     ///
-    /// **Both sides may reach this on a true network partition, and both would claim the win.**
-    /// That is a known limitation rather than an oversight: with the connection cut there is no
-    /// shared authority left to arbitrate, and neither client can tell "they crashed" from "my
-    /// own link died". It is also not a case anyone shares a screen for. The freeze-and-arbitrate
-    /// design in `docs/PLAYTEST_LIST.md` is what actually resolves it; until then, deciding is
-    /// still strictly better than the original behaviour, which was to record no result at all.
+    /// **Only for departures somebody decided on** — a quit, an abandon, a kick. Those are safe to
+    /// score as an outright win because only one side ever reaches this: the leaver knows it left,
+    /// and the announcement is delivered before the link closes. There is no second claimant.
+    ///
+    /// An *accidental* drop is not this. See <see cref="DecideAfterSilence"/>.
     /// </summary>
     public static void Declare(string why)
     {
         _declared = true;
         Log.Warn($"[SpirePvp] {why} — declaring a win by disconnect");
         DuelResult.DeclareWinner(true, DuelEndReason.Disconnect);
+    }
+
+    /// <summary>
+    /// Decides a match whose opponent stopped talking and never came back.
+    ///
+    /// **The old rule handed the win to whoever was still here, and over Steam that gives it to
+    /// both of them.** Measured 2026-08-18, the first real two-machine session: the link died
+    /// mid-draft and *each* end independently reported `ProblemDetectedLocally` — the host
+    /// `4001 Timeout; remote problem`, the client `5003 Connection dropped`. Neither was told the
+    /// other had closed, and the transport does distinguish that: the same session's divergence
+    /// kick reached the client as `ClosedByPeer / 1105`. So the partition was genuinely mutual,
+    /// both sides remained, and both would have claimed the win.
+    ///
+    /// This was already written down as a known limitation on <see cref="Declare"/> — "not a case
+    /// anyone shares a screen for" — and that estimate was wrong twice over. A partition is
+    /// symmetric by nature, so it is the *only* kind of disconnect the Steam transport produced,
+    /// where every local ENet test killed one process and the dead side saw nothing. And these two
+    /// play on a shared call, so both screens get read out loud.
+    ///
+    /// **So ask the question <see cref="DuelEndReason.Desync"/> already isolated: can both sides
+    /// reach the same answer without talking?**
+    ///
+    /// - **In the duel, yes — by HP.** Both duelists are creatures in one coupled combat with
+    ///   checksums live, so the two machines hold identical HP by construction; that is precisely
+    ///   what a checksum asserts. Each side compares the same two numbers and reaches the same
+    ///   winner with nothing on the wire. Unplugging while losing therefore still loses, which is
+    ///   the property worth keeping.
+    /// - **Anywhere else, no.** Outside the duel there is no number both peers provably share. In a
+    ///   race the two runs are decoupled and your copy of the opponent's `Player` stops updating —
+    ///   `RaceProgressMessage` refreshes it periodically, so at the instant of a drop each side
+    ///   holds a *different* snapshot and the two could disagree. In a draft nobody has taken
+    ///   damage at all. Both are a draw: one because the evidence cannot be trusted, one because
+    ///   there is none.
+    ///
+    /// Equal HP is a draw for the same reason a desync is — there is no winner to name, and naming
+    /// one anyway is the coin flip this project already refused once.
+    /// </summary>
+    public static void DecideAfterSilence(string why)
+    {
+        _declared = true;
+
+        ICombatState? state = DuelSession.IsDuelActive
+            ? CombatManager.Instance?.DebugOnlyGetState()
+            : null;
+
+        Player? me = state == null ? null : LocalContext.GetMe(state);
+        Player? them = state?.Players.FirstOrDefault(p => !LocalContext.IsMe(p));
+
+        if (me == null || them == null)
+        {
+            Log.Warn($"[SpirePvp] {why} — no duel in progress, so there is no agreed board to "
+                     + "read; voiding the match as a draw");
+            DuelResult.DeclareDraw(DuelEndReason.Disconnect);
+            return;
+        }
+
+        int mine = me.Creature.CurrentHp;
+        int theirs = them.Creature.CurrentHp;
+
+        if (mine == theirs)
+        {
+            Log.Warn($"[SpirePvp] {why} — level on HP at {mine}, so nobody was ahead; drawn");
+            DuelResult.DeclareDraw(DuelEndReason.Disconnect);
+            return;
+        }
+
+        Log.Warn($"[SpirePvp] {why} — decided on HP at the drop: me {mine}, them {theirs}");
+        DuelResult.DeclareWinner(mine > theirs, DuelEndReason.Disconnect);
     }
 
     /// <summary>
@@ -327,8 +449,11 @@ public static class DuelDisconnect
 
         ulong waited = ForfeitWindowMs;
         ClearWait("the match is decided");
-        Declare($"opponent {opponent.NetId} never returned "
-                + $"(silent for {silentFor / 1000}s, window {waited / 1000}s)");
+
+        // **`DecideAfterSilence`, not `Declare`** — this is the accidental route, the one both
+        // sides can reach at once. `Declare` stays for departures somebody chose.
+        DecideAfterSilence($"opponent {opponent.NetId} never returned "
+                           + $"(silent for {silentFor / 1000}s, window {waited / 1000}s)");
     }
 
     /// <summary>

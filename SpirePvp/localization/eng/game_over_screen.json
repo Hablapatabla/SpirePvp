@@ -45,5 +45,11 @@
   "SPIREPVP_QUOTE.lostFlag.3": "Death by hesitation. Yours.",
   "SPIREPVP_QUOTE.lostResign.1": "You tipped your king over.",
   "SPIREPVP_QUOTE.lostResign.2": "You saw where it was going.",
-  "SPIREPVP_QUOTE.lostResign.3": "No last stand. You conceded."
+  "SPIREPVP_QUOTE.lostResign.3": "No last stand. You conceded.",
+  "SPIREPVP_QUOTE.drawDisconnect.1": "The line went dead with nothing settled.",
+  "SPIREPVP_QUOTE.drawDisconnect.2": "No connection, no winner.",
+  "SPIREPVP_QUOTE.drawDisconnect.3": "You were level when the wire went quiet.",
+  "SPIREPVP_QUOTE.lostDisconnect.1": "The connection died. You were behind.",
+  "SPIREPVP_QUOTE.lostDisconnect.2": "Saved by nothing. You were losing when it dropped.",
+  "SPIREPVP_QUOTE.lostDisconnect.3": "The wire went quiet on a board you were not winning."
 }
