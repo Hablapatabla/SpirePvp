@@ -44,6 +44,8 @@ public static class DuelUnlockButtonPatch
 
         if (!model.CanUnlock)
         {
+            // The one line that tells a refusal apart from a bug — see LockInTurnModel.UnlockReason.
+            Log.Info($"[SpirePvp] lock-in: end turn pressed, withdraw not offered ({model.UnlockReason})");
             return true;
         }
 

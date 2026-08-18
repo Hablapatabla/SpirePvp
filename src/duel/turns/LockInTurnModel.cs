@@ -599,6 +599,19 @@ public sealed class LockInTurnModel : IPlanningTurnModel
     public bool CanUnlock => _localLockedIn && !_remoteLockedIn && !_flushing && _local.Count > 0;
 
     /// <summary>
+    /// Why <see cref="CanUnlock"/> answered as it did, for the log.
+    ///
+    /// **Reported 2026-08-14: the client could not take a lock-in back on turn 3 while the host had
+    /// not committed.** Four terms decide it and the button shows none of them, so the report and
+    /// the rule cannot be told apart from outside — `_remoteLockedIn` surviving a mid-turn batch
+    /// and `_local` being empty produce the identical symptom and want opposite fixes. Printed
+    /// whenever the button refuses, rather than guessed at a fifth time.
+    /// </summary>
+    internal string UnlockReason =>
+        $"localLockedIn={_localLockedIn} remoteLockedIn={_remoteLockedIn} "
+        + $"flushing={_flushing} planned={_local.Count}";
+
+    /// <summary>
     /// Takes back the lock-in and returns the planned cards to the hand.
     ///
     /// **The plays are recalled, not just the flag.** A client forwards its buffer to the host

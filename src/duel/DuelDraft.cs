@@ -7,6 +7,7 @@ using MegaCrit.Sts2.Core.Commands;
 using MegaCrit.Sts2.Core.Context;
 using MegaCrit.Sts2.Core.Entities.Cards;
 using MegaCrit.Sts2.Core.Entities.Players;
+using MegaCrit.Sts2.Core.Entities.Relics;
 using MegaCrit.Sts2.Core.Helpers;
 using MegaCrit.Sts2.Core.Localization;
 using MegaCrit.Sts2.Core.Logging;
@@ -65,10 +66,16 @@ public static class DuelDraft
     /// </summary>
     private const int PicksEach = 7;
 
-    /// <summary>Relics shown, and taken — 10 in the pool, 5 each, drafted to exhaustion.</summary>
-    private const int RelicPoolSize = 10;
+    /// <summary>
+    /// Relics shown, and taken — 8 in the pool, 4 each, drafted to exhaustion.
+    ///
+    /// Ten was the first number and played as a few too many (Lucas, 2026-08-14): a duel is a
+    /// handful of turns, and five relics each is more permanent advantage than that many turns can
+    /// express.
+    /// </summary>
+    private const int RelicPoolSize = 8;
 
-    private const int RelicPicksEach = 5;
+    private const int RelicPicksEach = 4;
 
     /// <summary>
     /// Which round is running. Each is an independent alternating draft over its own pool, which is
@@ -426,6 +433,15 @@ public static class DuelDraft
                 .GetUnlockedRelics(runState.UnlockState)
                 .Concat(ModelDb.RelicPool<SharedRelicPool>().GetUnlockedRelics(runState.UnlockState))
                 .Where(r => !held.Contains(r.Id.Entry))
+
+                // **Shop relics are excluded by rarity, which is what "drop the merchant pool"
+                // actually means.** The first attempt inferred it from merchant hooks and missed
+                // Orrery, which overrides none of them — its whole effect is `AfterObtained` and it
+                // is a shop relic by *declaration*: `Rarity => RelicRarity.Shop`. Reading the
+                // property the game already keeps beats deducing it from behaviour, and it is the
+                // same lesson as filtering relics by hook rather than by name, one level up: ask
+                // the model what it is.
+                .Where(r => r.Rarity != RelicRarity.Shop)
                 .Where(r => !IsDeadInADuel(r))
                 .GroupBy(r => r.Id.Entry)
                 .Select(g => g.First())
@@ -484,18 +500,7 @@ public static class DuelDraft
                 .Distinct()
                 .ToList();
 
-            // **Anything that touches the merchant is out, whatever else it does.** Lucas, after
-            // drafting Orrery and finding it did nothing: *"maybe no shop relics at all is the
-            // right choice here."* Agreed, and by category rather than by judging relics one at a
-            // time — a duel has no gold, no shop and no card removal, so value routed through them
-            // is dead by construction, and a category is stable where a per-relic verdict rots the
-            // day the roster changes.
-            //
-            // This is stricter than the all-map-only test below on purpose: a relic that is half
-            // combat and half shop is a weakened pick in a ten-relic pool, and there are plenty of
-            // whole ones to offer instead.
-            dead = overridden.Any(MerchantHooks.Contains)
-                   || (overridden.Count > 0 && overridden.All(MapOnlyHooks.Contains));
+            dead = overridden.Count > 0 && overridden.All(MapOnlyHooks.Contains);
         }
         catch (Exception e)
         {
@@ -531,17 +536,6 @@ public static class DuelDraft
     /// for "when does this happen", they change far less often than the relic roster, and a hook
     /// added by a game update simply is not on this list, which fails toward keeping a relic.
     /// </summary>
-    /// <summary>
-    /// Hooks that only mean anything in a shop. Overriding one is enough to be dropped.
-    /// </summary>
-    private static readonly HashSet<string> MerchantHooks = new()
-    {
-        "ModifyMerchantCardCreationResults",
-        "ModifyMerchantCardPool",
-        "ModifyMerchantCardRarity",
-        "ModifyMerchantPrice"
-    };
-
     private static readonly HashSet<string> MapOnlyHooks = new()
     {
         "AfterActEntered",

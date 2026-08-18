@@ -423,63 +423,11 @@ public static class DuelDraftCharacterLockPatch
         bool draft = DuelDraftMirrorPatch.DraftLobbyActive;
         bool allowed = mirroring || !client || !draft;
 
-        // **Random is kept for drafts, but resolved when it is picked rather than at run start.**
-        //
-        // Left alone it cannot be mirrored at all: the host's roll lands *as the run begins* —
-        //
-        //     PlayerChanged 1 = SILENT                 (the host's roll, at run start)
-        //     SetLocalCharacter -> SILENT ... ALLOWED  (the client mirrors it)
-        //     Player 1001 tried to change character while run was already starting! Ignoring
-        //
-        // — and both peers rolling separately is two rolls, measured the same evening (host
-        // IRONCLAD, client SILENT). Refusing it outright was the first answer and Lucas asked to
-        // keep the option, which is fair: the button is wanted, only its timing is unusable.
-        //
-        // So a draft turns Random into "roll now": the host picks a real character immediately and
-        // that travels as an ordinary pick, which the mirror already handles. The player gets what
-        // they asked for — a character they did not choose — and the race disappears entirely,
-        // because by run start there is nothing left to resolve.
-        //
-        // Client-side it stays refused, but the button is hidden there anyway by the lock.
-        if (draft && !mirroring && character != null && character.Id.Entry == "RANDOM_CHARACTER")
-        {
-            CharacterModel? rolled = ModelDb.AllCharacters
-                .Where(c => c.Id.Entry != "RANDOM_CHARACTER")
-                .OrderBy(_ => Guid.NewGuid())
-                .FirstOrDefault();
-
-            if (rolled == null)
-            {
-                Log.Warn("[SpirePvp] draft lobby: Random picked but no character to roll — refusing");
-                return false;
-            }
-
-            Log.Warn($"[SpirePvp] draft lobby: rolling Random now — {rolled.Id.Entry}. A draft "
-                     + "cannot use the run-start resolution, so it happens at the click instead.");
-
-            // Re-entered through the same method so the roll is an ordinary pick: it syncs, the
-            // client mirrors it, and nothing downstream knows Random was involved. `mirroring`
-            // carries it past this guard on the way back in.
-            _mirroringForRandom = true;
-            try
-            {
-                __instance.SetLocalCharacter(rolled);
-            }
-            finally
-            {
-                _mirroringForRandom = false;
-            }
-
-            return false;
-        }
-
-        // **Every character change, on either peer, allowed or not.** This is the line that answers
-        // the question four fixes could not: whether a change the client makes ever becomes real.
-        // It prints on the way *in*, so a change that is allowed here and still missing from the
-        // host's record is a delivery problem rather than a lobby one.
-        Log.Warn($"[SpirePvp] lobby telemetry: SetLocalCharacter -> {character?.Id.Entry ?? "null"} "
-                 + $"[{__instance.NetService.Type}] mirroring={mirroring} draft={draft} "
-                 + $"=> {(allowed ? "ALLOWED" : "BLOCKED")}");
+        // **Random in a draft is rolled at the screen, not here** — see `DuelDraftRandomRollPatch`.
+        // This method is the lobby's, and the lobby has no buttons: intercepting the roll at this
+        // level set the character correctly and left the *marker* sitting on Random, because
+        // nothing had told the screen which button was now selected. Reported 2026-08-14: "host
+        // indicator on random and client indicator on whatever's actually getting picked".
 
         return allowed;
     }
@@ -580,5 +528,75 @@ public static class DuelLobbyRemoteMarkerPatch
         {
             match?.OnRemotePlayerSelected(player.id);
         }
+    }
+}
+
+/// <summary>
+/// Rolls Random into a real character at the moment it is clicked, in a draft lobby.
+///
+/// **Random cannot survive to run start in a draft.** The host's roll resolves *as the run begins* —
+///
+///     PlayerChanged 1 = SILENT                 (the host's roll, at run start)
+///     SetLocalCharacter -> SILENT ... ALLOWED  (the client mirrors it)
+///     Player 1001 tried to change character while run was already starting! Ignoring
+///
+/// — so the mirror can never land, and both peers rolling separately is two rolls rather than one
+/// (measured: host IRONCLAD, client SILENT). Refusing Random outright was the first answer; Lucas
+/// asked to keep it, which is fair — the option is wanted, only its timing was unusable.
+///
+/// So the click rolls immediately and the lobby is handed a *real* character, which travels as an
+/// ordinary pick the mirror already knows how to follow. By run start there is nothing left to
+/// resolve.
+///
+/// **Patched here rather than at `StartRunLobby.SetLocalCharacter`, and that is the whole fix for
+/// the second report.** The lobby has no buttons: rolling at that level set the character and left
+/// both indicators wrong — the host's marker stayed on Random while the client's moved to the
+/// rolled character. `SelectCharacter` owns the button visuals *and* calls into the lobby, so doing
+/// it here keeps the two in step by construction.
+/// </summary>
+[HarmonyPatch(typeof(NCustomRunScreen), nameof(NCustomRunScreen.SelectCharacter))]
+public static class DuelDraftRandomRollPatch
+{
+    private static bool _rolling;
+
+    public static bool Prefix(NCustomRunScreen __instance, CharacterModel characterModel)
+    {
+        if (_rolling
+            || characterModel == null
+            || characterModel.Id.Entry != "RANDOM_CHARACTER"
+            || !DuelDraftMirrorPatch.DraftLobbyActive)
+        {
+            return true;
+        }
+
+        List<NCharacterSelectButton> buttons = __instance._charButtonContainer.GetChildren()
+            .OfType<NCharacterSelectButton>()
+            .Where(b => b._character != null && b._character.Id.Entry != "RANDOM_CHARACTER")
+            .ToList();
+
+        NCharacterSelectButton? rolled = buttons
+            .OrderBy(_ => Guid.NewGuid())
+            .FirstOrDefault();
+
+        if (rolled?._character == null)
+        {
+            Log.Warn("[SpirePvp] draft lobby: Random clicked but there is nothing to roll — ignoring");
+            return false;
+        }
+
+        Log.Warn($"[SpirePvp] draft lobby: rolling Random now — {rolled._character.Id.Entry}. "
+                 + "A draft cannot use the run-start resolution, so it happens at the click.");
+
+        _rolling = true;
+        try
+        {
+            __instance.SelectCharacter(rolled, rolled._character);
+        }
+        finally
+        {
+            _rolling = false;
+        }
+
+        return false;
     }
 }
