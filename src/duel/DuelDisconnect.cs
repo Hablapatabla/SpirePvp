@@ -187,7 +187,15 @@ public static class DuelDisconnect
             return false;
         }
 
-        return DuelSession.Phase is DuelPhase.RaceActive or DuelPhase.DuelActive;
+        // A draft is a live match too, but it runs in phase `Inactive` — there is no draft phase in
+        // the enum — so the phase test alone lets a mid-draft opponent drop fall through. Measured
+        // 2026-08-18: the client dropped mid-draft, this returned false, nothing was decided, and
+        // the host was left on a frozen draft whose only exit was Give Up — scored as the *host*
+        // resigning (a loss) for a match the opponent abandoned. `IsDraftRun` is true for the whole
+        // draft-format match; the guards above already exclude the lobby (no PvP run) and a
+        // finished match (`IsGameOver`), so this only ever adds the live draft.
+        return DuelSession.Phase is DuelPhase.RaceActive or DuelPhase.DuelActive
+               || DuelDraft.IsDraftRun;
     }
 
     /// <summary>
