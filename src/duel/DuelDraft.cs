@@ -858,6 +858,66 @@ public static class DuelDraft
         // present the top screen properly now that the map is shut.
         NOverlayStack.Instance?.ShowOverlays();
         RefreshVisuals();
+
+        // **Only the first screen of the draft fades, and that restriction is the whole design.**
+        // `ShowScreen` also runs on every relic pick, because the relic round rebuilds where the
+        // card round repaints — fading there would reintroduce the flicker that "a janky black
+        // screen refresh for every pick" was reported for, one report above this one in the file.
+        // The jolt worth smoothing is the draft arriving, which happens once.
+        if (!_introFaded)
+        {
+            _introFaded = true;
+            FadeIn(_stage == Stage.Relics ? _relicScreen : _screen);
+        }
+    }
+
+    /// <summary>
+    /// Whether the draft's opening fade has already played. One per draft, reset with everything
+    /// else in <see cref="Disarm"/> so a second match in the same process fades again.
+    /// </summary>
+    private static bool _introFaded;
+
+    /// <summary>
+    /// Brings a node up from transparent to whatever alpha it was already set to.
+    ///
+    /// Asked for 2026-08-17 — the draft arrived correctly but *abruptly*, now that it no longer
+    /// comes up over a map that was already on screen. Nothing is being animated into place; this
+    /// only takes the alpha it would have had instantly and spends a beat getting there, so a
+    /// tween that never runs (a freed node, a node outside the tree) costs the appearance and not
+    /// the draft.
+    ///
+    /// Reading the target off `Modulate` rather than passing one keeps the backdrop's deliberate
+    /// dimming — it is scenery at 0.55 grey, and a fade to opaque white would undo the tint that
+    /// makes the cards read as the screen.
+    /// </summary>
+    private static void FadeIn(CanvasItem? node, double seconds = 0.45)
+    {
+        if (node == null || !GodotObject.IsInstanceValid(node) || !node.IsInsideTree())
+        {
+            return;
+        }
+
+        try
+        {
+            Color colour = node.Modulate;
+            float target = colour.A;
+            colour.A = 0f;
+            node.Modulate = colour;
+
+            Tween tween = node.CreateTween();
+            tween.TweenProperty(node, "modulate:a", target, seconds)
+                .SetEase(Tween.EaseType.Out)
+                .SetTrans(Tween.TransitionType.Sine);
+        }
+        catch (Exception e)
+        {
+            // Presentation only. Restore the node to visible and carry on — a draft that appears
+            // abruptly is a complaint, a draft stuck at zero alpha is a lost match.
+            Log.Warn($"[SpirePvp] draft: could not fade in ({e.Message}) — showing it outright");
+            Color colour = node.Modulate;
+            colour.A = 1f;
+            node.Modulate = colour;
+        }
     }
 
     /// <summary>Takes the first thing left in the pool, for `duel draft`.</summary>
@@ -1347,6 +1407,7 @@ public static class DuelDraft
             overlays.AddChildSafely(backdrop);
             overlays.MoveChildSafely(backdrop, 0);
             _backdrop = backdrop;
+            FadeIn(backdrop);
             Log.Info($"[SpirePvp] draft: campfire backdrop up ({act.Id.Entry})");
         }
         catch (Exception e)
@@ -1358,6 +1419,8 @@ public static class DuelDraft
 
     private static void CloseBackdrop()
     {
+        _introFaded = false;
+
         if (_backdrop != null && GodotObject.IsInstanceValid(_backdrop))
         {
             _backdrop.QueueFree();

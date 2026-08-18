@@ -41,13 +41,30 @@ Everything below landed on 2026-08-14 in one unsupervised batch.
   `RUINED_HELMET(Rare), STONE_CRACKER(Uncommon), LOOMING_FRUIT(Ancient), WAR_PAINT(Common),
   VERY_HOT_COCOA(Ancient), CHARONS_ASHES(Rare), ORICHALCUM(Uncommon), BAG_OF_MARBLES(Common)` —
   2/2/2/2, drafted 4 each, no divergence, into the arena.
-- **The map guard is NOT confirmed, despite the button doing nothing.** `DuelMapLockPatch` logged
+- **The client's lock-in cancel works — the standing report is closed.** Confirmed on the wire
+  2026-08-17, twice in one turn, and the refusal telemetry reads correctly around it:
+
+      lock-in: end turn pressed, withdraw not offered (localLockedIn=False ... planned=1)
+      lock-in: locking in 1 play(s)
+      lock-in: end turn pressed while locked in — taking it back
+      lock-in: took back 1 play(s) — the opponent had not locked in
+
+  The `withdraw not offered` line on the *first* press is correct behaviour, not a refusal: there
+  was nothing locked in yet. That distinction is the whole reason the line prints its four terms.
+- **The map guard is confirmed, and the trace is what confirmed it.** A second run showed
+  `top-bar open reached NMapScreen.Open` immediately followed by `refused to open (duel=True
+  draft=True topBar=True)` — so the button is being stopped by this patch rather than being inert.
+  The run's own start-up open is refused too (`duel=False draft=True topBar=False`), which is what
+  makes a draft load straight into the campfire backdrop instead of flashing the map.
+- **Superseded — the entry below said the map guard was unconfirmed.** `DuelMapLockPatch` logged
   nothing at all during the deck review, so `NTopBarMapButton.OnRelease` never reached
   `NMapScreen.Open` — the button was simply inert that time. A button that does nothing and a guard
   that refuses it are indistinguishable from the outside and completely different underneath, and
   the original trap was reached *somehow*. The patch now traces every player-initiated open during
   a PvP run, so the next occurrence says which it was.
-- **Still untested: the client's lock-in cancel.** Unchanged since it was written.
+- **The boss relic tier was a constant, not a draw** — see DESIGN §7b. `SharedRelicPool` holds two
+  Ancient relics, the character pools hold none, and `EventRelicPool` holds a hundred. Fixed, and
+  the candidate count per tier is now logged so the question can be answered from a log next time.
 
 **CLOSED 2026-08-17: the relic round is played and clean.** Read out of `host.20260817T203523.log`
 and its client, which ran a draft end to end: 15 cards drafted 7 each, then **8 relics 4 each**, then
