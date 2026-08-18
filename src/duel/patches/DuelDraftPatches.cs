@@ -147,7 +147,10 @@ public static class DuelDraftMirrorPatch
             DumpLobby(__instance._lobby, "PlayerConnected");
         }
 
-        MirrorHost(__instance, player);
+        if (__instance._lobby != null)
+        {
+            MirrorNow(__instance);
+        }
     }
 
     [HarmonyPostfix]
@@ -161,7 +164,14 @@ public static class DuelDraftMirrorPatch
             DumpLobby(__instance._lobby, "PlayerChanged");
         }
 
-        MirrorHost(__instance, player);
+        // **`MirrorNow`, not `MirrorHost(player)`.** The change that matters is not always the
+        // host's: when the client's own random resolved, the event was for the *local* player, so a
+        // per-player mirror returned early and never noticed the two had diverged. Re-asserting the
+        // whole thing on any change is one comparison and cannot miss.
+        if (__instance._lobby != null)
+        {
+            MirrorNow(__instance);
+        }
     }
 
     /// <summary>
@@ -298,16 +308,25 @@ public static class DuelDraftMirrorPatch
             return;
         }
 
-        // **Random is mirrored like any other pick, and that is deliberate.** A guard here used to
-        // skip it, on the theory that a placeholder resolves independently on each client and so
-        // copying it is the opposite of a mirror. That theory was wrong, and `DuelRandomCharacterPatch`
-        // already says why: `StartRunLobby.BeginRunLocally` resolves `RandomCharacter` from an `Rng`
-        // seeded off the **run seed**, so both clients land on the same character with nothing
-        // crossing the wire. Two players on Random are therefore already a mirror.
+        // **Never put the client on Random. Measured, after believing the opposite.**
         //
-        // Skipping it was also the visible bug: the host moved to Random and the client stayed on
-        // whatever it held, because nothing else was ever going to arrive — in a Custom lobby the
-        // resolution never travels as a `PlayerChanged` at all, since vanilla throws on one.
+        // `DuelRandomCharacterPatch` says `BeginRunLocally` resolves `RandomCharacter` from an `Rng`
+        // seeded off the run seed, so both peers would land on the same character. That reading was
+        // wrong, and the log settles it — one lobby, both peers on Random:
+        //
+        //     PlayerChanged 1    = IRONCLAD     (the host's random resolved)
+        //     PlayerChanged 1001 = SILENT       (the client's resolved, independently)
+        //
+        // Two players on Random are two *separate* rolls, which is the opposite of a mirror. So the
+        // client stays on whatever real character it holds while the host sits on Random, and takes
+        // the host's roll when it lands — the resolution arrives as an ordinary `PlayerChanged`
+        // carrying a real character, which this mirrors like any other.
+        if (player.character.Id.Entry == "RANDOM_CHARACTER")
+        {
+            Log.Info("[SpirePvp] draft lobby: host is on random — waiting for it to resolve, "
+                     + "because a second random roll is not a mirror");
+            return;
+        }
 
         if (lobby.LocalPlayer.character != null
             && lobby.LocalPlayer.character.Id.Equals(player.character.Id))
@@ -487,20 +506,26 @@ public static class DuelLobbyRemoteMarkerPatch
             .OfType<NCharacterSelectButton>()
             .ToList();
 
-        bool marked = buttons.Any(b => b.RemoteSelectedPlayers.Contains(player.id));
-        if (marked)
-        {
-            return;
-        }
+        NCharacterSelectButton? holder =
+            buttons.FirstOrDefault(b => b.RemoteSelectedPlayers.Contains(player.id));
 
         NCharacterSelectButton? match = buttons.FirstOrDefault(
             b => b._character != null && b._character.Id.Equals(player.character.Id));
 
+        // **Logged whether or not it did anything, and the previous version was not.** It returned
+        // silently when vanilla had already placed a marker, so a run producing zero lines was
+        // indistinguishable between "vanilla placed it every time" and "this never ran" — the exact
+        // ambiguity that has repeatedly been mistaken here for a patch that failed to apply. It
+        // produced zero lines, the icon was still missing, and that told us nothing.
         Log.Warn($"[SpirePvp] lobby telemetry: remote marker for {player.id} "
-                 + $"({player.character.Id.Entry}) was not placed by vanilla — "
-                 + $"{(match == null ? "and no button matches by id either" : "placing it by id")}. "
-                 + $"buttons: {string.Join(",", buttons.Select(b => b._character?.Id.Entry ?? "?"))}");
+                 + $"({player.character.Id.Entry}) — vanilla put it on "
+                 + $"{holder?._character?.Id.Entry ?? "NOTHING"}, id match is "
+                 + $"{match?._character?.Id.Entry ?? "NOTHING"}, buttons: "
+                 + $"{string.Join(",", buttons.Select(b => b._character?.Id.Entry ?? "?"))}");
 
-        match?.OnRemotePlayerSelected(player.id);
+        if (holder == null)
+        {
+            match?.OnRemotePlayerSelected(player.id);
+        }
     }
 }
