@@ -37,6 +37,12 @@ showed the portrait.
 
 Everything below landed on 2026-08-14 in one unsupervised batch.
 
+**2026-08-18 — the first Steam session with a second player.** Two Draft matches, both ended wrong,
+both diagnosed from the two logs and fixed (UNPLAYED). See "START HERE" under *Immediate next step*
+for the full read; the short version is that a mid-draft partition decided nothing and left the host
+resigning its own match, the duel's first checksum diverged on a single synchronizer counter, and
+the "whoever remains wins" rule turns out to award a symmetric partition to **both** players.
+
 **Confirmed in play 2026-08-17, later the same session:**
 
 - **The relic rarity split works.** One pool, read straight out of the log:
@@ -109,7 +115,7 @@ flags, console commands and gotchas below are OS-neutral unless marked.
 | **M5** race phase | **working, playtested 2026-08-05.** Two clients race the same seeded map independently — own combats, own rewards, advancing at their own pace — with mirrored RNG and a run-long clock |
 | **M6** full loop | **done, playtested through 2026-08-11.** Lobby modifiers → race → arena node → rendezvous → deck review → duel → result screen, with checksums live, split race/duel clocks and Neow intact. Plus resignation and agreed draws. Result-screen stats and badges reach the screen and compare correctly. The 2026-08-11 sweep closed the race phase's remaining rough edges — rest site, treasure chest, shop, map portraits, the loser's result screen and opponent summons. Remaining: rematch |
 | **M7** | **done, playtested 2026-08-11.** A **Duel** entry beside Standard/Daily/Custom opens a lobby retitled "Duel": Blitz/Rapid/No-clock presets, then the three real decisions as headed rows of chips, then the other custom-run modifiers behind a collapsed caret. Re-dresses `NCustomRunScreen` rather than replacing it |
-| **Disconnects** | **done, playtested 2026-08-12.** A dropped opponent no longer evaporates a match: whoever remains is shown "Opponent disconnected — the match is yours in 5…" and wins. Four routes, all tested — an announced quit, heartbeat silence, our own link dying, and a deliberate leave. Rejoining is a separate milestone and deliberately not built |
+| **Disconnects** | **reworked 2026-08-18 after the first Steam session, UNPLAYED.** A deliberate departure (quit / abandon / kick) is an outright win for whoever remains. An accidental one opens a **30s** window and is then decided on evidence both machines provably share — HP if it happened in the duel, a draw anywhere else — because **a partition is symmetric and "whoever remains wins" awards it to both players**. The four routes tested on 2026-08-12 were all ENet, where only one side ever drops; Steam produced the symmetric case on its first outing. Rejoining is a separate milestone and deliberately not built, but the window is now sized for it |
 | **Shipping** | **done.** `git clone && dotnet build` is a complete install — the `.pck` is committed, so no Godot is needed. README has a step-by-step for a non-technical Windows player. Debug builds stamp the git commit into the mod version, so the engine's mod-match gate enforces "same build" rather than us asking. Coexistence verified with a Workshop mod (RegentFX): patches clean on both clients and VFX rendering in a duel. **The `.pck` is committed, so no Godot is needed to build — only to re-export after changing something under `SpirePvp/`, and the exported pack must then be committed too** |
 | **Balance pass** | **deferred by design — do not start until the loop is fully playable** (every known bug closed and the UX / playability / netcode list drained). A dedicated *tuning and content* milestone, not a bug bucket: potion timing in turn-based, choice-on-obtain relics (BIIIG_HUG's kind), and what content to cut from a 1v1 vanilla never designed for. Parked so these decisions are made against a finished loop rather than a moving one — "make it playable first." Charter and running task list in `docs/BALANCE.md` |
 
@@ -883,7 +889,145 @@ Keep that split if you extend this.
 
 ## Immediate next step
 
-### START HERE — 2026-08-18: the draft is seeded (UNPLAYED)
+### START HERE — 2026-08-18: the first Steam session, read back from both logs
+
+Lucas and a friend played two Draft matches over Steam. **Both ended wrong, in two unrelated
+ways, and a third session had already shipped fixes for them before these logs were read
+independently.** This entry is that independent read. Both peers' logs were collected — Lucas
+hosting on Windows (`%APPDATA%\SlayTheSpire2\logs\godot.log`), the friend on a MacBook — and both
+are v0.111.0 at `92 patch classes applied cleanly (128 methods)`.
+
+**Read the filenames with suspicion.** Godot names a rotated log for the moment it was *archived*,
+not the session it holds, so `godot2026-08-18T10.29.08.log` was the most recent-looking file on
+Lucas's machine and holds a **v0.110.1 race session from before the draft existed**. The session
+that matters is plain `godot.log` on both machines. Two hours were nearly spent on the wrong file;
+check `release=` and the patch-count line before trusting any Steam log.
+
+#### The three events, in order, with what each actually was
+
+**1. The brief "disconnected, trying to reconnect" at the start of game 1 — not a disconnect, and
+invisible in both logs by design.** Lucas was on a black screen still loading; the friend's screen
+showed the curtain. Neither log records a single connection state change anywhere near it, and that
+is not evidence of nothing: `NMultiplayerTimeoutOverlay.UpdateLoop` raises and lowers itself purely
+from `ConnectionStats.LastReceivedTime` age and **logs nothing at all**. Its thresholds are in the
+decompile — `RemoteIsLoading ? 8000 : 3000` ms — so three seconds of host silence is enough. Lucas's
+`Preloading 'characters=NECROBINDER,NECROBINDER'` took **4,332ms** against the friend's **655ms**, so
+the host stalled past the threshold during run launch and the curtain came up, then came down on its
+own when packets resumed. Cosmetic, self-healing, and it never touched the match. The one real
+question it leaves: the 8s threshold applies only when the peer's heartbeat says it is loading, so
+the curtain appearing at all means `RemoteIsLoading` was false through part of that stall — worth a
+look if it gets annoying, but it is a polish item, not a fault.
+
+**2. The real drop, mid-draft in game 1 — a symmetric partition, and the mod's handling of it was
+wrong in three separate places.** At ~17:34:05, after 67–74ms pings at 0% loss on both sides all
+session, **both ends independently reported `ProblemDetectedLocally`**: the host `4001 Timeout;
+remote problem. Rx age server 13.5s relay 0.2s`, the client `5003 Connection dropped`. Neither was
+told the other had closed — and the transport does distinguish that, because game 2's divergence
+kick reached the client as `ClosedByPeer / 1105`. The cause is external to the mod; nothing in
+either log implicates it, and there is no code fix for a relay path dying.
+
+What the mod then did:
+- **Nothing decided the match.** `ShouldDecide` tested the phase, and a draft runs in phase
+  `Inactive`. Lucas was left on a frozen draft whose only exit was Give Up, which `DuelResign`
+  scored as *Lucas* resigning — a loss for the player whose opponent had vanished. Fixed in
+  `fdaa1fc` before these logs were read, and the diagnosis is right.
+- **The client got no result at all**, going straight to the main menu, for the same reason: with
+  `ShouldDecide` false, `DuelDisconnectPatch` did not hold the run open.
+- **And once `ShouldDecide` was widened, that same event awards the match to *both* of them** — see
+  below. That is the part the earlier fix did not reach.
+
+**3. Game 2 diverged on the duel's first checksum.** Confirmed independently by diffing the two
+109-line state dumps the host prints: **exactly one line differs**, `Choice IDs: 1` on the host
+against empty on the client, and the client's own dump says the same thing from the other side. The
+host had drafted BIIIG_HUG, whose on-obtain gathers a player choice, so its
+`PlayerChoiceSynchronizer` reserved id 0 while the client's never moved. `4877ff1` is the right fix
+and lands in the right place — after `ExitCurrentRooms`, before `StartSync`, on quiesced state — and
+`FastForwardChoiceIds(Repeat(0u, playerCount))` corrects both the value and the list *length*
+(`[1]` against `[]`). `ClearStaleReceivedChoices` covers the `PlayerChoiceMessage` the host's
+`SyncLocalChoice` broadcast to the client. **Keep it as it stands.** The desync handling around it
+worked perfectly: both peers declared the same void draw and both reached the same result screen.
+
+#### Checked and *not* bugs, so nobody re-opens them
+
+- **`Received message of type SpirePvp.Net.DraftStateMessage, but no message handlers are
+  registered!`** on the client in game 2 is alarming and is the retry working. The host's
+  `no ack yet — repeating the pool` follows it and the ack lands. It happened in game 2 and not
+  game 1 because the two machines swapped which one was slower to launch.
+- **`duel layout: moved 2 … 1 stayed` on the client against `moved 2 … 2 stayed` on the host** is
+  the exact pattern quoted in `DuelLateSummonLayoutPatch`'s own doc comment. The two peers reached
+  duel activation with different summons alive; both state dumps show all four creatures agreeing.
+
+#### FIXED 2026-08-18, UNPLAYED: an accidental disconnect is decided on evidence
+
+**The old rule — whoever is still here wins — hands a symmetric partition to both players.** It was
+already documented as a known limitation on `DuelDisconnect.Declare`, dismissed as "not a case
+anyone shares a screen for". Both halves of that estimate were wrong: a partition is symmetric by
+nature, so it is the **only** kind of disconnect Steam produced, where every local ENet test killed
+one process and the dead side saw nothing; and these two play on a shared call.
+
+So `DuelDisconnect.DecideAfterSilence` now asks the question `DuelEndReason.Desync` already
+isolated — *can both sides reach the same answer without talking?*
+
+| Where the drop happens | Decided by | Why it agrees |
+|---|---|---|
+| In the duel | **HP at the drop**, higher wins | One coupled combat with checksums live, so both machines hold identical HP by construction — that is what a checksum asserts |
+| In a race | **Draw** | The runs are decoupled; `RaceProgressMessage` refreshes periodically, so each side holds a *different* snapshot of the other's HP |
+| In a draft | **Draw** | Nobody has taken damage |
+| Level on HP | **Draw** | No winner to name |
+
+Deliberate departures — `Quit`, `HostAbandoned`, `Kicked` — are unchanged and still award the win
+outright, because only one side ever sees one. That test is now the single `DuelDisconnect.
+IsDeliberate` predicate rather than an inline list repeated at each site.
+
+**Second gap, found while fixing the first: the host had never once seen the countdown in a Steam
+match.** ENet reports no drop, so on the dev rig a host always arrives through heartbeat silence —
+which runs the window. Steam *does* report it, so the host took `RemotePlayerDisconnected` instead
+and decided instantly. It now opens the same wait (`NotePeerLinkGone`), timed from a stamp because
+the peer's `ConnectionStats` are disposed with the link.
+
+**`ForfeitWindowMs` is back to 25s, so the whole wait is 30s** (5s of silence, then the countdown).
+Requested by Lucas 2026-08-18. The cut to 5s on 2026-08-12 was correctly argued *while rejoining was
+never going to exist*; with native reconnect now planned, a five-second window is one no returning
+player could ever beat, so it would have to be undone anyway and every match in between is played
+under a rule already known to be changing.
+
+**Two new quote sets, and the reason is a trap this file should keep.** A drawn disconnect fell
+through to `drawRaceExpired` — *"Time ran out before either of you reached the arena"* — which is
+the precise false claim the comment directly above that switch warns about, arriving as the third
+draw reason within days of the warning being written. A *loss* by disconnect fell through to
+`lostHp`, *"Your opponent won the duel"*, about a duel that never finished. `drawDisconnect` and
+`lostDisconnect` now exist. **They are new loc keys, so the `.pck` needs a re-export** — `host.ps1`
+does it automatically; until then the screen shows the honest fallback sentence and the log says
+`drawDisconnect fallback — no loc entries, so the .pck is stale`, which is the designed degradation.
+
+#### NOT BUILT, and Lucas asked for it: the "wait longer" button
+
+Asked for 2026-08-18 as *"the same dc handling that we had built in the act 1 race format, with the
+about 30 second timeout and the button to extend it"*. **The 30 seconds existed and is restored; the
+button never shipped.** It is described in `DuelDisconnect`'s own doc comment as part of the design
+that was reconsidered on 2026-08-12, and `git log -S` finds no implementation of it at any commit —
+so the memory is of the design, not of code that regressed.
+
+The surface is the whole of the work, and it is a real decision rather than a detail:
+
+- `NMultiplayerTimeoutOverlay` is the current curtain and was chosen **because** there is nothing to
+  click — it is full-screen, non-interactive, already familiar to players, and a permanent node on
+  `NGame` so there is nothing to build or free. Its scene holds `%Icon`, `%Title` and `%Description`
+  and no button.
+- `NGenericPopup` is the mod's existing interactive surface (`DuelDrawPrompt` uses it in-match and it
+  works), but it was abandoned here for a reason that still holds: **the overlay draws on top of
+  `NModalContainer`**, and vanilla drives that overlay itself on a client from its own 3s test, so it
+  will cover our popup whether or not we raise it.
+
+**Recommended: instantiate a vanilla button as a child of the overlay** rather than fight the draw
+order. `DuelHostMenuPatch` already establishes the pattern for cloning a vanilla button and rewiring
+`NClickableControl.Released`, so this ships no assets and needs no `.pck` change. The alternative —
+suppressing vanilla's overlay and driving a popup with a live-updating countdown body — is more code
+and more patches for the same result. **Do not half-build it**: `docs/DRAFT_LOBBY.md` records what
+three partial attempts at one control cost, and a 30s window with no button is strictly better than
+the 5s window it replaced, so there is no pressure to rush this one.
+
+### 2026-08-18: the draft is seeded (UNPLAYED)
 
 **Reported by Lucas mid-playtest: the same seed with the same character gave different card and
 relic rewards.** The invariant he asked for is the right one and is now the stated rule —

@@ -44,11 +44,17 @@ committed, so no Godot needed), README has a step-by-step for a non-technical Wi
 and the mod version carries the git commit so the engine's own mod-match gate enforces
 "both on the same build". Verified coexisting with a Workshop mod (RegentFX).
 
-**Disconnects are handled (2026-08-12):** a dropped opponent no longer leaves a match with no
-result — whoever remains gets a five-second notice and the win. Note the finding underneath it,
-because it bites anything that waits on a peer: **ENet never reports a hard drop**
-(`ENetHost.Update` answers the transport's own `Disconnect` event with a bare `continue`), so
-absence has to be *measured* via `ConnectionStats.LastReceivedTime` rather than waited for.
+**Disconnects are handled (2026-08-12, reworked 2026-08-18):** a dropped opponent no longer leaves
+a match with no result. A **deliberate** departure (quit, abandon, kick) is an outright win for
+whoever remains. An **accidental** one — a timeout or a network error — opens a 30s window and is
+then decided on what both machines can be *proven* to still agree on: HP if the drop happened in the
+duel, a draw anywhere else. **A partition is symmetric, so "whoever remains wins" awards it to both
+players**, which is what the first real Steam session actually produced. Two findings underneath it,
+both of which bite anything that waits on a peer: **ENet never reports a hard drop**
+(`ENetHost.Update` answers the transport's own `Disconnect` event with a bare `continue`), so absence
+has to be *measured* via `ConnectionStats.LastReceivedTime` rather than waited for — and **Steam
+does**, which is a different code path that had never run, and on which the host used to skip the
+countdown entirely.
 
 **Rematch is done and playtested (2026-08-12).** A Rematch button on the result screen replays the
 same seed without passing through the main menu — the transport is held open through run teardown,
