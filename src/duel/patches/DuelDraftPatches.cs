@@ -204,6 +204,8 @@ public static class DuelDraftMirrorPatch
 
         DumpLobby(lobby, "modifiers refresh");
 
+        ResolvePendingRandom(screen, lobby);
+
         foreach (StartRunLobbyPlayer player in lobby.Players)
         {
             if (player.id != lobby.LocalPlayer.id)
@@ -211,6 +213,65 @@ public static class DuelDraftMirrorPatch
                 MirrorHost(screen, player);
             }
         }
+    }
+
+    /// <summary>
+    /// Rolls a Random the host chose *before* the format was set to Draft.
+    ///
+    /// **This broke a match on 2026-08-17 and the log has the whole sequence:**
+    ///
+    ///     PlayerChanged 1 = RANDOM_CHARACTER          (draft=False — the format was still Race)
+    ///     draft=True at modifiers refresh             (Draft ticked, Random already sitting there)
+    ///     host is on random — waiting for it to resolve
+    ///     PlayerChanged 1 = SILENT                    (vanilla resolves it AT RUN START)
+    ///     mirroring the host — taking SILENT          (a beat too late)
+    ///     run seeded with 1(me)=SILENT, 1001=IRONCLAD
+    ///     draft: refusing to start — SILENT and IRONCLAD
+    ///
+    /// `DuelDraftRandomClickPatch` rolls at the click, which is right and is not enough: it only
+    /// fires while a draft lobby is *already* active, so Random chosen first and Draft ticked second
+    /// leaves a live `RANDOM_CHARACTER` in the lobby. That resolves inside `BeginRunLocally`, and the
+    /// client's mirror then lands after `run already starting`, which is the exact timing this whole
+    /// area exists to avoid.
+    ///
+    /// **Same family as the rule this project already had, arriving from the other direction:** a
+    /// message that only fires on *change* cannot carry initial state, so the arrival has to be
+    /// hooked too. Here it is a *click* that cannot carry a later format change, so the format
+    /// change has to re-ask. Whichever of the two facts lands last must trigger the work.
+    ///
+    /// Host only. A client is never allowed to be on Random in a draft — see `MirrorHost`, where two
+    /// peers on Random is two separate rolls rather than a mirror.
+    ///
+    /// Deferred, and re-checked inside the deferral, for the reason documented on the mirror itself:
+    /// `SelectCharacter` sends `LobbyPlayerChangedCharacterMessage`, and a send made from inside the
+    /// handling of a lobby message does not survive. Re-checking rather than latching a flag keeps
+    /// repeated refreshes from queueing a second roll.
+    /// </summary>
+    private static void ResolvePendingRandom(NCustomRunScreen screen, StartRunLobby lobby)
+    {
+        if (!DraftLobbyActive
+            || lobby.NetService.Type == NetGameType.Client
+            || lobby.LocalPlayer.character?.Id.Entry != "RANDOM_CHARACTER")
+        {
+            return;
+        }
+
+        Log.Warn("[SpirePvp] draft lobby: the lobby is holding Random and Draft is ticked — rolling "
+                 + "it now, because a draft cannot use the run-start resolution");
+
+        Callable.From(() =>
+        {
+            StartRunLobby? now = screen._lobby;
+            if (now == null
+                || !DraftLobbyActive
+                || now.NetService.Type == NetGameType.Client
+                || now.LocalPlayer.character?.Id.Entry != "RANDOM_CHARACTER")
+            {
+                return;
+            }
+
+            DuelDraftRandomRollPatch.RollAndSelect(screen);
+        }).CallDeferred();
     }
 
     /// <summary>

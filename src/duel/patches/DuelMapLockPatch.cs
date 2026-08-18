@@ -30,14 +30,24 @@ namespace SpirePvp.Duel.Patches;
 ///   a map here at all: the arena is entered by `DuelArena`, not by travelling to a map point, and
 ///   anything that did reopen it would hide the duel the same way it hid the review.
 ///
-/// - **A draft before that — refuse only the top bar.** A draft run *does* open the map legitimately
-///   at run start: with `StartedWithNeow` cleared the run enters a plain `NMapRoom`, which calls
-///   `Open()`, and `DuelDraft.EnsureScreen` closes it a tick later so the draft overlay can show.
-///   That dance works today, and blocking it would be a change to the one path in this mode that is
-///   playtested. The press that traps you is the one to stop, not the run's own start-up.
+/// - **A draft run — refuse every open, including the run's own start-up.** With `StartedWithNeow`
+///   cleared the run enters a plain `NMapRoom`, whose `_Ready` calls `Open()`; the draft used to
+///   ride over that and `DuelDraft.EnsureScreen` closed the map a tick later. Asked for 2026-08-17:
+///   *"ideally the game just loads straight into the empty rest site background we have and then the
+///   draft overlay comes down over it."* Refusing the open is how that happens — a map that never
+///   opens needs no closing, and `NOverlayStack.ShowOverlays` gates on `IsOpen`, which now simply
+///   stays false.
 ///
-/// `isOpenedFromTopBar` is exactly that distinction and is vanilla's own: `NTopBarMapButton` is the
-/// only caller in the game that passes `true`, and every room passes `false`.
+/// **Checked rather than assumed, because this changes the one path in draft mode that is
+/// playtested.** `NMapRoom._Ready` uses the return value for exactly one call,
+/// `SetTravelEnabled(true)`, which sets a flag on a screen nobody is looking at; the two lines
+/// around it — disabling the top bar's map button and adding the act banner — do not touch it. So
+/// the refusal is inert beyond not drawing a map. `ReopenMap`, on capstone close, is refused the
+/// same way and for the same reason.
+///
+/// `isOpenedFromTopBar` is still read, but now only for the trace: it is vanilla's own way of
+/// saying a *player* asked. `NTopBarMapButton` is the only caller in the game that passes `true`,
+/// and every room passes `false`.
 ///
 /// Everything else — normal play, the race phase, a run with no duel in it — passes straight
 /// through, so the mod stays inert where Lucas's invariant requires it.
@@ -65,7 +75,7 @@ public static class DuelMapLockPatch
                      + $"draft={draft} alreadyOpen={__instance.IsOpen})");
         }
 
-        if (!duel && !(draft && isOpenedFromTopBar))
+        if (!duel && !draft)
         {
             return true;
         }

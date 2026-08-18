@@ -135,6 +135,30 @@ Implemented and believed correct:
 roll excludes the incumbent so a repeat press always changes the character. The three reverted
 concealment attempts are in the git history around `ef2a14d`..`ccc9f53` if the reasoning is wanted.
 
+### R1 regression found and fixed 2026-08-17: Random chosen *before* the format was ticked
+
+**This one broke a match, and it is not the parked cosmetic issue.** Picking Random and *then*
+ticking Draft left a live `RANDOM_CHARACTER` in the lobby: the roll-at-click only fires while a
+draft lobby is already active, so nothing resolved it, and vanilla resolved it inside
+`BeginRunLocally` — after which the client's mirror lands too late and the run seeds mismatched.
+
+    PlayerChanged 1 = RANDOM_CHARACTER          (draft=False — format still Race)
+    draft=True at modifiers refresh
+    host is on random — waiting for it to resolve
+    PlayerChanged 1 = SILENT                    (resolved at run start)
+    mirroring the host — taking SILENT          (too late)
+    run seeded with 1(me)=SILENT, 1001=IRONCLAD
+    draft: refusing to start — SILENT and IRONCLAD
+
+`MirrorNow.ResolvePendingRandom` rolls it when the format arrives. **The general rule, arriving from
+a new direction:** this project already knew that *a message which fires only on change cannot carry
+initial state, so hook the arrival too.* The mirror image is that a **click cannot carry a later
+format change**, so the format change has to re-ask. Whichever of the two facts lands last has to
+trigger the work — which is the same sentence, and is now the fifth bug in this family.
+
+**Test (add to R1):** pick Random *first*, then tick Draft, then start. Both peers seed with the same
+character and the draft opens.
+
 ### PARKED 2026-08-17, after three attempts — do not take a fourth without reading this
 
 **Current behaviour: every Random click rolls a new character and both players follow it. What does
