@@ -622,23 +622,18 @@ public static class DuelDraftRandomRollPatch
         // properly — it needs the *lobby* to genuinely hold Random on both peers, with the real
         // character decided at run creation, rather than a display layer over a resolved value.
 
-        // **`Select()`, not `SelectCharacter()` — and the difference is the whole of the second
-        // report.** `_isSelected = true` is set in exactly one place, `Select`, and it is what
-        // every visual on the button reads: the pulsing outline in `_Process`, the saturation in
-        // `RefreshState`, the gold player icon in `RefreshPlayerIcons`. `SelectCharacter` only
-        // assigns `_selectedButton` and *deselects everyone else*, so calling it directly left the
-        // screen with no locally selected button at all.
+        // **`SelectCharacter`, not `rolled.Select()`, and this was measured rather than reasoned.**
+        // Calling `Select()` is the tidier-looking choice — it is vanilla's own path, and it is the
+        // only place `_isSelected = true` is set, which is what the pulsing outline and the button
+        // saturation read. It was tried on 2026-08-17 and **made the control worse**: repeat clicks
+        // went from six rolls in six presses to one roll from several, so something downstream of a
+        // real `Select()` stops the next click reaching this patch at all.
         //
-        // The lobby record was right the whole time and the log proves it — six rolls, six
-        // `PlayerChanged`, the client mirroring each one. Only the host's own screen never showed
-        // it, which reads as a dead button, which is why the report was "unclickable after the
-        // first time" both before and after the click gate was fixed.
-        //
-        // The rule this keeps re-teaching: **when vanilla has a real path, call it rather than
-        // approximating it.** `RunState.CreateCard` and `EnterMapPointInternal` are the same
-        // mistake, and each was found the same way — a hand-rolled version of a real method,
-        // inheriting every omission silently.
-        rolled.Select();
+        // What is left is the version with the better measurement. Every Random click rolls, the
+        // lobby record changes, and both players' icons follow it — only the button's own
+        // highlight does not move. See `docs/DRAFT_LOBBY.md`: this control has now had three
+        // attempts and is deliberately parked rather than given a fourth.
+        screen.SelectCharacter(rolled, rolled._character);
     }
 }
 

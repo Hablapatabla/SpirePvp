@@ -135,6 +135,37 @@ Implemented and believed correct:
 roll excludes the incumbent so a repeat press always changes the character. The three reverted
 concealment attempts are in the git history around `ef2a14d`..`ccc9f53` if the reasoning is wanted.
 
+### PARKED 2026-08-17, after three attempts — do not take a fourth without reading this
+
+**Current behaviour: every Random click rolls a new character and both players follow it. What does
+not move is the Random-adjacent button's own highlight**, so the control reads as unresponsive even
+though the lobby record is correct on both peers every time. Lucas: *"if this is a massive yak shave
+let's just abandon it because it at least works currently."* Taken.
+
+**What is actually known, from logs rather than from reading the decompile:**
+
+| Build | Repeat clicks | Highlight |
+|---|---|---|
+| Roll from a prefix on `NCustomRunScreen.SelectCharacter` | 1 roll, then dead until another character is clicked | does not move |
+| Same, plus taking the click at `NCharacterSelectButton.Select` | **6 rolls in 6 presses** | does not move |
+| Same, but rolling via `rolled.Select()` instead of `SelectCharacter` | **1 roll from several presses — worse** | still reported as nothing visible |
+
+The third row is the surprising one and it is the reason this is parked rather than continued.
+`Select()` is the *more* correct call — it is vanilla's own path and the only place `_isSelected` is
+set, which is what the pulsing outline, the saturation and the gold icon all read — and using it
+made repeat clicks stop working. So something downstream of a genuine `Select()` prevents the next
+click from reaching the patch, and nobody has observed what.
+
+**The narrow unanswered question, for whoever picks this up:** *is `NCharacterSelectButton.Select`
+called at all on the second click?* One log line at the top of the click patch, unconditional and
+before every guard, answers it and rules out half the search space. Every attempt so far has instead
+changed what happens *after* the click, which is why three fixes produced three different failures
+and no understanding. Do not add a fourth fix without that line.
+
+The shipped version is row two: the one with the best measurement.
+
+---
+
 **And then a third fix, because the click gate was only half of it.** With the click taken at the
 button, the log showed six rolls, six `PlayerChanged`, and the client mirroring every one — while
 Lucas reported the button still doing nothing. Both were true. `_isSelected = true` is set in exactly
