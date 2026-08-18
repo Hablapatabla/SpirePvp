@@ -934,12 +934,12 @@ second match on **the same seed and the same character** and compare. Watch for:
 | A *different* seed still varies | Change one character of the seed; all three lines should change |
 | Patch count | `92 patch classes applied cleanly (128 methods)` — this change adds no patch class |
 
-**One decision is deliberately left open, and it needs Lucas.** A rematch relaunches on the same
-seed, so a redrafted rematch now offers the **identical pool** and gives first pick to the **same
-seat**. The pool repeating is the point — both players have already seen it, which is the same
-argument DESIGN §5b made for replaying the same map. First pick repeating is a fairness coin flip,
-not content, and strict alternation across rematches would be a rematch counter mixed into the
-`first_picker` stream. Left unchanged rather than half-changed. See DESIGN §7b.
+**The one open question was asked and DECIDED the same day.** A rematch relaunches on the same
+seed, so a redrafted rematch offers the **identical pool** and gives first pick to the **same
+seat**. Lucas: *"same seed, same characters, just clicking rematch? first pick should be the same.
+should just be the default. a rematch should be a rematch."* Both halves are intended and shipped —
+**do not add a rematch counter to the `first_picker` stream.** Changing the seed is how you get a
+different draft. See DESIGN §7b.
 
 ### FIXED: the energy display, both halves (2026-08-13, UNPLAYED)
 

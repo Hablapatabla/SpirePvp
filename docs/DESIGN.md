@@ -938,13 +938,14 @@ the host builds the pool and sends it — but "same seed, same run" holds across
 the unlock states match. Worth knowing before a Steam session; `unlock all` on both dev profiles is
 already the standing advice for a different reason.
 
-**What this changes about Rematch, deliberately and worth a decision.** A rematch relaunches on the
-same seed (§5b), so a redrafted match now offers the **identical pool** and gives first pick to the
-**same seat**. The pool repeating is the point — both players have already seen it, exactly the
-argument §5b made for replaying the same map. First pick repeating is less obviously right, since
-it is a fairness coin flip rather than content: strict alternation across rematches would be a
-rematch counter mixed into the `first_picker` stream. **Left as-is pending a call**, rather than
-half-changed.
+**What this changes about Rematch — asked and DECIDED 2026-08-18 (Lucas).** A rematch relaunches
+on the same seed (§5b), so a redrafted match offers the **identical pool** and gives first pick to
+the **same seat**. Both are intended: *"same seed, same characters, just clicking rematch? first
+pick should be the same. should just be the default. a rematch should be a rematch."* The pool
+repeating was never in doubt — both players have already seen it, exactly the argument §5b made for
+replaying the same map — and first pick follows the same rule rather than being carved out as a
+special case. **So no rematch counter is mixed into the `first_picker` stream, and none should be
+added.** A player who wants a different draft changes the seed, which is what the seed is for.
 
 ### What is left
 
