@@ -283,7 +283,7 @@ public static class RaceCoordinator
         run.ActionQueueSynchronizer.FastForwardHookId(0);
 
         Log.Warn($"[SpirePvp] duel: reset {playerCount} choice / {rewardStateCount} reward / action / hook " +
-                 "counters — the race diverged them and the state sync does not cover them");
+                 "counters — the race or draft diverged them and the state sync does not cover them");
     }
 
     /// <summary>
