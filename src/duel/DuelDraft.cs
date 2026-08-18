@@ -119,6 +119,21 @@ public static class DuelDraft
     private static int _appliedPicks;
 
     /// <summary>
+    /// The round <see cref="_appliedPicks"/> counts against.
+    ///
+    /// **Without this the client applied nothing after the first round.** `_appliedPicks` was reset
+    /// in `AdvanceStage`, which runs on the **host only** — the client learns a round ended from a
+    /// message, so its counter kept the cards round's value of 7 into a 5-pick relic round and
+    /// `while (_appliedPicks &lt; mine.Count)` never ran once. Measured 2026-08-14: the host obtained
+    /// five relics, the client obtained none, and the next checksum diverged.
+    ///
+    /// The general shape is one this project keeps meeting: **a reset that only the host performs
+    /// is not a reset.** Anything the peers must agree on has to be derived from the state they
+    /// share, which here is the stage carried on every broadcast.
+    /// </summary>
+    private static Stage _appliedStage = Stage.Cards;
+
+    /// <summary>
     /// How long the host waits before repeating an unacknowledged draft state.
     ///
     /// Long enough not to spam a link that is merely slow, short enough that a client which armed
@@ -176,6 +191,7 @@ public static class DuelDraft
         _complete = false;
         _screenDirty = false;
         _appliedPicks = 0;
+        _appliedStage = Stage.Cards;
         _awaitingAck = false;
         AutoPick = false;
         CloseBackdrop();
@@ -798,7 +814,6 @@ public static class DuelDraft
         _pickerId = _firstPickerId;
         _hostPicks.Clear();
         _clientPicks.Clear();
-        _appliedPicks = 0;
 
         if (_stage == Stage.Cards && runState != null && me != null)
         {
@@ -992,6 +1007,20 @@ public static class DuelDraft
 
         ShowBackdrop();
         _relicScreen = NChooseARelicSelection.ShowScreen(remaining);
+
+        // **The relic screen had no turn indicator at all**, which is worse here than on the card
+        // grid: the relics do not grey out on the opponent's turn, so the only feedback was clicks
+        // doing nothing. Vanilla's banner is the one piece of text on the screen, and it says
+        // "Choose a relic" — true for a boss reward, and a lie for half of a draft.
+        if (_relicScreen != null && _relicScreen._banner?.label != null)
+        {
+            _relicScreen._banner.label.SetTextAutoSize(
+                LocalMayPick
+                    ? Text("SPIREPVP_DRAFT.yourTurn", "Your pick")
+                    : Text("SPIREPVP_DRAFT.theirTurn", "Opponent is picking"));
+            _relicScreen._banner.label.Modulate = LocalMayPick ? StsColors.green : StsColors.red;
+        }
+
         Log.Info($"[SpirePvp] draft [relics]: {remaining.Count} left, "
                  + $"{(LocalMayPick ? "your pick" : "waiting on " + _pickerId)}");
     }
@@ -1088,11 +1117,22 @@ public static class DuelDraft
         {
             // The status line rather than the title, because the title is fixed at construction and
             // the whole point of building the screen once is that it is never reconstructed.
+            //
+            // **Coloured, because the words are read second.** Asked for 2026-08-14: green when it
+            // is your pick, red when it is not. A player glancing back at the screen wants to know
+            // whether to act before they have read anything, and the pool looks identical either
+            // way — the turn is the only thing that changes and it was carried by text alone.
             _screen._infoLabel.Text = _complete
                 ? Text("SPIREPVP_DRAFT.done", "Draft complete - waiting for the arena")
                 : LocalMayPick
                     ? Text("SPIREPVP_DRAFT.yourTurn", "Your pick")
                     : Text("SPIREPVP_DRAFT.theirTurn", "Opponent is picking");
+
+            _screen._infoLabel.Modulate = _complete
+                ? Colors.White
+                : LocalMayPick
+                    ? StsColors.green
+                    : StsColors.red;
         }
     }
 
@@ -1290,6 +1330,14 @@ public static class DuelDraft
         if (me == null)
         {
             return;
+        }
+
+        // Derived from the shared stage rather than reset by whoever advances it, so the host and
+        // the client agree without either telling the other.
+        if (_appliedStage != _stage)
+        {
+            _appliedStage = _stage;
+            _appliedPicks = 0;
         }
 
         List<int> mine = LocalId() == HostId() ? _hostPicks : _clientPicks;
