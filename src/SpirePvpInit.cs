@@ -51,6 +51,7 @@ public static class SpirePvpInit
         Harmony harmony = new Harmony(Id);
         int applied = 0;
         int failed = 0;
+        int silent = 0;
 
         foreach (Type type in Assembly.GetExecutingAssembly().GetTypes())
         {
@@ -61,6 +62,19 @@ public static class SpirePvpInit
                 {
                     applied++;
                 }
+                else if (type.GetCustomAttributes(typeof(HarmonyPatch), inherit: false).Length > 0)
+                {
+                    // **A patch class that binds nothing and throws nothing.** Added 2026-08-17,
+                    // after two classes were added in one build and the count went up by one: the
+                    // failure was invisible because `Patch()` returning empty is not an exception,
+                    // so the log said "applied cleanly" while naming no name. Counting is not
+                    // enough — a count that disagrees with what you just wrote leaves you guessing
+                    // which half is missing, which is exactly the state this whole file exists to
+                    // prevent.
+                    silent++;
+                    Log.Error($"[{Id}] PATCH BOUND NOTHING for {type.Name}: the class carries a "
+                              + "[HarmonyPatch] attribute but no method was patched.");
+                }
             }
             catch (Exception e)
             {
@@ -69,11 +83,16 @@ public static class SpirePvpInit
             }
         }
 
+        // **Deliberately not gated on `silent`.** A class that binds nothing is a real hole and is
+        // logged as an error by name, but locking the Duel menu over one is a bigger surprise than
+        // the hole — the first such class found this way was a cosmetic map guard. Name it, read
+        // the log, then decide. Revisit if one ever turns out to matter to a result.
         PatchesHealthy = failed == 0;
 
-        if (failed > 0)
+        if (failed > 0 || silent > 0)
         {
-            Log.Error($"[{Id}] {applied} patch classes applied, {failed} FAILED — duelling is " +
+            Log.Error($"[{Id}] {applied} patch classes applied, {failed} FAILED, {silent} bound " +
+                      "nothing — duelling is " +
                       "disabled. Normal runs are unaffected; this mod is inert outside a PvP " +
                       "match. If the game has just updated, rebuild the mod: patch targets bind " +
                       "at compile time, so a rebuild will name anything that moved.");

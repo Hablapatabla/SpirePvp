@@ -558,12 +558,11 @@ public static class DuelLobbyRemoteMarkerPatch
 [HarmonyPatch(typeof(NCustomRunScreen), nameof(NCustomRunScreen.SelectCharacter))]
 public static class DuelDraftRandomRollPatch
 {
-    private static bool _rolling;
-
     public static bool Prefix(NCustomRunScreen __instance, CharacterModel characterModel)
     {
-        if (_rolling
-            || characterModel == null
+        // No re-entry guard is needed: the roll goes out through `NCharacterSelectButton.Select`
+        // with a real character, so this prefix never sees `RANDOM_CHARACTER` twice.
+        if (characterModel == null
             || characterModel.Id.Entry != "RANDOM_CHARACTER"
             || !DuelDraftMirrorPatch.DraftLobbyActive)
         {
@@ -622,15 +621,24 @@ public static class DuelDraftRandomRollPatch
         // `docs/DRAFT_LOBBY.md` has the requirements and the design that makes concealment work
         // properly — it needs the *lobby* to genuinely hold Random on both peers, with the real
         // character decided at run creation, rather than a display layer over a resolved value.
-        _rolling = true;
-        try
-        {
-            screen.SelectCharacter(rolled, rolled._character);
-        }
-        finally
-        {
-            _rolling = false;
-        }
+
+        // **`Select()`, not `SelectCharacter()` — and the difference is the whole of the second
+        // report.** `_isSelected = true` is set in exactly one place, `Select`, and it is what
+        // every visual on the button reads: the pulsing outline in `_Process`, the saturation in
+        // `RefreshState`, the gold player icon in `RefreshPlayerIcons`. `SelectCharacter` only
+        // assigns `_selectedButton` and *deselects everyone else*, so calling it directly left the
+        // screen with no locally selected button at all.
+        //
+        // The lobby record was right the whole time and the log proves it — six rolls, six
+        // `PlayerChanged`, the client mirroring each one. Only the host's own screen never showed
+        // it, which reads as a dead button, which is why the report was "unclickable after the
+        // first time" both before and after the click gate was fixed.
+        //
+        // The rule this keeps re-teaching: **when vanilla has a real path, call it rather than
+        // approximating it.** `RunState.CreateCard` and `EnterMapPointInternal` are the same
+        // mistake, and each was found the same way — a hand-rolled version of a real method,
+        // inheriting every omission silently.
+        rolled.Select();
     }
 }
 

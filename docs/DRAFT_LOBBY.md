@@ -135,6 +135,20 @@ Implemented and believed correct:
 roll excludes the incumbent so a repeat press always changes the character. The three reverted
 concealment attempts are in the git history around `ef2a14d`..`ccc9f53` if the reasoning is wanted.
 
+**And then a third fix, because the click gate was only half of it.** With the click taken at the
+button, the log showed six rolls, six `PlayerChanged`, and the client mirroring every one — while
+Lucas reported the button still doing nothing. Both were true. `_isSelected = true` is set in exactly
+one place, `NCharacterSelectButton.Select`, and it is what every visual on the button reads: the
+pulsing outline in `_Process`, the saturation in `RefreshState`, the gold player icon in
+`RefreshPlayerIcons`. The roll was calling `NCustomRunScreen.SelectCharacter` directly, which only
+assigns `_selectedButton` and *deselects everyone else* — so the lobby record moved and no button on
+the host's own screen ever lit up. It read as a dead button, which is why the report did not change
+shape when the gate was fixed. The roll now calls `rolled.Select()`, vanilla's own path.
+
+**Two fixes, one report, and the second was invisible to the log** — the log could only show that the
+record was correct, which it was throughout. Worth remembering next to this project's standing rule
+about reading logs: a log settles what the *state* is, not what the screen is showing.
+
 **The re-roll needed a second patch, and the log named the level.** A second Random click produced
 *no log line at all* — `DuelDraftRandomRollPatch` never ran, because
 `NCharacterSelectButton.Select` opens with `if (!_isSelected)` and swallowed the click one level
