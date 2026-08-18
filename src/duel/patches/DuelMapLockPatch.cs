@@ -53,6 +53,18 @@ public static class DuelMapLockPatch
         bool duel = DuelSession.IsDuelActive;
         bool draft = DuelDraft.IsDraftRun;
 
+        // **Traced whether or not it is refused, and that is the point.** Tested 2026-08-17: the
+        // map button did nothing during the deck review and this patch logged nothing either, so
+        // all that was observed is a button that happened to be inert — `OnRelease` never reached
+        // `Open`. That is not the same as the trap being closed, and the difference is invisible
+        // without a line here. Player-initiated opens only, so a race's room-by-room map opens stay
+        // out of the log.
+        if (isOpenedFromTopBar && DuelSession.Phase != DuelPhase.Inactive)
+        {
+            Log.Info($"[SpirePvp] map: top-bar open reached NMapScreen.Open (duel={duel} "
+                     + $"draft={draft} alreadyOpen={__instance.IsOpen})");
+        }
+
         if (!duel && !(draft && isOpenedFromTopBar))
         {
             return true;

@@ -35,6 +35,20 @@ showed the portrait.
 
 Everything below landed on 2026-08-14 in one unsupervised batch.
 
+**Confirmed in play 2026-08-17, later the same session:**
+
+- **The relic rarity split works.** One pool, read straight out of the log:
+  `RUINED_HELMET(Rare), STONE_CRACKER(Uncommon), LOOMING_FRUIT(Ancient), WAR_PAINT(Common),
+  VERY_HOT_COCOA(Ancient), CHARONS_ASHES(Rare), ORICHALCUM(Uncommon), BAG_OF_MARBLES(Common)` —
+  2/2/2/2, drafted 4 each, no divergence, into the arena.
+- **The map guard is NOT confirmed, despite the button doing nothing.** `DuelMapLockPatch` logged
+  nothing at all during the deck review, so `NTopBarMapButton.OnRelease` never reached
+  `NMapScreen.Open` — the button was simply inert that time. A button that does nothing and a guard
+  that refuses it are indistinguishable from the outside and completely different underneath, and
+  the original trap was reached *somehow*. The patch now traces every player-initiated open during
+  a PvP run, so the next occurrence says which it was.
+- **Still untested: the client's lock-in cancel.** Unchanged since it was written.
+
 **CLOSED 2026-08-17: the relic round is played and clean.** Read out of `host.20260817T203523.log`
 and its client, which ran a draft end to end: 15 cards drafted 7 each, then **8 relics 4 each**, then
 the arena. All eight picks appear on both peers in the same order, each peer logs `obtained` for its
