@@ -441,6 +441,29 @@ public static class DuelDraft
             List<RelicModel> available = drafter.Character.RelicPool
                 .GetUnlockedRelics(runState.UnlockState)
                 .Concat(ModelDb.RelicPool<SharedRelicPool>().GetUnlockedRelics(runState.UnlockState))
+
+                // **The boss tier has to come from `EventRelicPool` or it is not a draw at all.**
+                // Audited 2026-08-17, after Lucas noticed the same two boss relics every round and
+                // asked whether it was really chance. It was not, and the counts are flat:
+                //
+                //     SharedRelicPool      2 Ancient  (Looming Fruit, Very Hot Cocoa)
+                //     every character pool 0 Ancient
+                //     EventRelicPool     100 Ancient
+                //
+                // So the two boss slots had exactly two candidates and drew both of them, every
+                // time, deterministically. The other hundred — Sozu, Pandora's Box, Snecko Eye,
+                // Runic Pyramid, Black Star — sit in the pool a duel never opens, because a duel
+                // has no boss and no event.
+                //
+                // **Restricted to Ancient on purpose.** `EventRelicPool` also carries 34 Event, 5
+                // Starter and 3 ordinary relics, and none of those belong here: the other three
+                // tiers already draw from pools meant for them, and an unrestricted concat would
+                // leak starters into the top-up path. Taking only the tier that is otherwise empty
+                // is the whole of the change.
+                .Concat(ModelDb.RelicPool<EventRelicPool>()
+                    .GetUnlockedRelics(runState.UnlockState)
+                    .Where(r => r.Rarity == RelicRarity.Ancient))
+
                 .Where(r => !held.Contains(r.Id.Entry))
 
                 // **Shop relics are excluded by rarity, which is what "drop the merchant pool"
@@ -506,6 +529,13 @@ public static class DuelDraft
 
             // Shuffled again so the grid does not read as four tidy rarity pairs in a fixed order.
             pool = pool.OrderBy(_ => rng.Next()).ToList();
+
+            // The candidate count per tier, because "is this actually random" is a question this
+            // pool has already answered wrong once. A tier with two candidates and two slots is not
+            // a draw, and the only way to see that from a log is to print how many there were.
+            Log.Info("[SpirePvp] draft: relic candidates — "
+                     + string.Join(", ", tiers.Select(t =>
+                         $"{t}={available.Count(r => r.Rarity == t)}")));
 
             Log.Info("[SpirePvp] draft: relic pool by rarity — "
                      + string.Join(", ", pool.Select(r => $"{r.Id.Entry}({r.Rarity})")));

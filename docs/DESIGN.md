@@ -858,6 +858,23 @@ different pool, which is what makes a third round cheap. Relics come from **the 
 plus the shared pool**, minus anything already held: a duel has no shop, chest or boss reward, so
 the draft is the only source there is and one pool would delete half the relic game.
 
+**The boss tier draws from `EventRelicPool`** (audited 2026-08-17, after Lucas noticed the same two
+boss relics every round and asked whether it was really chance — it was not):
+
+| Pool | Ancient (boss) relics |
+|---|---|
+| `SharedRelicPool` | **2** — Looming Fruit, Very Hot Cocoa |
+| every character pool | **0** |
+| `EventRelicPool` | **100** |
+
+Two candidates for two slots is not a draw, it is a constant, and no amount of shuffling would have
+shown otherwise. The other hundred — Sozu, Pandora's Box, Snecko Eye, Runic Pyramid, Black Star —
+live in the pool a duel never opens, because a duel has no boss and no event. The concat is
+restricted to `Rarity == Ancient` because that pool also carries 34 Event, 5 Starter and 3 ordinary
+relics, and the other three tiers already draw from pools meant for them. **The candidate count per
+tier is now logged**, since "is this actually random" is a question this pool has answered wrong once
+and a log of the *result* can never settle it.
+
 **The rarity split is fixed rather than shuffled** (2026-08-17). An unweighted draw over the whole
 pool is mostly commons, so the picks that actually shape a duel arrive by luck or not at all; Lucas
 drew a boss relic in the first played round and it was the most interesting pick in it. Two of each
