@@ -252,7 +252,17 @@ public static class DuelArena
             await runManager.ExitCurrentRooms();
             RaceCoordinator.EndRace();
 
-
+            // A draft skips the race, so EndRace() above early-returned and never ran the
+            // synchronizer-counter reset the duel depends on — the one piece of EndRace a draft
+            // still needs. Run it here for the draft case. Without it, a drafted relic whose
+            // on-obtain gathers a player choice (BIIIG_HUG, measured 2026-08-18) bumps only the
+            // drafter's PlayerChoiceSynchronizer counter, and the duel's first checksum diverges on
+            // it. Mutually exclusive with the race path: IsDraftRun is false for a race, and
+            // EndRace's own reset only runs when a race was active.
+            if (DuelDraft.IsDraftRun)
+            {
+                RaceCoordinator.ResetDraftSynchronizerCounters(runManager);
+            }
 
             // Bracketed by logs on purpose: a sync that never completes is a silent wait on the
             // map, which looks nothing like a sync problem from the outside.

@@ -211,6 +211,32 @@ public static class RaceCoordinator
     }
 
     /// <summary>
+    /// The draft's equivalent of the reset <see cref="EndRace"/> does for a race.
+    ///
+    /// **A draft never ran a race, so `EndRace` early-returns and its
+    /// <see cref="ResetSynchronizerCounters"/> is skipped — and that reset is the one part of
+    /// `EndRace` a draft still needs.** The rest of `EndRace` restores combat sync, checksums and
+    /// hooks that only a race turned off, so it is correctly gated on `_raceActive`; the counter
+    /// reset is not, because both formats couple back together for the duel.
+    ///
+    /// **Measured 2026-08-18.** Each player obtains their own drafted relics locally and decoupled.
+    /// BIIIG_HUG's on-obtain gathers a player choice, so the host that drafted it reserved choice
+    /// id 0 (`next is 1`) while the client that did not stayed at 0. Nothing reconciles that — the
+    /// pre-combat state sync covers serialized state and RNG, not the synchronizer counters (see
+    /// <see cref="ResetSynchronizerCounters"/>) — so the duel's first checksum compared 1 against 0
+    /// and the host kicked the client for StateDivergence. Both full state dumps were identical in
+    /// every other line; the only difference was `Choice IDs: 1` vs empty.
+    ///
+    /// Called from `DuelArena` at arena entry, after the rooms are exited, so it lands on quiesced
+    /// state at the same point the race path resets from. The action / reward / hook counters a
+    /// draft never touched are still 0, so their fast-forward is a no-op.
+    /// </summary>
+    public static void ResetDraftSynchronizerCounters(RunManager run)
+    {
+        ResetSynchronizerCounters(run);
+    }
+
+    /// <summary>
     /// Zeroes the run-level synchronizer counters that the race pulled apart.
     ///
     /// `CombatStateSynchronizer` reconciles each player's serialized state, the run RNG and the
