@@ -125,9 +125,15 @@ the two rounds share a scene, a banner, a skip button and every tween. A `RelicM
 potion's icon was the other route and was refused — a fake relic can leak into a pool, a save or a
 grab bag, and a display lie in the model layer is worse than the bug it fixes.
 
-**Remaining before the balance pass:** **M8.5 slice 3** (the opponent's unsubmitted queue on the wire, which makes
-the paced mode readable rather than merely slower), the **pre-duel rest site**, and **native
-reconnect**. See HANDOFF.
+**Remaining before the balance pass:** the **pre-duel rest site** and **native reconnect**. That is
+the whole list.
+
+**M8.5 slice 3 is done** — checked 2026-08-19 because this line still claimed otherwise. The
+opponent's unsubmitted queue was built and confirmed in play on 2026-08-13: `DuelIncoming` is armed
+at run start, published from `DuelPlayScheduler`, disarmed on teardown and cleared on the result
+screen. Its one failure (a missing loc key throwing `LocException` *inside* a net message handler,
+so `NetMessageBus` dropped the whole message and the feature was dead on the client while perfect on
+the host) was fixed at the time with a guard rather than a re-export.
 
 **The one idea that explains most of the code:** the duel never breaks card logic — it breaks
 every place the engine encodes "enemy" as a *side* rather than a *relationship*. Both duelists
