@@ -1,7 +1,9 @@
 using System;
 using System.Collections.Generic;
 using MegaCrit.Sts2.Core.Combat;
+using MegaCrit.Sts2.Core.Entities.Cards;
 using MegaCrit.Sts2.Core.Entities.Creatures;
+using MegaCrit.Sts2.Core.Entities.Players;
 using MegaCrit.Sts2.Core.Models;
 using MegaCrit.Sts2.Core.Models.Potions;
 using MegaCrit.Sts2.Core.GameActions;
@@ -119,6 +121,7 @@ public static class DuelTurnModel
         // asked again or they keep showing last turn's commitments.
         LockInPlanView.RefreshPlannedCosts();
         LogPowers(state);
+        LogHandCosts(state);
 
         // **Only in the duel.** This is armed for the whole run, and `CombatManager.TurnStarted`
         // fires for every combat in the *race* too — so an ordinary Act 1 fight was drawing "You
@@ -148,6 +151,52 @@ public static class DuelTurnModel
     /// such question a diff instead of a discussion, and HANDOFF has been carrying an open note to
     /// "audit `AfterSideTurnStart` powers when one shows up" since poison needed its own patch.
     /// </summary>
+    /// <summary>
+    /// What every card in the local hand costs at turn start, canonical and modified.
+    ///
+    /// **Because "the numbers on my cards were wrong" has two completely different causes and the
+    /// screen cannot tell them apart.** Reported 2026-08-19: on turn two, Bash read 1 (canonical 2),
+    /// Flame Barrier 1 (2), Dark Embrace 3 (2) and Brand 1 (0) — up and down, so not an off-by-one —
+    /// and *"they corrected once something was actually queued"*, which is the signature of a stale
+    /// label rather than a wrong cost. But nothing in that match randomises costs: no cost-touching
+    /// relic was drafted, no Snecko-shaped potion was drunk, and no power was up.
+    ///
+    /// So either the model's cost really is wrong, in which case `modified` differs from
+    /// `canonical` here and something is applying a modifier nobody has found yet — or the model is
+    /// right and only the label is stale, in which case these agree and the fault is entirely in the
+    /// repaint. One line per card at turn start settles which, and this project has now paid twice
+    /// for guessing at a mechanism nobody had observed.
+    /// </summary>
+    private static void LogHandCosts(CombatState state)
+    {
+        Player? me = LocalContext.GetMe(state);
+        if (me == null)
+        {
+            return;
+        }
+
+        List<string> costs = new List<string>();
+        foreach (CardModel card in PileType.Hand.GetPile(me).Cards)
+        {
+            try
+            {
+                int modified = card.EnergyCost.GetWithModifiers(CostModifiers.None);
+                int canonical = card.EnergyCost.Canonical;
+                string flag = modified == canonical ? "" : "  <-- DIFFERS";
+                costs.Add($"{card.Id.Entry}={modified}(canonical {canonical}){flag}");
+            }
+            catch (Exception e)
+            {
+                costs.Add($"{card.Id.Entry}=? ({e.GetType().Name})");
+            }
+        }
+
+        if (costs.Count > 0)
+        {
+            Log.Info($"[SpirePvp] hand costs at turn start — {string.Join(", ", costs)}");
+        }
+    }
+
     private static void LogPowers(CombatState state)
     {
         foreach (Creature creature in state.Creatures)
