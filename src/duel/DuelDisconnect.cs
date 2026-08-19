@@ -63,11 +63,12 @@ public static class DuelDisconnect
     /// also the number this route was originally playtested at (`docs/PLAYTEST_LIST.md`:
     /// `forfeit in 24s`, declared at 30s).
     ///
-    /// The arithmetic is deliberate: <see cref="SilenceBeforeNoticeMs"/> is the 5s of quiet before
-    /// the curtain goes up, and this is the countdown drawn on it. 5 + 25 = 30s from the last
-    /// packet to the result.
+    /// The arithmetic: <see cref="SilenceBeforeNoticeMs"/> is the 5s of quiet before the curtain
+    /// goes up, and this is the countdown drawn on it — so 5 + 30 = **35s** from the last packet to
+    /// the result. Set 2026-08-18 after seeing it on screen: the number that matters is the one the
+    /// waiting player is reading, so the countdown starts at 30 rather than the total doing so.
     /// </summary>
-    public const ulong ForfeitWindowMs = 25_000;
+    public const ulong ForfeitWindowMs = 30_000;
 
     /// <summary>
     /// How long a peer may be quiet before any of this starts.
@@ -539,6 +540,18 @@ public static class DuelDisconnect
     /// 2. The button is meant to be pressable more than once. Anything that tears the panel down
     ///    on the first press defeats the point.
     ///
+    /// **The scene's own layout is left alone.** The first version forced
+    /// `SetAnchorsAndOffsetsPreset(FullRect)` and the panel stretched to fill the screen — a stone
+    /// slab from edge to edge with the button shoved half off the bottom-right corner. The preset
+    /// was never needed: `NModalContainer.Add` is `AddChildSafely` and nothing else, so a popup
+    /// centres itself from its own anchors, and the overlay is a full-screen `Control` exactly like
+    /// the container. Adding the child and touching nothing gets the same normal-sized popup.
+    ///
+    /// **The red button is `NoButton`, and that is not a styling flag.** `IsYes` only rebinds the
+    /// hotkey and the controller glyph; the colours live in the two separate nodes in
+    /// `vertical_popup.tscn` — `YesButton` green, `NoButton` red. Asked for red, so the yes button
+    /// is hidden and the no button carries the action.
+    ///
     /// `SetText` is called first on purpose: it is what runs `EnsureNodesAreSet`, and
     /// `HideNoButton` does not, so touching the buttons before it would read a null.
     ///
@@ -560,19 +573,16 @@ public static class DuelDisconnect
             PackedScene scene = PreloadManager.Cache.GetScene(SceneHelper.GetScenePath("ui/vertical_popup"));
             NVerticalPopup popup = scene.Instantiate<NVerticalPopup>(PackedScene.GenEditState.Disabled);
 
-            // Anchors *and* offsets: anchoring alone keeps the scene's own offsets, which would
-            // hang the panel off the corner of a full-screen parent it was never laid out for.
-            popup.SetAnchorsAndOffsetsPreset(Control.LayoutPreset.FullRect);
             overlay.AddChild(popup);
-
             popup.SetText(string.Empty, string.Empty);
-            popup.HideNoButton();
 
             LocString label = new LocString(Table, "SPIREPVP_TIMEOUT.waitLonger");
-            popup.YesButton.IsYes = true;
-            popup.YesButton.SetText(label.Exists() ? label.GetFormattedText() : "Wait one more minute");
-            popup.YesButton.Connect(NClickableControl.SignalName.Released,
-                                    Callable.From<NButton>(OnWaitLongerPressed));
+            popup.YesButton.Visible = false;
+            popup.NoButton.Visible = true;
+            popup.NoButton.IsYes = false;
+            popup.NoButton.SetText(label.Exists() ? label.GetFormattedText() : "Wait longer");
+            popup.NoButton.Connect(NClickableControl.SignalName.Released,
+                                   Callable.From<NButton>(OnWaitLongerPressed));
 
             _extendPrompt = popup;
             Log.Warn("[SpirePvp] wait-longer prompt built inside the timeout curtain");
