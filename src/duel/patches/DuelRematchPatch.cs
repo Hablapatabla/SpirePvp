@@ -49,12 +49,16 @@ public static class DuelRematchPatch
     [HarmonyPrefix]
     public static bool BeforeHostDisconnect()
     {
-        if (!DuelRematch.Relaunching)
+        // **Two features, one guard.** Returning to the lobby needs the transport held across
+        // exactly the same teardown, and for exactly the same reason — a second pair of prefixes on
+        // the same method would be two places to forget. Everything else still disconnects.
+        if (!DuelRematch.Relaunching && !DuelReturnToLobby.Holding)
         {
             return true;
         }
 
-        Log.Warn("[SpirePvp] rematch: holding the host transport open through run teardown");
+        Log.Warn("[SpirePvp] holding the host transport open through run teardown "
+                 + $"(rematch={DuelRematch.Relaunching}, returnToLobby={DuelReturnToLobby.Holding})");
         return false;
     }
 
@@ -62,12 +66,13 @@ public static class DuelRematchPatch
     [HarmonyPrefix]
     public static bool BeforeClientDisconnect()
     {
-        if (!DuelRematch.Relaunching)
+        if (!DuelRematch.Relaunching && !DuelReturnToLobby.Holding)
         {
             return true;
         }
 
-        Log.Warn("[SpirePvp] rematch: holding the client transport open through run teardown");
+        Log.Warn("[SpirePvp] holding the client transport open through run teardown "
+                 + $"(rematch={DuelRematch.Relaunching}, returnToLobby={DuelReturnToLobby.Holding})");
         return false;
     }
 

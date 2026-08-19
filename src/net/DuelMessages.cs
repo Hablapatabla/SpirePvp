@@ -790,3 +790,66 @@ public record struct DraftAckMessage : INetMessage
     {
     }
 }
+
+/// <summary>
+/// "Let's go back to the lobby" — and the answer to it.
+///
+/// **The same offer/answer shape as <see cref="DuelRematchMessage"/>, and for the same reason.**
+/// Both peers have to leave the result screen together: one side alone tearing its run down and
+/// pushing a lobby leaves the other on a screen whose buttons all refer to a match that no longer
+/// exists on the wire. Agreement is what makes "both arrive at the same place" a fact rather than
+/// a hope, and a half-torn-down peer is the state this project has been bitten by most.
+///
+/// Distinct from a rematch rather than a flag on it, because the destinations differ in what they
+/// have to rebuild: a rematch recreates a run from the old one's seed and never leaves the run
+/// machinery, where this returns to the main menu and re-opens a lobby — which for the client also
+/// means re-asking for a join response it only ever had from its original join.
+///
+/// Appended last: ids are positional.
+/// </summary>
+public record struct DuelReturnToLobbyMessage : INetMessage
+{
+    public bool ShouldBroadcast => true;
+
+    public NetTransferMode Mode => NetTransferMode.Reliable;
+
+    public LogLevel LogLevel => LogLevel.Info;
+
+    public bool ShouldBuffer => true;
+
+    /// <summary>Offer, an answer to one, or the host saying its lobby is open. See the consts.</summary>
+    public byte kind;
+
+    /// <summary>Meaningful only when <see cref="kind"/> is <see cref="Answer"/>.</summary>
+    public bool accepted;
+
+    /// <summary>"Shall we go back to the lobby?"</summary>
+    public const byte Offer = 0;
+
+    /// <summary>"Here is my answer to yours."</summary>
+    public const byte Answer = 1;
+
+    /// <summary>
+    /// Host only: "my lobby is open, ask to join it now."
+    ///
+    /// **A third state rather than a second message, because the ordering it encodes is the whole
+    /// difficulty of this feature.** A client cannot re-enter the lobby on its own: it needs a
+    /// `ClientLobbyJoinResponseMessage`, which only exists as an answer to a request, and only a
+    /// live `StartRunLobby` on the host answers those. So the host must be *in* its lobby before
+    /// the client asks — and `NetMessageBus` drops a message with no registered handler rather than
+    /// buffering it, so a request sent one frame early is not late, it is gone.
+    /// </summary>
+    public const byte HostLobbyReady = 2;
+
+    public void Serialize(PacketWriter writer)
+    {
+        writer.WriteByte(kind);
+        writer.WriteBool(accepted);
+    }
+
+    public void Deserialize(PacketReader reader)
+    {
+        kind = reader.ReadByte();
+        accepted = reader.ReadBool();
+    }
+}

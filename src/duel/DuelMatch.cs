@@ -198,6 +198,8 @@ public static class DuelMatch
         DuelRaceDeath.Disarm();
         DuelStats.Disarm();
         DuelRematch.Disarm();
+        DuelReturnToLobby.Disarm();
+        DuelReturnToLobby.Reset();
         RaceProgress.Disarm();
         RaceProgressHud.Clear();
         DuelLayout.Reset();
@@ -365,6 +367,11 @@ public static class DuelMatch
         // to zero and no one ever lost on time. That is the same shape of failure as arming a
         // message handler too late: nothing throws, the feature is simply absent.
         DuelFlag.Arm();
+
+        // Armed with everything else rather than when the result screen opens: the peer can offer
+        // to go back to the lobby before you have looked at the screen, and an offer that lands on
+        // no handler is dropped rather than buffered.
+        DuelReturnToLobby.Arm();
 
         // **Last, and after everything else is armed.** Beginning the draft broadcasts immediately,
         // and the rest of this method is what makes the answers audible when they come back.
