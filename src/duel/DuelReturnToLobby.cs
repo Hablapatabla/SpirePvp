@@ -422,23 +422,17 @@ public static class DuelReturnToLobby
     /// </summary>
     private static async Task OpenClientLobby()
     {
-        DateTime deadline = DateTime.UtcNow.AddSeconds(HostLobbyTimeoutSeconds);
-        while (!_hostLobbyReady && DateTime.UtcNow < deadline)
-        {
-            await Task.Delay(100);
-        }
-
-        if (!_hostLobbyReady)
-        {
-            Log.Error($"[SpirePvp] return to lobby: the host's lobby never opened within "
-                      + $"{HostLobbyTimeoutSeconds}s — staying on the main menu");
-            return;
-        }
-
         INetGameService? net = RunManager.Instance?.NetService;
         if (net == null)
         {
             Log.Error("[SpirePvp] return to lobby: the transport went away before the join");
+            return;
+        }
+
+        if (!await PumpUntil(net, () => _hostLobbyReady))
+        {
+            Log.Error($"[SpirePvp] return to lobby: the host's lobby never opened within "
+                      + $"{HostLobbyTimeoutSeconds}s — staying on the main menu");
             return;
         }
 
@@ -492,8 +486,7 @@ public static class DuelReturnToLobby
                 unlockState = unlocks.ToSerializable()
             });
 
-            Task timeout = Task.Delay(TimeSpan.FromSeconds(HostLobbyTimeoutSeconds));
-            if (await Task.WhenAny(completion.Task, timeout) == timeout)
+            if (!await PumpUntil(net, () => completion.Task.IsCompleted))
             {
                 throw new TimeoutException(
                     $"no ClientLobbyJoinResponseMessage within {HostLobbyTimeoutSeconds}s");
@@ -505,6 +498,58 @@ public static class DuelReturnToLobby
         {
             net.UnregisterMessageHandler<ClientLobbyJoinResponseMessage>(OnResponse);
         }
+    }
+
+    /// <summary>
+    /// Waits for something to arrive, **pumping the transport while it does**.
+    ///
+    /// # This is the whole reason the client half was hard
+    ///
+    /// **Nothing polls the socket between leaving a run and opening a lobby.** There are exactly
+    /// two callers of `INetGameService.Update()` in the game:
+    ///
+    ///     NRun.cs:201                RunManager.Instance.NetService.Update();   // during a run
+    ///     NCustomRunScreen.cs:568    _lobby.NetService.Update();                // in the lobby
+    ///
+    /// A run node pumps it while a run exists, and the lobby screen pumps it once a lobby exists.
+    /// Return to lobby lives in the gap between those two, where the connection is open, held, and
+    /// **completely unread**.
+    ///
+    /// Measured 2026-08-18, and the asymmetry is the tell: the *host* worked. It opens its lobby
+    /// before it sends anything, so `NCustomRunScreen` is already pumping by then. The client sat
+    /// on the main menu waiting for `HostLobbyReady` with no lobby screen and therefore no pump —
+    /// so the packet arrived at a socket nobody was reading, and the log recorded neither the
+    /// message nor a missing-handler error, because the bus was never asked. It could have waited
+    /// forever; eight seconds only made it fail faster.
+    ///
+    /// So this stands in for the frame pump for exactly that window. It is the same call both
+    /// vanilla pumps make, on the same service, at roughly a frame's cadence.
+    /// </summary>
+    /// <returns>True if the condition came true, false if the wait timed out.</returns>
+    private static async Task<bool> PumpUntil(INetGameService net, Func<bool> until)
+    {
+        DateTime deadline = DateTime.UtcNow.AddSeconds(HostLobbyTimeoutSeconds);
+        while (DateTime.UtcNow < deadline)
+        {
+            if (until())
+            {
+                return true;
+            }
+
+            try
+            {
+                net.Update();
+            }
+            catch (Exception e)
+            {
+                Log.Error($"[SpirePvp] return to lobby: the transport threw while being pumped: {e}");
+                return false;
+            }
+
+            await Task.Delay(16);
+        }
+
+        return until();
     }
 
     /// <summary>
