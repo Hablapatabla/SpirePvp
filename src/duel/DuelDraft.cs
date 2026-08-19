@@ -421,10 +421,18 @@ public static class DuelDraft
     /// <summary>
     /// Takes the relic, and lets an on-pickup effect finish before the draft draws over it.
     ///
-    /// **`HasUponPickupEffect` is the model's own answer**, so this is not a list of relic names to
-    /// keep up to date — the same instinct as filtering dead relics by the hooks they override and
-    /// reading `Rarity == Shop` rather than deducing a shop relic from behaviour. KALEIDOSCOPE and
-    /// BIIIG_HUG both declare it; anything a game update adds declares it too.
+    /// **Asked of the method, not of the flag, and the flag is why.** `HasUponPickupEffect` looked
+    /// like the model's own answer and is not a reliable one: TRI_BOOMERANG's `AfterObtained` runs
+    /// `CardSelectCmd.FromDeckForEnchantment` — it stops dead waiting for you to pick a card — and
+    /// the relic **declares `HasUponPickupEffect` nowhere**. Measured 2026-08-19: it was drafted,
+    /// the choice was reserved (`Reserved choice id 0 for player 1`), no screen ever came up because
+    /// the draft was drawing over it, and the await never returned. No error, no `obtained` line,
+    /// and to the player the relic simply did nothing.
+    ///
+    /// So the question is "does this relic override `AfterObtained` at all", which reflection can
+    /// answer exactly and a flag can only be trusted to answer when someone remembered to set it.
+    /// Same technique as `IsDeadInADuel` asking which hooks a relic overrides, and the same reason:
+    /// a property the model *has* to define beats one it may forget to.
     ///
     /// **Awaited rather than fired and forgotten, which is the whole fix.** The old line was
     /// `TaskHelper.RunSafely(RelicCmd.Obtain(...))` and the draft moved straight on to the next
@@ -437,7 +445,7 @@ public static class DuelDraft
     /// </summary>
     private static async Task ObtainAndResolve(RelicModel relic, Player owner)
     {
-        bool waits = relic.HasUponPickupEffect;
+        bool waits = HasPickupEffect(relic);
         if (waits)
         {
             _resolvingPickup = true;
@@ -465,6 +473,43 @@ public static class DuelDraft
             }
         }
     }
+
+    /// <summary>
+    /// Whether this relic does anything at all when obtained, by whether it overrides the method.
+    ///
+    /// Cached per type, like <see cref="IsDeadInADuel"/>'s answer: it is a property of the class and
+    /// reflection is not free.
+    /// </summary>
+    private static bool HasPickupEffect(RelicModel relic)
+    {
+        Type type = relic.GetType();
+        if (_pickupEffectCache.TryGetValue(type, out bool known))
+        {
+            return known;
+        }
+
+        bool overrides;
+        try
+        {
+            MethodInfo? method = type.GetMethod(
+                nameof(RelicModel.AfterObtained),
+                BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic);
+            overrides = method != null && method.DeclaringType != typeof(RelicModel);
+        }
+        catch (Exception e)
+        {
+            // Erring towards waiting: a relic wrongly waited on resolves instantly and costs a
+            // frame, where one wrongly skipped hangs its effect forever with nothing in the log.
+            Log.Warn($"[SpirePvp] draft: could not tell whether {relic.Id.Entry} has a pickup "
+                     + $"effect, assuming it does: {e.Message}");
+            overrides = true;
+        }
+
+        _pickupEffectCache[type] = overrides;
+        return overrides;
+    }
+
+    private static readonly Dictionary<Type, bool> _pickupEffectCache = new();
 
     /// <summary>
     /// Gives a draft run the map-point history entry that the engine assumes every run already has.

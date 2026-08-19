@@ -99,9 +99,22 @@ public static class DuelDraftPotionScreenPatch
                 continue;
             }
 
+            // **Into the tree first, then filled — and `AddChild`, not `AddChildSafely`.**
+            // `NPotionHolder.AddPotion` writes `_emptyIcon.Modulate`, and `_emptyIcon` is assigned
+            // in the holder's `_Ready`, which only runs once the node is in the tree. Filling first
+            // is a `NullReferenceException` inside `AddPotion`, measured 2026-08-19.
+            //
+            // `AddChildSafely` is not enough either: it *defers* to the end of the frame unless the
+            // parent `IsNodeReady()`, and this runs from inside the screen's own `_Ready`, when the
+            // row is not. Plain `AddChild` on a parent already in the tree runs the child's `_Ready`
+            // synchronously, which is exactly the guarantee needed here.
+            //
+            // Vanilla's relic row can use the deferring version because `NRelicBasicHolder.Create`
+            // takes its model up front and needs nothing from `_Ready`. A potion holder is filled
+            // in a second step, so it does.
+            screen._relicRow.AddChild(holder);
             holder.AddPotion(node);
             holder.Scale = Vector2.One * 2f;
-            screen._relicRow.AddChildSafely(holder);
 
             PotionModel captured = potion;
             holder.Connect(NClickableControl.SignalName.Released,

@@ -62,6 +62,17 @@ up cold, and a pointer to where the reasoning already lives.
      as an easier fallback; awaiting in place turned out to be the smaller change, since deferring
      would have meant re-showing a reward set that vanilla had already parked.
 
+   **TRI_BOOMERANG, added 2026-08-19, is the same family and found the gate's false negative.**
+   Reported as "tri-boomering relic got skipped". Its `AfterObtained` runs
+   `CardSelectCmd.FromDeckForEnchantment` and waits for you to pick a card — and it declares
+   `HasUponPickupEffect` **nowhere**, so the gate that holds the draft screen for KALEIDOSCOPE let
+   this one straight through. The relic was taken, the choice was reserved, no screen came up
+   because the draft was drawing over it, and the await never returned: no error, no `obtained`
+   line, and to the player the relic simply did nothing. The gate now asks whether the relic
+   overrides `AfterObtained` at all, which is a question reflection answers exactly, so
+   Tri-Boomerang works the way Kaleidoscope does. **The mechanism is fixed; whether a
+   mid-draft "enchant a card in your deck" is a good offer is this pass's call.**
+
    **What this pass still owns is the content question**, which is untouched: whether a
    "remove 4 cards" or "pick 1 of 3 off-class cards" relic is a *good* thing to offer in a
    competitive draft at all. It works now; whether it belongs is still a judgement call, and it
