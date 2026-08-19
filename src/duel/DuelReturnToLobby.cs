@@ -73,7 +73,24 @@ public static class DuelReturnToLobby
     /// </summary>
     private const double HostLobbyTimeoutSeconds = 8.0;
 
-    private static bool _armed;
+    /// <summary>
+    /// The service we are armed on, or null. **Not a bool, and that distinction is the bug.**
+    ///
+    /// Every other feature in this mod can use a flag, because every other feature lives entirely
+    /// inside one run: `CleanUp` always fires with a live `State` when a run ends, so `Disarm`
+    /// always runs and the flag always clears. This one deliberately survives a teardown, which
+    /// puts it in a state none of the others reach — armed, on the main menu, with no run to end.
+    ///
+    /// The sequence a flag gets wrong: return to the lobby (armed on service S), back out of the
+    /// lobby to the main menu (no run, so no `CleanUp`, so no `Disarm` — the flag stays set while
+    /// S is disposed), then host again (new service S'). `Arm` sees the flag, returns, and the
+    /// handler is never registered on S'. Return to lobby then fails silently for the rest of the
+    /// session, which is exactly the "armed on a dead service" trap `CLAUDE.md` lists.
+    ///
+    /// Holding the service answers "armed on *this* one?" instead of "armed at all?", which is the
+    /// question that was always meant.
+    /// </summary>
+    private static INetGameService? _armedOn;
 
     /// <summary>
     /// True from the moment a teardown starts until the lobby is open, suppressing the disconnect.
@@ -113,11 +130,6 @@ public static class DuelReturnToLobby
     /// </summary>
     public static void Arm()
     {
-        if (_armed)
-        {
-            return;
-        }
-
         INetGameService? net = RunManager.Instance?.NetService;
         if (net == null)
         {
@@ -129,8 +141,16 @@ public static class DuelReturnToLobby
             return;
         }
 
+        if (ReferenceEquals(_armedOn, net))
+        {
+            return;
+        }
+
+        // The old service, if there is one, is a service we are no longer on. It is not
+        // unregistered from: it has already been disposed with the session that owned it, and
+        // reaching into a disposed bus to tidy a handler that died with it is a throw for nothing.
         net.RegisterMessageHandler<DuelReturnToLobbyMessage>(OnMessage);
-        _armed = true;
+        _armedOn = net;
         Log.Info("[SpirePvp] return to lobby: handler armed");
     }
 
@@ -138,7 +158,7 @@ public static class DuelReturnToLobby
     public static void Disarm()
     {
         RunManager.Instance?.NetService?.UnregisterMessageHandler<DuelReturnToLobbyMessage>(OnMessage);
-        _armed = false;
+        _armedOn = null;
     }
 
     /// <summary>
@@ -347,7 +367,14 @@ public static class DuelReturnToLobby
             // The same call the vanilla Main Menu button makes. It is public, so there is nothing
             // to reflect at — the only thing that button does which this does not is the
             // `Disconnect` immediately before it, which is exactly the difference we want.
-            await NGame.Instance.ReturnToMainMenuAfterRun();
+            NGame? game = NGame.Instance;
+            if (game == null)
+            {
+                Log.Error("[SpirePvp] return to lobby: no NGame to return to the menu with");
+                return;
+            }
+
+            await game.ReturnToMainMenuAfterRun();
 
             if (isHost)
             {
@@ -368,6 +395,12 @@ public static class DuelReturnToLobby
             // **Cleared last and always.** While this is true the game cannot be disconnected from,
             // which is a far worse state to leave behind than a failed lobby open.
             Holding = false;
+
+            // The finished run's models have done their job. Held any longer they are a reference
+            // to a run that no longer exists, kept alive on a static for no reason — the ghost this
+            // whole path has to be careful about.
+            _carriedModifiers = new List<ModifierModel>();
+
             StateChanged?.Invoke();
         }
     }
