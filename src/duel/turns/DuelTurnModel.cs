@@ -342,11 +342,19 @@ public static class DuelTurnModel
     /// model, exactly as patch targets are `nameof` rather than strings, where an id list would
     /// silently start queueing something it used to free.
     ///
-    /// **The membership was read off the models rather than recalled.** Every potion's `OnUse` was
-    /// checked for which command families it touches: the thirteen below reach only `CardCmd`,
-    /// `CardSelectCmd` and `CardPileCmd`, and every other potion reaches at least one of
-    /// `CreatureCmd`, `PowerCmd`, `PlayerCmd`, `OrbCmd` or `PotionCmd` — or does its work through
-    /// some other route entirely, which is itself a reason to leave it queued.
+    /// **The membership was classified mechanically off all 66 models, not recalled.** Each
+    /// potion's `OnUse` body was read and every call in it collected: the nineteen below touch only
+    /// the user's own cards and piles (`CardCmd`, `CardSelectCmd`, `CardPileCmd`, `CardFactory`,
+    /// `Soul`, or plain field writes on their own cards), and every other potion reaches at least
+    /// one of `CreatureCmd`, `PowerCmd`, `PlayerCmd`, `OrbCmd`, `PotionCmd`, `OstyCmd` or
+    /// `ForgeCmd`.
+    ///
+    /// **Two things the mechanical pass got wrong, both worth keeping.** It first missed
+    /// `BlessingOfTheForge` and `SoldiersStew`, whose `OnUse` is `Task` rather than `async Task` —
+    /// a regex that assumed the common form. And it *passed* `DistilledChaos`, which touches
+    /// nothing but `CardPileCmd` and is nonetheless the most board-affecting potion in the game:
+    /// the method is `AutoPlayFromDrawPile`, so it plays your cards at the opponent. Reading the
+    /// call family is a good filter and not a decision; the excluded one had to be caught by eye.
     ///
     /// **`TargetType` is not the question, though it looks like it.** Fire Potion is `AnyEnemy` and
     /// Skill Potion is `AnyPlayer`, which suggests the split is free — but Block Potion, Dexterity
@@ -359,19 +367,34 @@ public static class DuelTurnModel
     /// </summary>
     private static readonly HashSet<Type> FreeUsePotions = new()
     {
-        typeof(AttackPotion),            // adds an attack to your hand
-        typeof(SkillPotion),             // adds a skill to your hand
-        typeof(PowerPotion),             // adds a power to your hand
-        typeof(ColorlessPotion),         // adds a colorless card to your hand
-        typeof(CosmicConcoction),        // generates upgraded colorless cards into your hand
-        typeof(CunningPotion),           // upgrades cards in your hand
-        typeof(BlessingOfTheForge),      // upgrades your whole hand
+        // Put a card in your hand
+        typeof(AttackPotion),            // choose an attack
+        typeof(SkillPotion),             // choose a skill
+        typeof(PowerPotion),             // choose a power
+        typeof(ColorlessPotion),         // choose a colorless card
+        typeof(CosmicConcoction),        // generates upgraded colorless cards
+        typeof(OrobicAcid),              // generates one of each card type
+        typeof(PotOfGhouls),             // creates Souls in hand
+        typeof(LiquidMemories),          // returns one from the discard pile
+        typeof(DropletOfPrecognition),   // pulls one out of the draw pile
+
+        // Change the cards you already hold
+        typeof(CunningPotion),           // upgrades cards you pick
+        typeof(BlessingOfTheForge),      // upgrades the whole hand
+        typeof(TouchOfInsanity),         // makes one card free this combat
+        typeof(SneckoOil),               // draws, then randomises your costs
+        typeof(SoldiersStew),            // bumps the replay count on your Strikes
+
+        // Cycle your hand
+        typeof(SwiftPotion),             // draw
         typeof(GamblersBrew),            // discard any number, draw that many
         typeof(GlowwaterPotion),         // exhausts your hand and redraws
-        typeof(Ashwater),                // exhausts cards you pick out of your hand
-        typeof(LiquidMemories),          // returns a card from the discard pile to your hand
-        typeof(DropletOfPrecognition),   // pulls a card out of your draw pile
-        typeof(TouchOfInsanity),         // makes one card in your hand free this combat
+        typeof(BottledPotential),        // hand back to draw, shuffle, redraw
+        typeof(Ashwater),                // exhausts cards you pick
+
+        // **Deliberately absent: DistilledChaos.** It touches only `CardPileCmd`, so a pass that
+        // reads call families alone clears it — but the method is `AutoPlayFromDrawPile`. It plays
+        // your cards, at the opponent, which is as board-affecting as a potion gets.
     };
 
     private static IDuelTurnModel Build(IRunState? runState)
