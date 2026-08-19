@@ -126,6 +126,15 @@ public static class DuelDraftPotionScreenPatch
                     Log.Warn($"[SpirePvp] draft:   {c.Name} [{potion}] visible={c.Visible} "
                              + $"global={c.GlobalPosition} size={c.Size} scale={c.Scale} "
                              + $"modulate={c.Modulate}");
+
+                    // The holder can be in the right place with the sprite nowhere near it, which
+                    // is the state this round was in on 2026-08-19 — hover worked, nothing drew.
+                    if (c is NPotionHolder ph && ph.Potion is NPotion sprite)
+                    {
+                        Log.Warn($"[SpirePvp] draft:     sprite visible={sprite.Visible} "
+                                 + $"global={sprite.GlobalPosition} size={sprite.Size} "
+                                 + $"scale={sprite.Scale} modulate={sprite.Modulate}");
+                    }
                 }
             }
             catch (Exception e)
@@ -159,6 +168,13 @@ public static class DuelDraftPotionScreenPatch
                 continue;
             }
 
+            // **Vanilla's own offset, copied rather than derived.** `NPotionContainer` sets exactly
+            // this before handing a potion to a holder, and `AddPotion` does not position what it
+            // is given — so without it the sprite sits wherever the scene left it rather than in
+            // the slot. The holder is 60x60 and the potion art is twice that, so the half-size
+            // shift is what centres one in the other.
+            node.Position = new Vector2(-30f, -30f);
+
             // **Into the tree first, then filled — and `AddChild`, not `AddChildSafely`.**
             // `NPotionHolder.AddPotion` writes `_emptyIcon.Modulate`, and `_emptyIcon` is assigned
             // in the holder's `_Ready`, which only runs once the node is in the tree. Filling first
@@ -176,9 +192,14 @@ public static class DuelDraftPotionScreenPatch
             holder.AddPotion(node);
             holder.Scale = Vector2.One * 2f;
 
+            // **`NPotionHolder`, not `NButton`.** `Released` marshals the emitting control into the
+            // delegate's parameter, and `NPotionHolder` derives from `NClickableControl` without
+            // being an `NButton` — so a click threw `InvalidCastException` before ever reaching the
+            // pick. Vanilla's own row connects `Callable.From<NRelicBasicHolder>` for the same
+            // reason; the type is part of the contract, not decoration.
             PotionModel captured = potion;
             holder.Connect(NClickableControl.SignalName.Released,
-                           Callable.From<NButton>(_ => DuelDraft.SubmitPotionPick(captured)));
+                           Callable.From<NPotionHolder>(_ => DuelDraft.SubmitPotionPick(captured)));
 
             // **Assigned, not added to — and this is the whole of why the row was invisible.**
             // Vanilla writes `holder.Position + shift + …` because `NRelicBasicHolder` is created at
