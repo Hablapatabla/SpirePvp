@@ -64,6 +64,7 @@ public static class DuelDraftPotionScreenPatch
         {
             BuildPotionRow(__instance, potions);
             Log.Info($"[SpirePvp] draft: potion row built with {potions.Count} potion(s)");
+            DumpPlacementLater(__instance);
             return false;
         }
         catch (Exception e)
@@ -73,6 +74,65 @@ public static class DuelDraftPotionScreenPatch
             Log.Error($"[SpirePvp] draft: could not build the potion row: {e}");
             return false;
         }
+    }
+
+    /// <summary>
+    /// Dumps where the row actually ended up, a beat after the tweens land.
+    ///
+    /// **Because "it says it was built and it is not on screen" is not answerable from a
+    /// screenshot.** Reported 2026-08-19 as an empty page on a round whose log says the row was
+    /// built with three potions — the same shape as the Rematch button, which reported itself
+    /// added, placed and shown while being invisible. Two placement bugs in this project were
+    /// "corrected" from screenshots and one of those corrections was wrong; what settled them both
+    /// was logging the numbers and reading them.
+    ///
+    /// Deferred three quarters of a second because `Enable` and the position tween are still
+    /// running before that, and the interesting values are the ones they land on.
+    /// </summary>
+    private static void DumpPlacementLater(NChooseARelicSelection screen)
+    {
+        SceneTreeTimer? settled = screen.GetTree()?.CreateTimer(0.75);
+        if (settled == null)
+        {
+            return;
+        }
+
+        settled.Timeout += () =>
+        {
+            try
+            {
+                if (!screen.IsValid() || screen._relicRow == null)
+                {
+                    Log.Warn("[SpirePvp] draft: potion row gone before it could be measured");
+                    return;
+                }
+
+                Control row = screen._relicRow;
+                Log.Warn($"[SpirePvp] draft: potion row — visible={row.Visible} "
+                         + $"global={row.GlobalPosition} size={row.Size} scale={row.Scale} "
+                         + $"modulate={row.Modulate} children={row.GetChildCount()}");
+
+                foreach (Node child in row.GetChildren())
+                {
+                    if (child is not Control c)
+                    {
+                        continue;
+                    }
+
+                    string potion = c is NPotionHolder h && h.Potion != null
+                        ? h.Potion.Model?.Id.Entry ?? "(no model)"
+                        : "(not a potion holder)";
+
+                    Log.Warn($"[SpirePvp] draft:   {c.Name} [{potion}] visible={c.Visible} "
+                             + $"global={c.GlobalPosition} size={c.Size} scale={c.Scale} "
+                             + $"modulate={c.Modulate}");
+                }
+            }
+            catch (Exception e)
+            {
+                Log.Warn($"[SpirePvp] draft: could not measure the potion row: {e.Message}");
+            }
+        };
     }
 
     private static void BuildPotionRow(NChooseARelicSelection screen, IReadOnlyList<PotionModel> potions)

@@ -14,6 +14,7 @@ using MegaCrit.Sts2.Core.Localization;
 using MegaCrit.Sts2.Core.Map;
 using MegaCrit.Sts2.Core.Logging;
 using MegaCrit.Sts2.Core.Models;
+using MegaCrit.Sts2.Core.Models.PotionPools;
 using MegaCrit.Sts2.Core.Models.RelicPools;
 using MegaCrit.Sts2.Core.Multiplayer.Game;
 using MegaCrit.Sts2.Core.Nodes.Cards;
@@ -825,9 +826,22 @@ public static class DuelDraft
     /// <summary>
     /// The potion pool: <see cref="PotionPoolSize"/> from the drafting character's own potions.
     ///
-    /// **Simpler than the relic pool, and the differences are all things potions do not have.**
-    /// There is one source rather than three — `CharacterModel.PotionPool` — because potions have no
-    /// shared pool, no event pool and no boss tier to go hunting for. There is no rarity split for
+    /// **Both pools, exactly as the relic pool takes both, and the first version got this wrong.**
+    /// It read `CharacterModel.PotionPool` alone and produced three candidates. Counted rather than
+    /// assumed: `SharedPotionPool` holds **45**, and a character's own pool holds whatever its epoch
+    /// contributes — a handful at most, and nothing at all for several characters. So the character
+    /// pool alone is not "the potions this character can get", it is the small class-flavoured tail
+    /// of it, and drafting from it gave a three-item row out of a game with dozens of potions.
+    ///
+    /// Same shape as the relic pool needing `SharedRelicPool`, and the same reasoning: in a normal
+    /// run a player meets shared potions constantly, so offering only the character's own would
+    /// silently delete most of the potion game.
+    ///
+    /// `EventPotionPool` is deliberately left out — three potions behind events a duel never
+    /// reaches, the same call `IsDeadInADuel` makes for relics that only fire somewhere a duel does
+    /// not go.
+    ///
+    /// There is no rarity split for
     /// the same reason the relic round needed one and this does not: a four-item row drafted to
     /// exhaustion has no room for a shape, and `PotionRarity` does not carry the "this is the pick
     /// that decides the duel" weight `RelicRarity.Ancient` does.
@@ -851,6 +865,8 @@ public static class DuelDraft
 
             List<PotionModel> available = drafter.Character.PotionPool
                 .GetUnlockedPotions(runState.UnlockState)
+                .Concat(ModelDb.PotionPool<SharedPotionPool>()
+                            .GetUnlockedPotions(runState.UnlockState))
                 .Where(pot => pot.Usage is PotionUsage.CombatOnly or PotionUsage.AnyTime)
                 .Where(pot => !held.Contains(pot.Id.Entry))
                 .GroupBy(pot => pot.Id.Entry)
