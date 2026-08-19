@@ -105,8 +105,16 @@ a surface decision. See DESIGN §7b.
   announcement here is separated from arming by a whole race, so the margin never mattered; a draft
   begins at run launch and has none. The host repeats until acked.
 
+**Potions split queued from free (2026-08-18, unplayed).** A potion that touches the board is a
+play and waits its turn; one that only changes your own hand resolves on click. `IsDeferrable` is
+`IsPlayerInitiated` plus that test, and **both** call sites take it — the host path in
+`DuelLockInPatch` is the one this project has forgotten four times. Nineteen potions, classified off
+every model's `OnUse` rather than recalled; anything unlisted queues.
+
 **Remaining:** M8.5 slice 3 — the opponent's unsubmitted queue on the wire, which is what makes the
-paced mode readable rather than merely slower. See HANDOFF for the playtest order.
+paced mode readable rather than merely slower. The **potion draft round** still needs a bespoke
+screen (vanilla has no potion picker), and **return to lobby** is teardown ordering across two
+clients and is deliberately not started without a playtester. See HANDOFF for the playtest order.
 
 **The one idea that explains most of the code:** the duel never breaks card logic — it breaks
 every place the engine encodes "enemy" as a *side* rather than a *relationship*. Both duelists

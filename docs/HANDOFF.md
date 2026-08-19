@@ -1072,6 +1072,90 @@ change when you change one character of the seed.
 
 Confirm `92 patch classes applied cleanly (128 methods)` on both — none of this adds a patch class.
 
+### 2026-08-18, unsupervised pass: potions, and two audits that came back clean
+
+Built with Lucas away, so **all of it is unplayed** and none of it was chosen for needing a
+playtest to be worth having.
+
+#### BUILT: hand-only potions resolve on click instead of queueing
+
+Asked for 2026-08-14 (*"Skill potions just feel funky"*) and scoped then. A potion that does
+something to the board is a play and has to be ordered against the opponent's; a potion that only
+changes your own options has nothing to order against, and deferring it means planning a round
+without knowing what it gave you — the dead-draw problem the multi-batch turn exists to solve.
+
+**Split as a new predicate rather than folded into `IsPlayerInitiated`.** That method answers *who
+raised it* and is still exactly right about that — a Skill Potion is unambiguously player-initiated.
+What a turn model needs is the narrower "should this wait its turn". `IsDeferrable` is the
+conjunction, and **both call sites take it**: the comment above
+`DuelLockInPatch.BeforeHandleRequestEnqueue` records this same predicate being handed to one site
+and not the other four separate times, and a potion resolving freely for the host while queueing for
+the client would be a standing advantage for whoever is hosting.
+
+**Nineteen potions, classified mechanically off all 66 models rather than recalled** — every
+`OnUse` body read and every call in it collected. Two things that pass is worth keeping:
+
+- It **missed** `BlessingOfTheForge` and `SoldiersStew`, whose `OnUse` is `Task` rather than
+  `async Task`. A regex that assumed the common form.
+- It **passed** `DistilledChaos`, which touches nothing but `CardPileCmd` and is the most
+  board-affecting potion there is — the method is `AutoPlayFromDrawPile`, so it plays your cards at
+  the opponent. **Reading the call family is a good filter and not a decision.** It is excluded by
+  name in the list with that reasoning attached, because the next person to run the same scan will
+  hit it again.
+
+`TargetType` looks like it would answer this and does not: Fire Potion is `AnyEnemy` and Skill
+Potion is `AnyPlayer`, but Block Potion, Dexterity Potion and Duplicator are all `AnyPlayer` and all
+change the board. Anything unlisted queues, so an unclassified or newly added potion is wrong in the
+safe direction.
+
+Worth knowing before suspecting this of a desync: **resolving freely is the *vanilla* path.**
+Deferral is what this mod added, and host-assigned action ordering is unchanged either way, so
+neither sim executes anything different or in a different order.
+
+#### Two mechanical audits, both clean — do not redo these
+
+Written as throwaway scripts against `src/` and the decompile. Recording the *results* so the next
+reader does not spend the same hour.
+
+- **Run-scoped static state.** The rule is "anything surviving a run must be released in
+  `DuelMatch.OnRunEnded`". Every class holding mutable static state was checked against what that
+  method releases, transitively. **Nine came back flagged and all nine were false positives** —
+  computed properties matched as fields (`DuelLockInPatch.Model`,
+  `DuelHoverSuppressionPatch.ShouldSuppress`), lobby-scoped rather than run-scoped state
+  (`DuelHostFlow`, `DuelDraftPatches`), load-time constants (`SpirePvpInit.PatchesHealthy`), and
+  node handles that are guarded by `IsInstanceValid` at every read and freed on teardown anyway
+  (`LockInPlanView._initiativeArrow`, `DuelRematchPatch._button`). The discipline holds.
+- **Async patch targets.** Two documented traps: a prefix that skips an `async Task` without
+  assigning `__result`, and a postfix on an async method running at state-machine creation rather
+  than completion. Every `[HarmonyPatch]` was cross-referenced against its target's decompiled
+  signature. **One hit, and it is already correct**: `DuelLateSummonLayoutPatch` postfixes
+  `CombatManager.AfterCreatureAdded`, which returns `Task` — but the decompile confirms it is
+  `public Task AfterCreatureAdded(Creature c) => AfterCreatureAdded(c, _turnState.State);`, not
+  `async`, so it builds no state machine and the postfix runs at the ordinary time. The patch's own
+  doc comment already says exactly this.
+
+#### Two things deliberately NOT built, both because they need a playtest to be safe
+
+Recorded so they read as decisions rather than oversights.
+
+- **The potion draft round.** Confirmed again that vanilla has no potion picker — the only
+  "choose one of N" surfaces are `NChooseACardSelectionScreen`, `NChooseABundleSelectionScreen` and
+  `NChooseARelicSelection`, and the last takes a `RelicModel`. So the round needs a bespoke screen,
+  and building one blind is how the wait-longer panel came out as a full-screen stone slab on its
+  first try. The logic around it is ~30 lines and the `Stage` enum already leaves `2` free for it.
+- **Return to lobby.** Its own note says *"Do not start this at the end of a session — it is
+  teardown ordering across two clients, which is the category that produced both the 2026-08-13
+  desync and the stuck-turn loop."* That is exactly what an unsupervised pass should not touch, and
+  nothing about it can be validated by reading.
+
+#### Stale entries corrected while auditing
+
+- The draft clock was marked **NOT built** and has shipped — `DraftClockTwenty/Thirty/Sixty/None`
+  are registered and the Steam logs carry `MODIFIER.DRAFT_CLOCK_NONE`.
+- DESIGN §7b listed "the map screen is behind the draft" as outstanding; `DuelMapLockPatch` closed
+  it and it was confirmed in play 2026-08-17.
+- The patch count was **89** here and **93** in `CLAUDE.md`; the log says **92 / 128**.
+
 ### 2026-08-18: the draft is seeded (UNPLAYED)
 
 **Reported by Lucas mid-playtest: the same seed with the same character gave different card and
