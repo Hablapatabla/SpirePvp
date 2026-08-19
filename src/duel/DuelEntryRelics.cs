@@ -198,6 +198,20 @@ public static class DuelEntryRelics
             MouseFilter = Control.MouseFilterEnum.Ignore
         };
 
+        // **The row joins the screen before it is filled, and that ordering is the whole fix.**
+        // `AddPotion` writes `_emptyIcon`, which the holder's `_Ready` assigns, and `_Ready` only
+        // runs once the node is in the *tree* — not merely inside some parent. Building the row
+        // detached and adding it afterwards, which is what the relic row above does, left every
+        // holder un-readied and every `AddPotion` throwing.
+        //
+        // The relic row gets away with it because `NRelicBasicHolder.Create` takes its model up
+        // front and needs nothing from `_Ready`. Potions are filled in a second step, so they do —
+        // the same lesson the draft's row cost a round trip to learn, one level further out.
+        //
+        // Plain `AddChild`, not `AddChildSafely`: the latter defers to end of frame unless the
+        // parent `IsNodeReady()`, and a deferred add is exactly the un-readied holder again.
+        screen.AddChild(row);
+
         int drawn = 0;
         foreach (SerializablePotion saved in potions)
         {
@@ -219,7 +233,10 @@ public static class DuelEntryRelics
             }
             catch (Exception e)
             {
-                Log.Warn($"[SpirePvp] duel entry — could not draw an opponent potion: {e.Message}");
+                // Whole exception, not `e.Message`. One line of "Object reference not set to an
+                // instance of an object" repeated six times says nothing about which of the four
+                // calls above threw, and that cost a round trip on 2026-08-19.
+                Log.Warn($"[SpirePvp] duel entry — could not draw an opponent potion: {e}");
             }
         }
 
@@ -229,7 +246,6 @@ public static class DuelEntryRelics
             return;
         }
 
-        screen.AddChildSafely(row);
         _potionRow = row;
 
         row.Alignment = FlowContainer.AlignmentMode.Center;
