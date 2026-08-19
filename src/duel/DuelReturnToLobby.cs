@@ -325,6 +325,19 @@ public static class DuelReturnToLobby
             // and releases the mod's handlers, including ours; `Arm` runs again with the next run.
             run.CleanUp();
 
+            // **Re-armed immediately, because the teardown we just ran disarmed us.**
+            // `DuelRunCleanupPatch` prefixes `CleanUp` and calls `DuelMatch.OnRunEnded`, which
+            // releases every handler this mod owns — including this one, in the middle of the
+            // exchange it is coordinating. Measured 2026-08-18: the host reached its lobby and sent
+            // `HostLobbyReady` to a client that had no handler left for it, and the client sat out
+            // its whole eight seconds and gave up.
+            //
+            // Re-arming here rather than exempting this handler from `OnRunEnded` keeps that method
+            // honest — it still releases everything — and puts the one exception at the one place
+            // that knows it is an exception. The service is the same object either side of
+            // `CleanUp`; only `State` is nulled.
+            Arm();
+
             // The same call the vanilla Main Menu button makes. It is public, so there is nothing
             // to reflect at — the only thing that button does which this does not is the
             // `Disconnect` immediately before it, which is exactly the difference we want.
@@ -362,7 +375,7 @@ public static class DuelReturnToLobby
     /// </summary>
     private static async Task OpenHostLobby()
     {
-        NCustomRunScreen? screen = PushLobbyScreen();
+        NCustomRunScreen? screen = GetLobbyScreen();
         if (screen == null)
         {
             return;
@@ -378,6 +391,7 @@ public static class DuelReturnToLobby
         // Four, matching vanilla's own host path (`NMultiplayerHostSubmenu`). A duel uses two of
         // them; the lobby's own rules are what keep a third out, not this number.
         screen.InitializeMultiplayerAsHost(net, 4);
+        PushLobbyScreen(screen);
 
         // **The match's own modifiers, not `DuelHostFlow.Requested`.** Setting that flag is how the
         // Duel *menu entry* opens a lobby, and `DuelHostLobbyPatch` consumes it by applying the
@@ -389,6 +403,8 @@ public static class DuelReturnToLobby
         // keys on the modifiers rather than on the flag, which is the same reason it works on a
         // client. `SetTickedModifiers` emits `ModifiersChanged`, so the client is synced through
         // vanilla's own handler and needs to be told nothing extra.
+        // After the push, deliberately: `OnSubmenuOpened` resets parts of the screen, so a tick
+        // applied before it would be reset along with them.
         ReapplyModifiers(screen);
 
         Log.Warn("[SpirePvp] return to lobby: host lobby open — telling the client to join");
@@ -437,7 +453,7 @@ public static class DuelReturnToLobby
             return;
         }
 
-        NCustomRunScreen? screen = PushLobbyScreen();
+        NCustomRunScreen? screen = GetLobbyScreen();
         if (screen == null)
         {
             return;
@@ -448,6 +464,7 @@ public static class DuelReturnToLobby
         // boxes would be inventing settings the run is not going to have. Same rule
         // `DuelHostLobbyPatch` states for a fresh client lobby.
         screen.InitializeMultiplayerAsClient(net, response);
+        PushLobbyScreen(screen);
         Log.Warn("[SpirePvp] return to lobby: client lobby open");
     }
 
@@ -498,7 +515,7 @@ public static class DuelReturnToLobby
     /// fetched, initialized by the caller, and pushed, in that order, because that is the order
     /// both of vanilla's own callers use.
     /// </summary>
-    private static NCustomRunScreen? PushLobbyScreen()
+    private static NCustomRunScreen? GetLobbyScreen()
     {
         // `NGame.MainMenu` is `RootSceneContainer.CurrentScene as NMainMenu` — null unless the main
         // menu is genuinely the scene on screen, which is precisely the precondition this needs.
@@ -509,8 +526,29 @@ public static class DuelReturnToLobby
             return null;
         }
 
-        NCustomRunScreen screen = menu.SubmenuStack.GetSubmenuType<NCustomRunScreen>();
-        menu.SubmenuStack.Push(screen);
-        return screen;
+        return menu.SubmenuStack.GetSubmenuType<NCustomRunScreen>();
+    }
+
+    /// <summary>
+    /// Pushes the lobby screen, which must happen **after** it has been initialized.
+    ///
+    /// **The order is not a style choice, and getting it wrong is a crash.** `Push` raises
+    /// `NCustomRunScreen.OnSubmenuOpened`, which resets the character-select buttons, which
+    /// refreshes their player icons — and those read the multiplayer state that
+    /// `InitializeMultiplayerAs{Host,Client}` is what installs. Pushing first, measured
+    /// 2026-08-18:
+    ///
+    ///     at NCharacterSelectButton.RefreshPlayerIcons()
+    ///     at NCharacterSelectButton.Reset()
+    ///     at NCustomRunScreen.OnSubmenuOpened()
+    ///     at NSubmenuStack.Push(NSubmenu screen)
+    ///
+    /// Both of vanilla's own callers — `NMultiplayerHostSubmenu` and `NJoinFriendScreen` — get,
+    /// initialize, then push, in that order. That they agree is the tell that the order is
+    /// load-bearing, and this code had it written down in a comment while doing the opposite.
+    /// </summary>
+    private static void PushLobbyScreen(NCustomRunScreen screen)
+    {
+        NGame.Instance?.MainMenu?.SubmenuStack.Push(screen);
     }
 }
