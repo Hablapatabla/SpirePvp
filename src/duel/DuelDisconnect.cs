@@ -520,6 +520,29 @@ public static class DuelDisconnect
     }
 
     /// <summary>
+    /// Stops waiting and takes the result now.
+    ///
+    /// **Brings the deadline forward rather than deciding here**, so the decision still happens in
+    /// exactly one place — the next `Tick` reads an expired deadline and runs
+    /// <see cref="DecideAfterSilence"/> like any other expiry. A second call site that declared a
+    /// result itself would be a second set of rules to keep in step with the first, and the rules
+    /// are the part that has changed twice already.
+    ///
+    /// Asked for 2026-08-19: thirty seconds is the right default and the wrong wait when you
+    /// already know they are not coming back.
+    /// </summary>
+    private static void OnEndNowPressed(NButton _)
+    {
+        if (_forfeitAtMs == null)
+        {
+            return;
+        }
+
+        Log.Warn("[SpirePvp] wait ended early — taking the result now");
+        _forfeitAtMs = Time.GetTicksMsec();
+    }
+
+    /// <summary>
     /// Buys another minute. The deadline is the only state, so extending is moving one number.
     /// </summary>
     private static void OnWaitLongerPressed(NButton _)
@@ -603,13 +626,24 @@ public static class DuelDisconnect
             popup.SetText(string.Empty, string.Empty);
 
             LocString label = new LocString(Table, "SPIREPVP_TIMEOUT.waitLonger");
-            popup.HideNoButton();
             popup.YesButton.Visible = true;
             popup.YesButton.IsYes = true;
             popup.YesButton.Modulate = WaitLongerTint;
             popup.YesButton.SetText(label.Exists() ? label.GetFormattedText() : "Wait longer...");
             popup.YesButton.Connect(NClickableControl.SignalName.Released,
                                     Callable.From<NButton>(OnWaitLongerPressed));
+
+            // **End now, on the left, in red — and the red is the scene's, not a tint.** The no
+            // button was hidden when this panel had only one thing to say; now there are two and
+            // they are opposites, so the pair vanilla already ships is exactly right: left/right,
+            // red/amber, stop/wait. This is the one control here that *does* end the match, which
+            // is what red is for, and it is the reason the wait button had to stop being red.
+            LocString endLabel = new LocString(Table, "SPIREPVP_TIMEOUT.endNow");
+            popup.NoButton.Visible = true;
+            popup.NoButton.IsYes = false;
+            popup.NoButton.SetText(endLabel.Exists() ? endLabel.GetFormattedText() : "End now");
+            popup.NoButton.Connect(NClickableControl.SignalName.Released,
+                                   Callable.From<NButton>(OnEndNowPressed));
 
             _extendPrompt = popup;
             Log.Warn("[SpirePvp] wait-longer prompt built inside the timeout curtain");
