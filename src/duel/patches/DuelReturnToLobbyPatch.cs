@@ -23,11 +23,13 @@ namespace SpirePvp.Duel.Patches;
 /// screen lays its buttons out itself, and a hard-coded gap is wrong the first time the font or the
 /// language changes.
 ///
-/// **The caption carries the state instead of a popup.** Rematch established this and it is the
-/// better surface here too — the result screen is already a screen full of buttons, and a modal
-/// over it to ask "shall we?" is a second thing to dismiss. So the label reads *Return to Lobby*,
-/// then *Waiting…* once you have asked, and *To lobby?* when they have asked you; pressing it in
-/// that last state is the acceptance. A marker mirrors the peer's intent, exactly as Rematch's does.
+/// **The opponent's portrait carries the state — not a popup, and not the caption.** The result
+/// screen is already full of buttons, so a modal asking "shall we?" is a second thing to dismiss;
+/// and a label that rewrites itself is a control you have to re-read. So the caption stays *Return
+/// to Lobby* and their icon appears over it once they have asked, which is exactly what Rematch
+/// does. Both were built and Lucas picked this one on sight. It uses Rematch's own helper, so the
+/// two cannot drift into looking like different features. Pressing it while their marker is up is
+/// the acceptance.
 /// </summary>
 [HarmonyPatch(typeof(NGameOverScreen), nameof(NGameOverScreen._Ready))]
 public static class DuelReturnToLobbyPatch
@@ -35,6 +37,9 @@ public static class DuelReturnToLobbyPatch
     /// <summary>Public so `DuelRematchPatch`'s enable mirror can find it. See `MirrorTo`.</summary>
     public const string ButtonName = "SpirePvpReturnToLobbyButton";
     private const string Table = "game_over_screen";
+
+    /// <summary>The opponent's portrait, shown over the button once they have asked. See Rematch's.</summary>
+    private const string VoteMarkerName = "SpirePvpLobbyVote";
 
     /// <summary>Fallback spacing when the menu button has not been laid out yet. Matches Rematch.</summary>
     private const float ButtonGap = 260f;
@@ -96,6 +101,8 @@ public static class DuelReturnToLobbyPatch
             float step = menuButton.Size.X > 1f ? menuButton.Size.X + 40f : ButtonGap;
             button._showPosition = menuButton._showPosition + new Vector2(step, 0f);
 
+            DuelRematchPatch.AddVoteMarker(button, VoteMarkerName);
+
             _button = button;
             DuelReturnToLobby.StateChanged += RefreshFromState;
 
@@ -156,16 +163,15 @@ public static class DuelReturnToLobbyPatch
             return;
         }
 
-        if (DuelReturnToLobby.IncomingOfferPending)
+        // **The portrait says it, not the caption.** Both were built; Lucas preferred the marker on
+        // sight, and it is the better of the two for the same reason Rematch uses one — a button
+        // whose label rewrites itself is a button you have to re-read, where a face appearing over
+        // it is legible without looking away from the score. The caption stays put so the control
+        // never stops saying what pressing it does.
+        if (button!.GetNodeOrNull<TextureRect>(VoteMarkerName) is TextureRect marker)
         {
-            SetLabel(button!, "SPIREPVP_RETURN_LOBBY.offered", "To lobby?");
-            return;
+            marker.Visible = DuelReturnToLobby.IncomingOfferPending;
         }
-
-        SetLabel(button!,
-                 DuelReturnToLobby.OfferPending ? "SPIREPVP_RETURN_LOBBY.waiting"
-                                                : "SPIREPVP_RETURN_LOBBY.title",
-                 DuelReturnToLobby.OfferPending ? "Waiting…" : "Return to Lobby");
     }
 
     /// <summary>

@@ -203,7 +203,7 @@ public static class DuelRematchPatch
             //
             // `CharacterModel.IconTexture` is the top-bar character icon, so the marker reads as
             // part of the game rather than as a mod's badge, and it costs no new art.
-            AddVoteMarker(rematch);
+            AddVoteMarker(rematch, VoteMarkerName);
 
             _button = rematch;
             DuelRematch.StateChanged += RefreshFromState;
@@ -376,19 +376,27 @@ public static class DuelRematchPatch
     /// through the enable tween rather than needing its own placement kept in step — the mistake
     /// the victory line made twice.
     /// </summary>
-    private static void AddVoteMarker(Control button)
+    /// <summary>
+    /// Puts the opponent's portrait on a result-screen button, hidden until they have voted.
+    ///
+    /// **Shared with `DuelReturnToLobbyPatch` rather than copied**, which is why it takes the
+    /// marker's name: both buttons want the identical affordance, and Lucas asked for the second
+    /// one *because* the first reads well. One implementation means the two cannot drift into
+    /// looking like different features.
+    /// </summary>
+    internal static void AddVoteMarker(Control button, string markerName)
     {
         IRunState? state = RunManager.Instance?.State;
         Player? opponent = state?.Players.FirstOrDefault(p => !LocalContext.IsMe(p));
         if (opponent == null)
         {
-            Log.Warn("[SpirePvp] rematch: no opponent to draw a vote marker for");
+            Log.Warn($"[SpirePvp] no opponent to draw a {markerName} vote marker for");
             return;
         }
 
         TextureRect marker = new TextureRect
         {
-            Name = VoteMarkerName,
+            Name = markerName,
             Texture = opponent.Character.IconTexture,
             ExpandMode = TextureRect.ExpandModeEnum.IgnoreSize,
             StretchMode = TextureRect.StretchModeEnum.KeepAspectCentered,
