@@ -413,6 +413,15 @@ public record struct DuelArrivedMessage : INetMessage
     /// </summary>
     public List<SerializableRelic> relics;
 
+    /// <summary>
+    /// The sender's potions, by the same route as <see cref="relics"/>.
+    ///
+    /// Wanted once the draft started handing them out: a duelist who spent two picks on potions is
+    /// carrying something the deck review was silently omitting, which made the review a partial
+    /// answer to "what am I about to fight".
+    /// </summary>
+    public List<SerializablePotion> potions;
+
 
     // **A field on the struct is not a field on the wire.** These are hand-written serializers, so
     // adding `hp`/`maxHp` above and populating them at the send site left them out of the packet
@@ -427,6 +436,7 @@ public record struct DuelArrivedMessage : INetMessage
         writer.WriteInt(maxHp);
         writer.WriteList<SerializableCard>(deck ?? new List<SerializableCard>());
         writer.WriteList<SerializableRelic>(relics ?? new List<SerializableRelic>());
+        writer.WriteList<SerializablePotion>(potions ?? new List<SerializablePotion>());
     }
 
     public void Deserialize(PacketReader reader)
@@ -436,6 +446,7 @@ public record struct DuelArrivedMessage : INetMessage
         maxHp = reader.ReadInt();
         deck = reader.ReadList<SerializableCard>();
         relics = reader.ReadList<SerializableRelic>();
+        potions = reader.ReadList<SerializablePotion>();
     }
 }
 

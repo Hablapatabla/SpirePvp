@@ -84,6 +84,9 @@ public static class DuelRendezvous
     /// </summary>
     public static IReadOnlyList<SerializableRelic>? OpponentRelics { get; private set; }
 
+    /// <summary>What the opponent is carrying, for the deck review. See `DuelEntryRelics`.</summary>
+    public static IReadOnlyList<SerializablePotion>? OpponentPotions { get; private set; }
+
     public static void Reset()
     {
         _localArrived = false;
@@ -91,6 +94,7 @@ public static class DuelRendezvous
         _firstToArrive = 0;
         OpponentDeck = null;
         OpponentRelics = null;
+        OpponentPotions = null;
     }
 
     /// <summary>True when <paramref name="coord"/> is this run's arena node.</summary>
@@ -130,7 +134,8 @@ public static class DuelRendezvous
             hp = mine?.CurrentHp ?? 0,
             maxHp = mine?.MaxHp ?? 0,
             deck = LocalDeckSnapshot(),
-            relics = LocalRelicSnapshot()
+            relics = LocalRelicSnapshot(),
+            potions = LocalPotionSnapshot()
         });
 
         ShowWaitingPortrait();
@@ -224,6 +229,7 @@ public static class DuelRendezvous
         RecordArrival(senderId);
         OpponentDeck = RebuildDeck(message.deck);
         OpponentRelics = message.relics ?? new List<SerializableRelic>();
+        OpponentPotions = message.potions ?? new List<SerializablePotion>();
         ApplyOpponentHp(senderId, message.hp, message.maxHp);
         Log.Warn($"[SpirePvp] arena: opponent {senderId} arrived with {OpponentDeck?.Count ?? 0} cards "
                  + $"and {OpponentRelics.Count} relic(s)");
@@ -252,6 +258,44 @@ public static class DuelRendezvous
     }
 
     /// <summary>This client's relics, in the form the wire takes. Same argument as the deck.</summary>
+    /// <summary>
+    /// The potions in the local belt, for the deck review.
+    ///
+    /// **Read off `PotionSlots`, not `Potions`.** The latter is already the non-null filtered view,
+    /// which is what you want for "what are they carrying" — but `ToSerializable` wants the belt
+    /// *slot*, and only the indexed list knows it. Nulls are the empty slots and are skipped.
+    /// </summary>
+    private static List<SerializablePotion> LocalPotionSnapshot()
+    {
+        List<SerializablePotion> potions = new List<SerializablePotion>();
+        Player? me = LocalContext.GetMe(RunManager.Instance?.State?.Players
+                                        ?? (IEnumerable<Player>)Array.Empty<Player>());
+        if (me == null)
+        {
+            return potions;
+        }
+
+        for (int i = 0; i < me.PotionSlots.Count; i++)
+        {
+            PotionModel? potion = me.PotionSlots[i];
+            if (potion == null)
+            {
+                continue;
+            }
+
+            try
+            {
+                potions.Add(potion.ToSerializable(i));
+            }
+            catch (Exception e)
+            {
+                Log.Warn($"[SpirePvp] duel entry — could not serialize {potion.Id.Entry}: {e.Message}");
+            }
+        }
+
+        return potions;
+    }
+
     private static List<SerializableRelic> LocalRelicSnapshot()
     {
         List<SerializableRelic> relics = new List<SerializableRelic>();

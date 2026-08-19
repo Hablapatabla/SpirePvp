@@ -5,6 +5,7 @@ using MegaCrit.Sts2.Core.Logging;
 using MegaCrit.Sts2.Core.Models;
 using MegaCrit.Sts2.Core.Models.Relics;
 using MegaCrit.Sts2.Core.Nodes.GodotExtensions;
+using MegaCrit.Sts2.Core.Nodes.Potions;
 using MegaCrit.Sts2.Core.Nodes.Relics;
 using MegaCrit.Sts2.Core.Nodes.Screens.CardSelection;
 using MegaCrit.Sts2.Core.Saves.Runs;
@@ -53,6 +54,15 @@ public static class DuelEntryRelics
     private const float RowHeightAboveCaption = 96f;
 
     private static HFlowContainer? _row;
+
+    /// <summary>
+    /// The opponent's potions, sitting one row above their relics.
+    ///
+    /// Asked for that way 2026-08-19, once the draft started handing potions out: *"can they be a
+    /// row on top of the relic view at the bottom of the screen?"* Two rows rather than one mixed
+    /// row, because they are two different kinds of thing and the eye should not have to sort them.
+    /// </summary>
+    private static HFlowContainer? _potionRow;
 
     /// <summary>
     /// Builds the row onto an open entry screen. Safe to call twice — the second call rebuilds,
@@ -155,6 +165,80 @@ public static class DuelEntryRelics
         Log.Warn($"[SpirePvp] duel entry — {drawn} opponent relic(s) drawn at {row.GlobalPosition} "
                  + $"across {width:F0}px, above the caption at {captionTopLeft} "
                  + $"(caption node size {label.Size})");
+
+        ShowPotions(screen, width, row.GlobalPosition.Y);
+    }
+
+    /// <summary>
+    /// Draws the opponent's potions in their own row, immediately above the relic row.
+    ///
+    /// **Stacked off the relic row's own position rather than off the caption**, so the two stay
+    /// together if the caption ever moves. The relic row is placed first and hands its Y down.
+    ///
+    /// `NPotionHolder` needs the same two things the draft's row needed and neither is optional:
+    /// the holder must be in the tree before it is filled, because `AddPotion` writes `_emptyIcon`
+    /// which `_Ready` assigns; and the potion needs `Position = (-30, -30)` to sit inside the
+    /// holder, which is what `NPotionContainer` does and `AddPotion` does not. Both cost a round
+    /// trip each in the draft — see `DuelDraftPotionScreenPatch`.
+    ///
+    /// Non-interactive throughout: this is a review, so the holders ignore the mouse for clicks and
+    /// keep only the hover tip, which is the one thing you actually want from them here.
+    /// </summary>
+    private static void ShowPotions(NDeckCardSelectScreen screen, float width, float relicRowY)
+    {
+        IReadOnlyList<SerializablePotion>? potions = DuelRendezvous.OpponentPotions;
+        if (potions == null || potions.Count == 0)
+        {
+            return;
+        }
+
+        HFlowContainer row = new HFlowContainer
+        {
+            Name = "SpirePvpOpponentPotions",
+            MouseFilter = Control.MouseFilterEnum.Ignore
+        };
+
+        int drawn = 0;
+        foreach (SerializablePotion saved in potions)
+        {
+            try
+            {
+                PotionModel model = PotionModel.FromSerializable(saved);
+                NPotionHolder holder = NPotionHolder.Create(isUsable: false);
+                NPotion? sprite = NPotion.Create(model);
+                if (sprite == null)
+                {
+                    continue;
+                }
+
+                sprite.Position = new Vector2(-30f, -30f);
+                row.AddChild(holder);
+                holder.AddPotion(sprite);
+                holder.MouseDefaultCursorShape = Control.CursorShape.Help;
+                drawn++;
+            }
+            catch (Exception e)
+            {
+                Log.Warn($"[SpirePvp] duel entry — could not draw an opponent potion: {e.Message}");
+            }
+        }
+
+        if (drawn == 0)
+        {
+            row.QueueFreeSafely();
+            return;
+        }
+
+        screen.AddChildSafely(row);
+        _potionRow = row;
+
+        row.Alignment = FlowContainer.AlignmentMode.Center;
+        row.Size = new Vector2(width, RowHeightAboveCaption);
+        row.GlobalPosition = new Vector2(screen.GlobalPosition.X,
+                                         relicRowY - RowHeightAboveCaption);
+
+        Log.Warn($"[SpirePvp] duel entry — {drawn} opponent potion(s) drawn at {row.GlobalPosition}, "
+                 + $"above the relic row at y={relicRowY:F0}");
     }
 
     /// <summary>
@@ -166,5 +250,8 @@ public static class DuelEntryRelics
     {
         _row?.QueueFreeSafely();
         _row = null;
+
+        _potionRow?.QueueFreeSafely();
+        _potionRow = null;
     }
 }
