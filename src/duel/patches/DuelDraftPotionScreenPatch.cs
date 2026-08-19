@@ -180,9 +180,22 @@ public static class DuelDraftPotionScreenPatch
             holder.Connect(NClickableControl.SignalName.Released,
                            Callable.From<NButton>(_ => DuelDraft.SubmitPotionPick(captured)));
 
+            // **Assigned, not added to — and this is the whole of why the row was invisible.**
+            // Vanilla writes `holder.Position + shift + …` because `NRelicBasicHolder` is created at
+            // the origin, so adding *is* assigning there. `NPotionHolder`'s scene is not: measured
+            // 2026-08-19 it carries an offset of roughly (-990, -570), so adding the slot offset to
+            // it put the whole row off the top-left corner of the screen. The telemetry said so
+            // outright — `visible=True size=(60,60) scale=(2,2)` at `global=(-354,-35)` while the
+            // row sat at `(936,535)` — which is the difference between "it did not render" and "it
+            // rendered somewhere you cannot see", and only one of those is a positioning bug.
+            //
+            // Zeroing first also gives the entrance tween the same origin vanilla's has, so the
+            // slide reads identically.
+            holder.Position = Vector2.Zero;
+
             Tween tween = screen.CreateTween().SetParallel();
             tween.TweenProperty(holder, "position",
-                                holder.Position + shift + Vector2.Right * ColumnPitch * i, 0.5)
+                                shift + Vector2.Right * ColumnPitch * i, 0.5)
                  .SetEase(Tween.EaseType.Out).SetTrans(Tween.TransitionType.Expo);
             tween.TweenProperty(holder, "modulate", Colors.White, 1.0)
                  .SetEase(Tween.EaseType.Out).SetTrans(Tween.TransitionType.Cubic)
