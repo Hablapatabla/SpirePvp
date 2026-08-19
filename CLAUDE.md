@@ -111,10 +111,17 @@ play and waits its turn; one that only changes your own hand resolves on click. 
 `DuelLockInPatch` is the one this project has forgotten four times. Nineteen potions, classified off
 every model's `OnUse` rather than recalled; anything unlisted queues.
 
-**Remaining:** M8.5 slice 3 — the opponent's unsubmitted queue on the wire, which is what makes the
-paced mode readable rather than merely slower. The **potion draft round** still needs a bespoke
-screen (vanilla has no potion picker), and **return to lobby** is teardown ordering across two
-clients and is deliberately not started without a playtester. See HANDOFF for the playtest order.
+**Return to lobby is done and played (2026-08-18).** A button on the result screen takes both peers
+back to the Duel lobby with the connection intact and the match's own settings re-ticked. The
+engine fact underneath it is worth knowing before building anything else that outlives a run:
+**nothing pumps the socket between a run and a lobby** — `INetGameService.Update()` has exactly two
+callers, `NRun` and `NCustomRunScreen` — and `NGame.ReturnToMainMenu` calls `RunManager.CleanUp` a
+*second* time on every menu transition.
+
+**Remaining before the balance pass:** the **potion draft round** (needs a bespoke screen — vanilla
+has no potion picker), **M8.5 slice 3** (the opponent's unsubmitted queue on the wire, which makes
+the paced mode readable rather than merely slower), the **pre-duel rest site**, and **native
+reconnect**. See HANDOFF.
 
 **The one idea that explains most of the code:** the duel never breaks card logic — it breaks
 every place the engine encodes "enemy" as a *side* rather than a *relationship*. Both duelists

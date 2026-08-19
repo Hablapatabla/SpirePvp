@@ -1798,7 +1798,27 @@ Vanilla's own `AnimateScoreBar` throws the same exception on the same click.
 condition, not on each route out — there is always another route.* The note reasoned about the one
 exit it happened to think of.
 
-### Return to lobby — the screen mechanics, researched 2026-08-14. NOT built.
+### ~~Return to lobby~~ — BUILT and played 2026-08-18, both directions
+
+**Works end to end**: both peers agree, tear down with the transport held, reach the main menu, and
+open the Duel lobby on the settings they just played — then start another match from it. Played
+match → lobby → match → lobby, and a rematch after that, all clean.
+
+Four causes were found in four rounds, each hiding behind the last, and the last two are facts about
+the engine worth carrying:
+
+1. Pushed the lobby screen before initializing it — `Push` raises `OnSubmenuOpened`, which reads
+   multiplayer state `InitializeMultiplayerAs*` installs. Both vanilla callers get, initialize, push.
+2. The teardown disarmed the handler coordinating it.
+3. **Nothing pumps the socket between a run and a lobby.** `INetGameService.Update()` has exactly
+   two callers — `NRun.cs:201` and `NCustomRunScreen.cs:568` — so in the gap the connection is open,
+   held, and unread. The host worked only because it opens its lobby before it sends.
+4. **`NGame.ReturnToMainMenu` calls `CleanUp` a second time**, and `DuelRunCleanupPatch` ran before
+   `CleanUp`'s own `State == null` guard, so every menu transition tore the mod down again.
+
+The research below is kept because its reasoning is what the build followed.
+
+### The original research — screen mechanics, 2026-08-14
 
 The item was parked as "mechanism confirmed viable, **screen-stack mechanics genuinely
 unresearched**". That half is now done, and it is smaller than it looked: opening the lobby screen is
@@ -1847,7 +1867,13 @@ how the item has been scoped until now.
 **Do not start this at the end of a session.** It is teardown ordering across two clients, which is
 the category that produced both the 2026-08-13 desync and the stuck-turn loop.
 
-### OPEN: not every potion should be queued (2026-08-14, marked not built)
+### ~~OPEN: not every potion should be queued~~ — BUILT 2026-08-18
+
+Nineteen hand-only potions resolve on click; everything else queues. `DuelTurnModel.IsDeferrable` is
+`IsPlayerInitiated` plus that test and **both** call sites take it. See the unsupervised-pass entry
+above for the classification and the two things the mechanical pass got wrong. The original note:
+
+#### The reasoning, kept
 
 Lucas: *"Skill potions just feel funky. I think we're going to have to manually discriminate on
 potions — which need to be actually queued (fire, poison, etc) vs which can be used freely (skill
