@@ -19,7 +19,7 @@ Both formats then share everything: two turn models (paced real-time, batched tu
 clocks, checksums, the arena, the result screen, badges, stats, rematch, resignation, agreed draws
 and disconnect handling.
 
-**Patch count: 93 classes / 128 methods** (`DuelReturnToLobbyPatch` added 2026-08-18; 92/128 was read out of a live log before it). Read out of `logs/host.20260818T114613.log`, not
+**Patch count: 94 classes / 129 methods** (`DuelDraftPotionScreenPatch` added 2026-08-19) (`DuelReturnToLobbyPatch` added 2026-08-18; 92/128 was read out of a live log before it). Read out of `logs/host.20260818T114613.log`, not
 restated — this file said 89 and `CLAUDE.md` said 93, and both were wrong in different directions.
 Confirm `N patch classes applied cleanly` on every launch — if it says `PATCH FAILED`, duelling
 refuses to start and in-game results mean nothing.

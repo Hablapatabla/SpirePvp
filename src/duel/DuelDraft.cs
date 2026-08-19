@@ -8,6 +8,7 @@ using MegaCrit.Sts2.Core.Context;
 using MegaCrit.Sts2.Core.Entities.Cards;
 using MegaCrit.Sts2.Core.Entities.Players;
 using MegaCrit.Sts2.Core.Entities.Relics;
+using MegaCrit.Sts2.Core.Entities.Potions;
 using MegaCrit.Sts2.Core.Helpers;
 using MegaCrit.Sts2.Core.Localization;
 using MegaCrit.Sts2.Core.Map;
@@ -81,6 +82,16 @@ public static class DuelDraft
     private const int RelicPicksEach = 4;
 
     /// <summary>
+    /// Potions shown, and taken — 4 in the pool, 2 each, drafted to exhaustion (DESIGN §7b).
+    ///
+    /// Half the relic round's numbers, because a potion is half a relic: one use, in one turn you
+    /// choose. Four also keeps the row the same shape as the relic row on screen without crowding.
+    /// </summary>
+    private const int PotionPoolSize = 4;
+
+    private const int PotionPicksEach = 2;
+
+    /// <summary>
     /// How many of each rarity the relic pool holds — 2 boss, 2 rare, 2 uncommon, 2 common.
     ///
     /// Asked for 2026-08-17 after a boss relic turned up in a draft and played as the most
@@ -97,12 +108,15 @@ public static class DuelDraft
     {
         Cards = 0,
         Relics = 1,
+        Potions = 2,
         Complete = 3
     }
 
     private static Stage _stage = Stage.Cards;
 
     private static List<RelicModel> _relicPool = new();
+
+    private static List<PotionModel> _potionPool = new();
 
     private static bool _armed;
 
@@ -190,10 +204,31 @@ public static class DuelDraft
     public static bool IsDrafting => CurrentPoolSize > 0 && !_complete;
 
     /// <summary>How many entries the running round's pool holds.</summary>
-    private static int CurrentPoolSize => _stage == Stage.Relics ? _relicPool.Count : _pool.Count;
+    /// <summary>
+    /// Whether the round on screen is one of the two that draw a row of items rather than a grid
+    /// of cards.
+    ///
+    /// **Relics and potions are the same round with a different pool**, which is the whole reason a
+    /// third round was cheap: they share the alternating loop, the message, the screen and every
+    /// dispatch below. Asking "is this a card round" once, here, keeps those dispatches two-way
+    /// instead of turning each into a three-way that has to be got right separately.
+    /// </summary>
+    private static bool IsItemStage => _stage is Stage.Relics or Stage.Potions;
+
+    private static int CurrentPoolSize => _stage switch
+    {
+        Stage.Relics => _relicPool.Count,
+        Stage.Potions => _potionPool.Count,
+        _ => _pool.Count,
+    };
 
     /// <summary>How many each player takes in the running round.</summary>
-    private static int CurrentPicksEach => _stage == Stage.Relics ? RelicPicksEach : PicksEach;
+    private static int CurrentPicksEach => _stage switch
+    {
+        Stage.Relics => RelicPicksEach,
+        Stage.Potions => PotionPicksEach,
+        _ => PicksEach,
+    };
 
     /// <summary>
     /// True once a draft has been set up for this run, and it stays true after the draft ends.
@@ -203,7 +238,7 @@ public static class DuelDraft
     /// is exactly when it happens, would have fallen back to arrival order and silently undone the
     /// compensation rule. Ask "is this a draft run", not "is a draft on screen".
     /// </summary>
-    public static bool IsDraftRun => _pool.Count > 0 || _relicPool.Count > 0;
+    public static bool IsDraftRun => _pool.Count > 0 || _relicPool.Count > 0 || _potionPool.Count > 0;
 
     /// <summary>
     /// Who takes the opening initiative: **whoever did not pick first**.
@@ -218,6 +253,19 @@ public static class DuelDraft
     {
         _pool = new List<CardModel>();
         _relicPool = new List<RelicModel>();
+
+        // **Cleared, and `IsDraftRun` is why it matters.** That property reads the pools, so a
+        // potion pool left behind would make the *next* run answer "yes, this is a draft" and take
+        // every draft-gated branch in the mod on a run that never drafted anything.
+        _potionPool = new List<PotionModel>();
+
+        // A pickup effect in flight at teardown would otherwise leave this latched, and the next
+        // draft would sit forever refusing to draw its own screen. See ObtainAndResolve.
+        _resolvingPickup = false;
+
+        // So the next draft fades in rather than snapping on, the way the first one does.
+        _introFaded = false;
+
         _stage = Stage.Cards;
         _hostPicks.Clear();
         _clientPicks.Clear();
@@ -730,6 +778,71 @@ public static class DuelDraft
     }
 
     /// <summary>
+    /// The potion pool: <see cref="PotionPoolSize"/> from the drafting character's own potions.
+    ///
+    /// **Simpler than the relic pool, and the differences are all things potions do not have.**
+    /// There is one source rather than three — `CharacterModel.PotionPool` — because potions have no
+    /// shared pool, no event pool and no boss tier to go hunting for. There is no rarity split for
+    /// the same reason the relic round needed one and this does not: a four-item row drafted to
+    /// exhaustion has no room for a shape, and `PotionRarity` does not carry the "this is the pick
+    /// that decides the duel" weight `RelicRarity.Ancient` does.
+    ///
+    /// **`Usage.None` and `Automatic` are excluded, and that is by declaration rather than by
+    /// guesswork** — the same instinct as reading `Rarity == Shop` off a relic instead of deducing
+    /// a shop relic from its hooks. A potion nobody can press is not a pick.
+    ///
+    /// Held potions are filtered out for the reason the relic pool filters them: a duelist arrives
+    /// with a starter belt in some formats, and offering back something already carried is a wasted
+    /// slot in a row of four.
+    /// </summary>
+    private static List<PotionModel> BuildPotionPool(RunState runState, Player drafter)
+    {
+        try
+        {
+            HashSet<string> held = drafter.Potions
+                .Where(pot => pot != null)
+                .Select(pot => pot.Id.Entry)
+                .ToHashSet();
+
+            List<PotionModel> available = drafter.Character.PotionPool
+                .GetUnlockedPotions(runState.UnlockState)
+                .Where(pot => pot.Usage is PotionUsage.CombatOnly or PotionUsage.AnyTime)
+                .Where(pot => !held.Contains(pot.Id.Entry))
+                .GroupBy(pot => pot.Id.Entry)
+                .Select(g => g.First())
+
+                // Canonical order before the shuffle, for the reason the other two pools sort:
+                // a shuffle by random key is a permutation of the *input* order, so the same seed
+                // over a differently-ordered candidate list would give a different row.
+                .OrderBy(pot => pot.Id.Entry, StringComparer.Ordinal)
+                .ToList();
+
+            if (available.Count < PotionPoolSize)
+            {
+                Log.Warn($"[SpirePvp] draft: only {available.Count} potion(s) available, wanted "
+                         + $"{PotionPoolSize} — the pool will be short");
+            }
+
+            Rng rng = DraftRng(runState, "potions");
+            List<PotionModel> pool = available
+                .OrderBy(_ => rng.NextInt())
+                .Take(PotionPoolSize)
+                .Select(pot => pot.ToMutable())
+                .ToList();
+
+            Log.Info("[SpirePvp] draft: potion pool — "
+                     + string.Join(", ", pool.Select(pot => $"{pot.Id.Entry}({pot.Rarity})")));
+
+            return pool;
+        }
+        catch (Exception e)
+        {
+            Log.Error($"[SpirePvp] draft: could not build a potion pool: {e}");
+            return new List<PotionModel>();
+        }
+    }
+
+    /// <summary>
     /// Whether a relic can do nothing at all in a duel, decided by the hooks it overrides.
     ///
     /// **By behaviour, not by name.** Enumerating "the rest site relics" is the hand-maintained list
@@ -864,9 +977,12 @@ public static class DuelDraft
         bool byHost = pickerId == HostId();
         (byHost ? _hostPicks : _clientPicks).Add(poolIndex);
 
-        string taken = _stage == Stage.Relics
-            ? _relicPool[poolIndex].Id.Entry
-            : _pool[poolIndex].Id.Entry;
+        string taken = _stage switch
+        {
+            Stage.Relics => _relicPool[poolIndex].Id.Entry,
+            Stage.Potions => _potionPool[poolIndex].Id.Entry,
+            _ => _pool[poolIndex].Id.Entry,
+        };
 
         Log.Warn($"[SpirePvp] draft [{_stage}]: {pickerId} took {taken} "
                  + $"(host {_hostPicks.Count}, client {_clientPicks.Count})");
@@ -995,7 +1111,7 @@ public static class DuelDraft
             map.Close();
         }
 
-        bool alive = _stage == Stage.Relics
+        bool alive = IsItemStage
             ? _relicScreen != null
               && GodotObject.IsInstanceValid(_relicScreen)
               && _relicScreen.IsInsideTree()
@@ -1005,7 +1121,7 @@ public static class DuelDraft
 
         // A relic round redraws on every pick rather than marking in place, so a state change is a
         // rebuild here where it is only a repaint for cards.
-        if (_stage == Stage.Relics && _screenDirty)
+        if (IsItemStage && _screenDirty)
         {
             alive = false;
         }
@@ -1054,7 +1170,7 @@ public static class DuelDraft
         if (!_introFaded)
         {
             _introFaded = true;
-            FadeIn(_stage == Stage.Relics ? _relicScreen : _screen);
+            FadeIn(IsItemStage ? _relicScreen : _screen);
         }
     }
 
@@ -1179,6 +1295,23 @@ public static class DuelDraft
             Log.Warn("[SpirePvp] draft: no relics available, skipping the relic round");
         }
 
+        // **Falls through from either of the two rounds above.** A relic round that could not be
+        // built lands here too, which is why this is not an `else if` — the potion round does not
+        // care why the previous one ended, only that it is over.
+        if (_stage is Stage.Cards or Stage.Relics && runState != null && me != null)
+        {
+            _potionPool = BuildPotionPool(runState, me);
+            if (_potionPool.Count > 0)
+            {
+                _stage = Stage.Potions;
+                Log.Warn($"[SpirePvp] draft: relics done — {_potionPool.Count} potion(s) up, "
+                         + $"{_firstPickerId} picks first");
+                return;
+            }
+
+            Log.Warn("[SpirePvp] draft: no potions available, skipping the potion round");
+        }
+
         _stage = Stage.Complete;
         _complete = true;
         _pickerId = 0;
@@ -1192,6 +1325,7 @@ public static class DuelDraft
             stage = (int)_stage,
             pool = _pool.Select(c => c.ToSerializable()).ToList(),
             relicPool = _relicPool.Select(r => r.ToSerializable()).ToList(),
+            potionPool = _potionPool.Select((pot, i) => pot.ToSerializable(i)).ToList(),
             hostPicks = new List<int>(_hostPicks),
             clientPicks = new List<int>(_clientPicks),
             pickerId = _pickerId,
@@ -1230,6 +1364,10 @@ public static class DuelDraft
         // than only once — unlike the cards, which exist from the first broadcast.
         if (_relicPool.Count != (message.relicPool?.Count ?? 0))
         {
+            _potionPool = (message.potionPool ?? new List<SerializablePotion>())
+                .Select(PotionModel.FromSerializable)
+                .ToList();
+
             _relicPool = (message.relicPool ?? new List<SerializableRelic>())
                 .Select(RelicModel.FromSerializable)
                 .Where(r => r != null)
@@ -1290,7 +1428,7 @@ public static class DuelDraft
     {
         CloseScreen();
 
-        if (_stage == Stage.Relics)
+        if (IsItemStage)
         {
             ShowRelicScreen();
             return;
@@ -1340,18 +1478,31 @@ public static class DuelDraft
     /// </summary>
     private static void ShowRelicScreen()
     {
+        // **The potion round borrows this screen whole**, which is the entire reason it looks
+        // identical: same scene, same banner, same row layout, same skip button, same tweens. All
+        // that differs is what sits in the row, and `DuelDraftPotionScreenPatch` swaps that in.
+        // The relic list is deliberately empty on a potion round — vanilla's own `_Ready` never
+        // runs there, so nothing reads it.
+        bool potions = _stage == Stage.Potions;
+        int itemsLeft = potions ? RemainingPotions.Count : 0;
+
         List<RelicModel> remaining = new List<RelicModel>();
-        for (int i = 0; i < _relicPool.Count; i++)
+        if (!potions)
         {
-            if (!IsTaken(i))
+            for (int i = 0; i < _relicPool.Count; i++)
             {
-                remaining.Add(_relicPool[i]);
+                if (!IsTaken(i))
+                {
+                    remaining.Add(_relicPool[i]);
+                }
             }
+
+            itemsLeft = remaining.Count;
         }
 
-        if (remaining.Count == 0)
+        if (itemsLeft == 0)
         {
-            Log.Warn("[SpirePvp] draft: no relics left to show");
+            Log.Warn($"[SpirePvp] draft: no {(potions ? "potions" : "relics")} left to show");
             return;
         }
 
@@ -1371,11 +1522,67 @@ public static class DuelDraft
             _relicScreen._banner.label.Modulate = LocalMayPick ? StsColors.green : StsColors.red;
         }
 
-        Log.Info($"[SpirePvp] draft [relics]: {remaining.Count} left, "
+        Log.Info($"[SpirePvp] draft [{(potions ? "potions" : "relics")}]: {itemsLeft} left, "
                  + $"{(LocalMayPick ? "your pick" : "waiting on " + _pickerId)}");
     }
 
     private static NChooseARelicSelection? _relicScreen;
+
+    /// <summary>
+    /// The potions still on the table, or an empty list in any other round.
+    ///
+    /// Read by `DuelDraftPotionScreenPatch` when the relic screen is being built, which is how the
+    /// potion round borrows that screen whole rather than growing one of its own.
+    /// </summary>
+    public static IReadOnlyList<PotionModel> RemainingPotions
+    {
+        get
+        {
+            List<PotionModel> remaining = new List<PotionModel>();
+            if (_stage != Stage.Potions)
+            {
+                return remaining;
+            }
+
+            for (int i = 0; i < _potionPool.Count; i++)
+            {
+                if (!IsTaken(i))
+                {
+                    remaining.Add(_potionPool[i]);
+                }
+            }
+
+            return remaining;
+        }
+    }
+
+    /// <summary>
+    /// Submits a potion pick. Called by `DuelDraftPotionScreenPatch` when a holder is clicked.
+    ///
+    /// By identity against the pool, exactly as the relic pick is, so two copies of one potion id
+    /// could never collapse onto the same slot.
+    /// </summary>
+    public static void SubmitPotionPick(PotionModel potion)
+    {
+        if (!LocalMayPick || _stage != Stage.Potions)
+        {
+            return;
+        }
+
+        int poolIndex = _potionPool.IndexOf(potion);
+        if (poolIndex < 0 || IsTaken(poolIndex))
+        {
+            return;
+        }
+
+        if (RunManager.Instance?.NetService.Type == NetGameType.Host)
+        {
+            TryPick(LocalId(), poolIndex);
+            return;
+        }
+
+        RunManager.Instance?.NetService?.SendMessage(new DraftPickMessage { poolIndex = poolIndex });
+    }
 
     /// <summary>
     /// Submits a relic pick. Called by `DuelDraftRelicPatch` when a holder is clicked.
@@ -1385,7 +1592,7 @@ public static class DuelDraft
     /// </summary>
     public static void SubmitRelicPick(RelicModel relic)
     {
-        if (!LocalMayPick || _stage != Stage.Relics)
+        if (!LocalMayPick || !IsItemStage)
         {
             return;
         }
@@ -1419,9 +1626,9 @@ public static class DuelDraft
     /// </summary>
     private static void RefreshVisuals()
     {
-        if (_stage == Stage.Relics)
+        if (IsItemStage)
         {
-            // The relic row has no marking to refresh — it is rebuilt with the survivors instead.
+            // The item row has no marking to refresh — it is rebuilt with the survivors instead.
             return;
         }
 
@@ -1715,6 +1922,28 @@ public static class DuelDraft
                 // is the same shortcut that made draft cards render as True Grit.
                 RelicModel relic = _relicPool[index];
                 TaskHelper.RunSafely(ObtainAndResolve(relic, me));
+                continue;
+            }
+
+            if (_stage == Stage.Potions)
+            {
+                if (index < 0 || index >= _potionPool.Count)
+                {
+                    continue;
+                }
+
+                // **`PotionCmd.TryToProcure`, not `AddPotionInternal`**, for the reason the relic
+                // round calls `Obtain` rather than the internal add: it is the path the game itself
+                // uses, so the belt animation, the "no room" case and anything hooked on procuring
+                // come for free. Reaching past it is the shortcut that made draft cards render as
+                // True Grit.
+                //
+                // Fire-and-forget is right here where it was wrong for relics: a potion has no
+                // on-pickup effect to wait for — that is exactly what `Usage.Automatic` would be,
+                // and the pool excludes it.
+                PotionModel potion = _potionPool[index];
+                TaskHelper.RunSafely(PotionCmd.TryToProcure(potion, me));
+                Log.Info($"[SpirePvp] draft: {potion.Id.Entry} procured");
                 continue;
             }
 

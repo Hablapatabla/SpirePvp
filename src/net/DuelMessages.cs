@@ -668,6 +668,9 @@ public record struct DraftStateMessage : INetMessage
     /// <summary>The relic pool, same contract, used when <see cref="stage"/> is the relic round.</summary>
     public List<SerializableRelic> relicPool;
 
+    /// <summary>The potion pool, same contract again, for the potion round.</summary>
+    public List<SerializablePotion> potionPool;
+
     /// <summary>Pool indices taken by the host, in pick order.</summary>
     public List<int> hostPicks;
 
@@ -687,6 +690,7 @@ public record struct DraftStateMessage : INetMessage
         writer.WriteInt(stage);
         writer.WriteList<SerializableCard>(pool ?? new List<SerializableCard>());
         writer.WriteList<SerializableRelic>(relicPool ?? new List<SerializableRelic>());
+        writer.WriteList<SerializablePotion>(potionPool ?? new List<SerializablePotion>());
         WriteIndices(writer, hostPicks);
         WriteIndices(writer, clientPicks);
         writer.WriteULong(pickerId);
@@ -699,6 +703,7 @@ public record struct DraftStateMessage : INetMessage
         stage = reader.ReadInt();
         pool = reader.ReadList<SerializableCard>();
         relicPool = reader.ReadList<SerializableRelic>();
+        potionPool = reader.ReadList<SerializablePotion>();
         hostPicks = ReadIndices(reader);
         clientPicks = ReadIndices(reader);
         pickerId = reader.ReadULong();

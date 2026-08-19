@@ -1,0 +1,151 @@
+using System;
+using System.Collections.Generic;
+using System.Linq;
+using Godot;
+using HarmonyLib;
+using MegaCrit.Sts2.Core.Helpers;
+using MegaCrit.Sts2.Core.Localization;
+using MegaCrit.Sts2.Core.Logging;
+using MegaCrit.Sts2.Core.Models;
+using MegaCrit.Sts2.Core.Nodes.CommonUi;
+using MegaCrit.Sts2.Core.Nodes.GodotExtensions;
+using MegaCrit.Sts2.Core.Nodes.Potions;
+using MegaCrit.Sts2.Core.Nodes.Screens;
+using MegaCrit.Sts2.Core.Nodes.Screens.CardSelection;
+
+namespace SpirePvp.Duel.Patches;
+
+/// <summary>
+/// Builds the potion round's row inside the relic screen, so the two rounds are the same screen.
+///
+/// **Asked for exactly that way**: *"can we make potion draft look exactly like relic? ... exactly
+/// how relic draft is now except with potions instead of relics."* Taken literally — this does not
+/// imitate `NChooseARelicSelection`, it *is* `NChooseARelicSelection`. Same scene, same banner, same
+/// backdrop, same skip button, same row geometry, same tweens, same focus wiring. The only thing
+/// that differs is what sits in the row, which is the only thing that should.
+///
+/// # Why a prefix that replaces `_Ready` rather than a shim relic
+///
+/// The screen is relic-typed all the way down: `_relics` is `IReadOnlyList&lt;RelicModel&gt;`,
+/// the row is built from `NRelicBasicHolder.Create(RelicModel)`, and the holder hands an
+/// `NRelic` its `Model`. The other route to "potions in this screen" is a `RelicModel` subclass
+/// wearing a potion's icon and tips — and that means a fake relic in the model layer, which can
+/// leak into a relic pool, a save, or a grab bag. **A display lie in a model is a worse bug than
+/// the one it fixes**, and it is the same instinct that stopped the draft giving pool cards a real
+/// pile just to make a preview render.
+///
+/// So the potion round hands `ShowScreen` an empty relic list and this prefix does the layout
+/// instead. Vanilla's `_Ready` never runs on that round, which is why the empty list is safe rather
+/// than merely unused.
+///
+/// # The layout is vanilla's, copied deliberately
+///
+/// The geometry below — the 200px column pitch, the half-width left shift, the expo position tween
+/// and the cubic modulate-from-black — is `NChooseARelicSelection._Ready`'s, line for line, because
+/// matching it *is* the requirement. If that method's layout ever changes, this is the twin that
+/// has to change with it. Same relationship `DuelArena` has with `EnterMapPointInternal`, and the
+/// same warning: six omissions were found there one at a time.
+/// </summary>
+[HarmonyPatch(typeof(NChooseARelicSelection), nameof(NChooseARelicSelection._Ready))]
+public static class DuelDraftPotionScreenPatch
+{
+    /// <summary>Vanilla's column pitch between items in the row.</summary>
+    private const float ColumnPitch = 200f;
+
+    public static bool Prefix(NChooseARelicSelection __instance)
+    {
+        IReadOnlyList<PotionModel> potions = DuelDraft.RemainingPotions;
+        if (potions.Count == 0)
+        {
+            return true;
+        }
+
+        try
+        {
+            BuildPotionRow(__instance, potions);
+            Log.Info($"[SpirePvp] draft: potion row built with {potions.Count} potion(s)");
+            return false;
+        }
+        catch (Exception e)
+        {
+            // Falling through to vanilla would build a row from an empty relic list and index into
+            // it, so the honest failure is no screen rather than a crash inside one.
+            Log.Error($"[SpirePvp] draft: could not build the potion row: {e}");
+            return false;
+        }
+    }
+
+    private static void BuildPotionRow(NChooseARelicSelection screen, IReadOnlyList<PotionModel> potions)
+    {
+        screen._banner = screen.GetNode<NCommonBanner>("Banner");
+        screen._banner.label.SetTextAutoSize(
+            new LocString("gameplay_ui", "CHOOSE_RELIC_HEADER").GetRawText());
+        screen._banner.AnimateIn();
+
+        screen._relicRow = screen.GetNode<Control>("RelicRow");
+
+        Vector2 shift = Vector2.Left * (potions.Count - 1) * ColumnPitch * 0.5f;
+        for (int i = 0; i < potions.Count; i++)
+        {
+            PotionModel potion = potions[i];
+
+            // `isUsable: false` — this is a row to pick from, not a belt. A usable holder wires up
+            // the click-to-drink path and the targeting arrow, which is emphatically not what a
+            // click here should mean.
+            NPotionHolder holder = NPotionHolder.Create(isUsable: false);
+            NPotion? node = NPotion.Create(potion);
+            if (node == null)
+            {
+                continue;
+            }
+
+            holder.AddPotion(node);
+            holder.Scale = Vector2.One * 2f;
+            screen._relicRow.AddChildSafely(holder);
+
+            PotionModel captured = potion;
+            holder.Connect(NClickableControl.SignalName.Released,
+                           Callable.From<NButton>(_ => DuelDraft.SubmitPotionPick(captured)));
+
+            Tween tween = screen.CreateTween().SetParallel();
+            tween.TweenProperty(holder, "position",
+                                holder.Position + shift + Vector2.Right * ColumnPitch * i, 0.5)
+                 .SetEase(Tween.EaseType.Out).SetTrans(Tween.TransitionType.Expo);
+            tween.TweenProperty(holder, "modulate", Colors.White, 1.0)
+                 .SetEase(Tween.EaseType.Out).SetTrans(Tween.TransitionType.Cubic)
+                 .From(Colors.Black);
+        }
+
+        screen._skipButton = screen.GetNode<NChoiceSelectionSkipButton>("SkipButton");
+        screen._skipButton.AnimateIn();
+
+        // **The skip button is not wired to anything**, unlike vanilla's. A draft pick is not
+        // optional — the round is drafted to exhaustion and skipping would desync the alternation —
+        // and `DuelDraftScreenPatch` already refuses the equivalent on the relic round. Left on
+        // screen rather than hidden so the row keeps the layout it is meant to match.
+        List<NPotionHolder> holders = screen._relicRow.GetChildren().OfType<NPotionHolder>().ToList();
+        if (holders.Count == 0)
+        {
+            return;
+        }
+
+        screen._skipButton.FocusNeighborTop = holders[holders.Count / 2].GetPath();
+        screen._skipButton.FocusNeighborBottom = screen._skipButton.GetPath();
+        screen._skipButton.FocusNeighborLeft = screen._skipButton.GetPath();
+        screen._skipButton.FocusNeighborRight = screen._skipButton.GetPath();
+
+        int count = screen._relicRow.GetChildCount();
+        for (int j = 0; j < count; j++)
+        {
+            Control child = screen._relicRow.GetChild<Control>(j);
+            child.FocusNeighborBottom = child.GetPath();
+            child.FocusNeighborTop = child.GetPath();
+            child.FocusNeighborLeft = (j > 0
+                ? screen._relicRow.GetChild(j - 1)
+                : screen._relicRow.GetChild(count - 1)).GetPath();
+            child.FocusNeighborRight = (j < count - 1
+                ? screen._relicRow.GetChild(j + 1)
+                : screen._relicRow.GetChild(0)).GetPath();
+        }
+    }
+}

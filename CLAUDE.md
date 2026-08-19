@@ -118,8 +118,14 @@ engine fact underneath it is worth knowing before building anything else that ou
 callers, `NRun` and `NCustomRunScreen` — and `NGame.ReturnToMainMenu` calls `RunManager.CleanUp` a
 *second* time on every menu transition.
 
-**Remaining before the balance pass:** the **potion draft round** (needs a bespoke screen — vanilla
-has no potion picker), **M8.5 slice 3** (the opponent's unsubmitted queue on the wire, which makes
+**The draft is complete (2026-08-19):** cards, then relics, then **potions** — 4 in the pool, 2
+each. The potion round *is* `NChooseARelicSelection` rather than an imitation of it:
+`DuelDraftPotionScreenPatch` prefixes its `_Ready` and fills the same row with `NPotionHolder`s, so
+the two rounds share a scene, a banner, a skip button and every tween. A `RelicModel` shim wearing a
+potion's icon was the other route and was refused — a fake relic can leak into a pool, a save or a
+grab bag, and a display lie in the model layer is worse than the bug it fixes.
+
+**Remaining before the balance pass:** **M8.5 slice 3** (the opponent's unsubmitted queue on the wire, which makes
 the paced mode readable rather than merely slower), the **pre-duel rest site**, and **native
 reconnect**. See HANDOFF.
 
@@ -132,7 +138,7 @@ side comparison before suspecting the mechanic. DESIGN §7 has the symptom → c
 - `dotnet build` must stay green; it auto-installs the mod into the local game.
 - **Never use `Harmony.PatchAll`.** It throws on the first bad target and silently abandons the
   rest. `SpirePvpInit` patches per class and logs a count — confirm `N patch classes applied
-  cleanly` in the log on every launch, or in-game results are meaningless. **93 classes / 128 methods** (`DuelReturnToLobbyPatch` added 2026-08-18; 92/128 was read out of `logs/host.20260818T114613.log` before it) (this line said 93 and HANDOFF said 89; both were guesses, and the log is the only thing that knows) — `DuelModifierMinimumPatch` added one, and the AoE fix removed `DuelAoeProbePatch` and added `DuelAoeTargetingPatch` and `DuelHookListenerScopePatch`. Note the count is per *class*, not per patch: a class holding
+  cleanly` in the log on every launch, or in-game results are meaningless. **94 classes / 129 methods** (`DuelReturnToLobbyPatch` added 2026-08-18; 92/128 was read out of `logs/host.20260818T114613.log` before it) (this line said 93 and HANDOFF said 89; both were guesses, and the log is the only thing that knows) — `DuelModifierMinimumPatch` added one, and the AoE fix removed `DuelAoeProbePatch` and added `DuelAoeTargetingPatch` and `DuelHookListenerScopePatch`. Note the count is per *class*, not per patch: a class holding
   methods still counts once, so grouping patches by concern does not move it.
 - **The engine assumes the party is standing together, and in a race it is not.** This is the
   single most productive thing to suspect when a race-phase room misbehaves — it has now
