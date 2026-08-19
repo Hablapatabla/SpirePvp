@@ -3595,7 +3595,6 @@ would improve the thing:
 | **Deck review background** | Currently the *boss* background, which is wrong and was flagged as wrong on sight. Anything plain — black, or the campfire — beats it; until then the fallback is whatever `NDeckCardSelectScreen` uses behind its grid. |
 | **Duel map node** | Exists (`SpirePvp/map/duel_node.png` + `_outline`). Now doubles as the top-bar boss icon via `DuelRoomIconPatch`, so it is being drawn at two sizes and may want a small variant. |
 | **Entry-screen confirm feedback** | Still a colour tint standing in for the intended green check plus opponent portrait (DESIGN §6). |
-| **Flame effect for the deck-review transition** | Wanted, not built. `NRestSiteFireVfx` is a scene child with no static `Create` so it cannot be reused standalone; `NRestSmokeVfx.Create()` and `NDesaturateTransitionVfx.Create()` are standalone and parameterless. A real flame is scene work. |
 
 **Loc tables are assets too, and their filenames are load-bearing.** `LocManager` merges a mod's
 tables only into tables vanilla already has, *by filename* — so a new table called
@@ -3794,12 +3793,6 @@ because leaving it is what disconnects.
 
 **The seed question is settled: same seed.** Both players have seen the map, so the second run is
 pure decision-making, and it is strictly less work — the seed is already in the run being ended.
-
-**A flame effect for the deck-review transition** (wanted, not built). The rest site's fire is
-`NRestSiteFireVfx`, a scene child of `NRestSiteRoom` with no static `Create`, so it cannot be
-reused standalone. The pieces of the rest animation that *are* standalone and parameterless are
-`NRestSmokeVfx.Create()` and `NDesaturateTransitionVfx.Create()`. A real flame is scene work,
-best batched with the M6 asset pass.
 
 **~~Run-history icon load failure.~~ FIXED 2026-08-06, and it was not cosmetic.** Recorded here
 as "logs an error once per run"; measured, it was **19 failures per client per session**, and
