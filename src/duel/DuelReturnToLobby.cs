@@ -121,11 +121,17 @@ public static class DuelReturnToLobby
         INetGameService? net = RunManager.Instance?.NetService;
         if (net == null)
         {
+            // **Said out loud, because a silent return here is invisible until a message is
+            // dropped.** This cost a round trip on 2026-08-18: the handler was re-armed after a
+            // teardown, the re-arm did not take, and the only evidence was a dropped message on
+            // the far side of the exchange with nothing local to point at.
+            Log.Warn("[SpirePvp] return to lobby: cannot arm — there is no net service");
             return;
         }
 
         net.RegisterMessageHandler<DuelReturnToLobbyMessage>(OnMessage);
         _armed = true;
+        Log.Info("[SpirePvp] return to lobby: handler armed");
     }
 
     /// <summary>Releases it. See `DuelMatch.OnRunEnded`.</summary>

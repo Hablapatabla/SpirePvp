@@ -24,6 +24,27 @@ public static class DuelRunCleanupPatch
 {
     public static void Prefix()
     {
+        // **The same question `CleanUp` asks itself, and it has to be asked here too.**
+        // `CleanUp` opens with `if (State == null) return;`, so calling it twice is harmless —
+        // but this prefix runs *before* that check, so without the same guard the second call
+        // still tears the mod down.
+        //
+        // That is not hypothetical. `NGame.ReturnToMainMenu` is
+        // `FadeOut  →  RunManager.Instance.CleanUp()  →  LoadMainMenu()`, so **every** return to
+        // the menu after a run calls `CleanUp` a second time. Measured 2026-08-18 by
+        // `DuelReturnToLobby`, which re-arms its handler immediately after its own `CleanUp` and
+        // found it disarmed again a line later, by the no-op call inside the menu transition:
+        //
+        //     Received message of type SpirePvp.Net.DuelReturnToLobbyMessage,
+        //     but no message handlers are registered for that type!
+        //
+        // Anything that legitimately holds state across a teardown — the two features that hold
+        // the transport open, and anything after them — hits this. Guarding here fixes it once.
+        if (RunManager.Instance?.State == null)
+        {
+            return;
+        }
+
         DuelMatch.OnRunEnded();
     }
 }
