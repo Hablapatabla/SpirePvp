@@ -90,7 +90,51 @@ up cold, and a pointer to where the reasoning already lives.
    post-hoc reconcile when the two clients next meet. **Decide it against native reconnect**, which
    is the milestone that changes the answer.
 
-4. **What to cut from 1v1.** Vanilla content assumes a co-op or solo run against monsters; a duel
+4. **The three relics that need `SetupForPlayer`, and currently no-op in a draft.** Deferred here
+   2026-08-18. Reported as "dusty tome didn't do anything", diagnosed, and parked rather than fixed
+   because the fix has a content question inside it.
+
+   `DustyTome`, `ArchaicTooth` and `TouchOfOrobas` each carry a `[SavedProperty]` chosen *per
+   player* — the Ancient card Dusty Tome will give you, for instance — and each exposes a
+   `SetupForPlayer(Player)` that picks it. **Vanilla calls that method from exactly two places, both
+   events** (`Darv` and `Orobas`), and a duel visits no events. So the draft hands out a relic whose
+   property is still null:
+
+       Property AncientCard on RELIC.DUSTY_TOME is null, which is not a valid SavedProperty
+       [SpirePvp] draft: DUSTY_TOME threw while being obtained:
+           System.ArgumentNullException: Value cannot be null. (Parameter 'key')
+
+   `AfterObtained` does `ModelDb.GetById<CardModel>(AncientCard)` on that null. It is **safe** —
+   `DuelDraft.ObtainAndResolve` catches it, logs it and the draft carries on — so these are dead
+   picks rather than broken matches, which is why this can wait.
+
+   Same family as "draft cards were never built through the factory": a vanilla creation path
+   reimplemented in one line, inheriting an omission silently. The mechanical fix is to call
+   `SetupForPlayer` on the three types, and the only real decision is *when*: at pool-build time the
+   grid can show which card Dusty Tome is offering, which is information you want while choosing —
+   but the pool is built once on the host and broadcast, while `SetupForPlayer` draws from
+   `player.PlayerRng.Rewards`, so "which player is it set up for" has to be answered before the
+   code can be written. Setting it up at grant time instead is trivially correct and makes the pick
+   blind.
+
+   Note `ArchaicTooth` and `TouchOfOrobas` return `bool` from theirs — setup can fail — so a relic
+   that cannot be set up needs a filter, which is a pool question and belongs in this pass anyway.
+
+5. **Fur Coat.** Deferred here 2026-08-18 on sight; recorded now because *why* it is suspicious is
+   the part worth keeping.
+
+   It is a map relic in a mode with no map: `ModifyGeneratedMapLate` marks eight Monster/Elite
+   coords when the act is generated, and the payoff only fires in a combat at one of those coords.
+   A draft generates no map to mark and the arena is a Boss-type point, so in practice it should do
+   nothing — a dead Ancient pick taking a slot in a tier that only has two.
+
+   **The reason to look rather than assume**: its payoff is
+   `CreatureCmd.SetCurrentHp(item, 1m)` over `hittableEnemies`, and in a duel `HittableEnemies` is
+   the getter `DuelAoeTargetingPatch` resolves to *the opponent*. So the failure mode if the
+   condition ever does hold is not "does nothing" — it is setting the other player to 1 HP. Worth
+   confirming which of the two it actually is before deciding whether to cut it.
+
+6. **What to cut from 1v1.** Vanilla content assumes a co-op or solo run against monsters; a duel
    is neither. Some relics, potions and cards are pointless, degenerate, or unfun across the table.
    The dead-in-a-duel *reflex* is already handled by hook (`DuelDraft.IsDeadInADuel`); this is the
    *judgement* layer on top — the things that technically function but should not be offered because

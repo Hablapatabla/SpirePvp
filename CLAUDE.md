@@ -125,7 +125,7 @@ side comparison before suspecting the mechanic. DESIGN §7 has the symptom → c
 - `dotnet build` must stay green; it auto-installs the mod into the local game.
 - **Never use `Harmony.PatchAll`.** It throws on the first bad target and silently abandons the
   rest. `SpirePvpInit` patches per class and logs a count — confirm `N patch classes applied
-  cleanly` in the log on every launch, or in-game results are meaningless. **93 classes / 129 methods** (`DuelReturnToLobbyPatch` added 2026-08-18; 92/128 was read out of `logs/host.20260818T114613.log` before it) (this line said 93 and HANDOFF said 89; both were guesses, and the log is the only thing that knows) — `DuelModifierMinimumPatch` added one, and the AoE fix removed `DuelAoeProbePatch` and added `DuelAoeTargetingPatch` and `DuelHookListenerScopePatch`. Note the count is per *class*, not per patch: a class holding
+  cleanly` in the log on every launch, or in-game results are meaningless. **93 classes / 128 methods** (`DuelReturnToLobbyPatch` added 2026-08-18; 92/128 was read out of `logs/host.20260818T114613.log` before it) (this line said 93 and HANDOFF said 89; both were guesses, and the log is the only thing that knows) — `DuelModifierMinimumPatch` added one, and the AoE fix removed `DuelAoeProbePatch` and added `DuelAoeTargetingPatch` and `DuelHookListenerScopePatch`. Note the count is per *class*, not per patch: a class holding
   methods still counts once, so grouping patches by concern does not move it.
 - **The engine assumes the party is standing together, and in a race it is not.** This is the
   single most productive thing to suspect when a race-phase room misbehaves — it has now

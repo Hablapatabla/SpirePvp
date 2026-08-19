@@ -32,7 +32,8 @@ namespace SpirePvp.Duel.Patches;
 [HarmonyPatch(typeof(NGameOverScreen), nameof(NGameOverScreen._Ready))]
 public static class DuelReturnToLobbyPatch
 {
-    private const string ButtonName = "SpirePvpReturnToLobbyButton";
+    /// <summary>Public so `DuelRematchPatch`'s enable mirror can find it. See `MirrorTo`.</summary>
+    public const string ButtonName = "SpirePvpReturnToLobbyButton";
     private const string Table = "game_over_screen";
 
     /// <summary>Fallback spacing when the menu button has not been laid out yet. Matches Rematch.</summary>
@@ -88,9 +89,12 @@ public static class DuelReturnToLobbyPatch
 
             SetLabel(button, "SPIREPVP_RETURN_LOBBY.title", "Return to Lobby");
 
-            // Two steps left: Main Menu sits at the anchor, Rematch one step off it, this one two.
+            // **To the right of Main Menu**, so the row reads Rematch · Main Menu · Return to Lobby.
+            // Asked for 2026-08-18. Rematch sits one step *left* of the anchor, so putting this one
+            // step right of it keeps Main Menu where players already expect to find it rather than
+            // shifting the whole row along by one every time a button is added.
             float step = menuButton.Size.X > 1f ? menuButton.Size.X + 40f : ButtonGap;
-            button._showPosition = menuButton._showPosition + new Vector2(-step * 2f, 0f);
+            button._showPosition = menuButton._showPosition + new Vector2(step, 0f);
 
             _button = button;
             DuelReturnToLobby.StateChanged += RefreshFromState;

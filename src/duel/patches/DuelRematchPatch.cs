@@ -277,90 +277,75 @@ public static class DuelRematchPatch
     private static void MirrorTo(NClickableControl source, bool enable)
     {
         // Enable() is called on every clickable control in the game, so this narrows to the one
-        // button we sit beside before touching anything.
-        if (source is not NReturnToMainMenuButton || source.Name == RematchButtonName
-            || !source.IsValid())
+        // button we sit beside before touching anything — and excludes our own clones, which are
+        // the same class and would otherwise recurse.
+        if (source is not NReturnToMainMenuButton || !source.IsValid() || IsOneOfOurs(source.Name))
         {
             return;
         }
 
-        if (source.GetParent()?.GetNodeOrNull<NReturnToMainMenuButton>(RematchButtonName)
-            is not NReturnToMainMenuButton rematch)
+        if (source.GetParent() is not Node parent)
         {
             return;
         }
 
-        if (enable)
+        foreach (string name in CloneNames)
         {
-            // Belt and braces against the guard above: if anything has left it believing it is
-            // already enabled, the call would be swallowed and the button would stay invisible
-            // with nothing in the log to say why.
-            if (rematch.IsEnabled)
+            if (parent.GetNodeOrNull<NReturnToMainMenuButton>(name)
+                is not NReturnToMainMenuButton clone)
             {
-                rematch.Disable();
-
-            // **Their portrait, over the button, when they have voted to play again.** Lucas asked
-            // for an unspoken way to read the other player's intent, and noted that seeing the
-            // opponent's *mouse* on this screen already does some of that — so this is the same
-            // idea made explicit rather than a replacement for it. See the cursor note in HANDOFF:
-            // that behaviour is wanted and must not be suppressed.
-            //
-            // `CharacterModel.IconTexture` is the top-bar character icon, so the marker reads as
-            // part of the game rather than as a mod's badge, and it costs no new art.
-            AddVoteMarker(rematch);
-
-            _button = rematch;
-            DuelRematch.StateChanged += RefreshFromState;
-            rematch.TreeExiting += () =>
-            {
-                DuelRematch.StateChanged -= RefreshFromState;
-                _button = null;
-            };
+                continue;
             }
 
-            rematch.Visible = true;
-            rematch.Enable();
-        }
-        else
-        {
-            rematch.Disable();
-
-            // **Their portrait, over the button, when they have voted to play again.** Lucas asked
-            // for an unspoken way to read the other player's intent, and noted that seeing the
-            // opponent's *mouse* on this screen already does some of that — so this is the same
-            // idea made explicit rather than a replacement for it. See the cursor note in HANDOFF:
-            // that behaviour is wanted and must not be suppressed.
-            //
-            // `CharacterModel.IconTexture` is the top-bar character icon, so the marker reads as
-            // part of the game rather than as a mod's badge, and it costs no new art.
-            AddVoteMarker(rematch);
-
-            _button = rematch;
-            DuelRematch.StateChanged += RefreshFromState;
-            rematch.TreeExiting += () =>
+            if (enable)
             {
-                DuelRematch.StateChanged -= RefreshFromState;
-                _button = null;
-            };
-        }
+                // Belt and braces: if anything has left it believing it is already enabled, the
+                // call below would be swallowed and the button would stay invisible with nothing
+                // in the log to say why.
+                if (clone.IsEnabled)
+                {
+                    clone.Disable();
+                }
 
-        Log.Warn($"[SpirePvp] rematch: button {(enable ? "shown" : "hidden")} with the menu button");
-
-        if (enable)
-        {
-            // **Both sides, dumped and diffed.** The button reports itself added, placed and
-            // shown, and is not on screen — so the next question is which property differs from
-            // the one beside it, and that is not answerable from a screenshot. Two placement bugs
-            // in this project were "corrected" from screenshots and one of those corrections was
-            // wrong; what settled them was logging both and diffing. Deferred a frame because
-            // `Enable` starts a half-second tween, and the interesting values are the ones it
-            // lands on.
-            SceneTreeTimer? settled = source.GetTree()?.CreateTimer(0.75);
-            if (settled != null)
+                clone.Visible = true;
+                clone.Enable();
+            }
+            else
             {
-                settled.Timeout += () => DumpPlacement(source, rematch);
+                clone.Disable();
+            }
+
+            Log.Warn($"[SpirePvp] {name} {(enable ? "shown" : "hidden")} with the menu button");
+        }
+    }
+
+    /// <summary>
+    /// The buttons this mod clones onto the result screen, in the order they sit from the right.
+    ///
+    /// **One list, because they share a failure.** `NGameOverScreen._Ready` ends with
+    /// `_mainMenuButton.Disable()`, so *any* clone taken there inherits `Visible = false`, and
+    /// vanilla re-enables its own button from two different places that know about neither of
+    /// ours. Riding the button's own `Enable` covers every route; a second clone that forgot to
+    /// join the list simply never appears, which is exactly what Return to Lobby did on
+    /// 2026-08-18 — added, placed, logged, and invisible, the same way Rematch was on 2026-08-12.
+    /// </summary>
+    private static readonly string[] CloneNames =
+    {
+        RematchButtonName,
+        DuelReturnToLobbyPatch.ButtonName,
+    };
+
+    private static bool IsOneOfOurs(string name)
+    {
+        foreach (string ours in CloneNames)
+        {
+            if (name == ours)
+            {
+                return true;
             }
         }
+
+        return false;
     }
 
     /// <summary>Every property that could make a placed, enabled control invisible.</summary>
