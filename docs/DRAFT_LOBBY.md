@@ -161,6 +161,26 @@ character and the draft opens.
 
 ### PARKED 2026-08-17, after three attempts — do not take a fourth without reading this
 
+**New data point, 2026-08-18, and it narrows the fault rather than reopening it.** Reported as
+"clicking random character in draft on host before client joined lobby didn't show an indicator
+appear under a character". Read out of the log, the roll landed *before* the client connected:
+
+    [StartRunLobby (1)] ... (client not yet connected)
+    draft lobby: rolling Random now — DEFECT (was IRONCLAD)
+    lobby telemetry: PlayerChanged 1 = DEFECT
+    ...
+    [StartRunLobby (1)] Client 1001 connected          ← nine lines later
+
+So the lobby record moved to DEFECT correctly with one player in the lobby. **This is not a remote-
+marker problem and it is not new** — it is the same parked fault seen without a second player to
+confuse it: `SelectCharacter` updates the record, and the selection *visuals* that `rolled.Select()`
+would set (`_isSelected`, which drives the outline and the saturation) never move. Worth knowing
+that it reproduces with a single player, because that makes it reproducible without a second client
+whenever someone does take the fourth attempt.
+
+Still parked. Lucas 2026-08-18 called it "small visual bug I think", which is the same call as
+before.
+
 **Current behaviour: every Random click rolls a new character and both players follow it. What does
 not move is the Random-adjacent button's own highlight**, so the control reads as unresponsive even
 though the lobby record is correct on both peers every time. Lucas: *"if this is a massive yak shave
