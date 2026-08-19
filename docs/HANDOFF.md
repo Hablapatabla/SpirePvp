@@ -1112,6 +1112,38 @@ Worth knowing before suspecting this of a desync: **resolving freely is the *van
 Deferral is what this mod added, and host-assigned action ordering is unchanged either way, so
 neither sim executes anything different or in a different order.
 
+#### Teardown audit, 2026-08-18 — clean on every axis, and here is the shape of the answer
+
+Asked for directly ("another pass on making sure we're doing all our synchronizer etc teardown
+properly"). Recorded because the *result* is the useful artefact — the discipline holds, and the
+next person should not re-derive it.
+
+**The engine owns synchronizer teardown, and it is not shared with us.** `RunManager.CleanUp`
+disposes `ActionQueueSynchronizer`, `PlayerChoiceSynchronizer`, `RewardSynchronizer`,
+`RewardsSetSynchronizer`, `RestSiteSynchronizer`, `FlavorSynchronizer` and `ChecksumTracker`, and
+every one of them is `new`'d again in the setup path (`RunManager` lines 472–513), including
+`CombatStateSynchronizer.IsDisabled` being reassigned from the run's own flag. So a second match in
+one process cannot inherit a synchronizer, and a race that ends without reaching the arena — where
+`EndRace` never runs and its restore never fires — cannot leak `IsDisabled` or `IsEnabled` either.
+
+**`CleanUp` is the single choke point and the mod rides it as a prefix.** `DuelRunCleanupPatch`
+runs before the body, so `RunManager.Instance` and `NetService` are both still alive when handlers
+unregister. A rematch does not skip it: `DuelRematch.RelaunchAsync` calls `run.CleanUp()` explicitly
+and only holds the *disconnect* back.
+
+Three mechanical checks, all clean:
+
+| Check | Result |
+|---|---|
+| Every `RegisterMessageHandler` has a matching `Unregister` for the same message and handler | **15 / 15**, no orphans either way |
+| Every class with an `Arm()` is released from `DuelMatch.OnRunEnded` | **all of them** |
+| Run-scoped mutable static state released on run end | clean — see the audit below |
+
+One thing that looks like a gap and is not: `RaceCoordinator.Reset()` clears only `_raceActive` and
+leaves `_combatSyncWasDisabled` / `_checksumsWereEnabled` stale. They are read only inside
+`EndRace`, which early-returns unless `_raceActive`, and `ActivateRace` re-stashes both before
+setting it — so the stale values are always overwritten before they can be read.
+
 #### Two mechanical audits, both clean — do not redo these
 
 Written as throwaway scripts against `src/` and the decompile. Recording the *results* so the next
