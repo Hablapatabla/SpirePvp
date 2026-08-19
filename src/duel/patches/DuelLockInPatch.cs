@@ -61,7 +61,11 @@ public static class DuelLockInPatch
         // filtered there. A client's travel over the wire and arrive here, where only the type was
         // being asked. One predicate, two call sites, and the second was never given it — the
         // trap this project has now hit four times (`DuelClockService`/`DuelFlag`, and twice since).
-        if (!DuelTurnModel.IsPlayerInitiated(action))
+        // **`IsDeferrable`, which is `IsPlayerInitiated` plus the free-use potions.** The paragraph
+        // above is about this predicate being given to one call site and not the other; the potion
+        // split added a second term to it, and both sites take the combined question so a Skill
+        // Potion cannot resolve freely for the host and queue for the client.
+        if (!DuelTurnModel.IsDeferrable(action))
         {
             return true;
         }

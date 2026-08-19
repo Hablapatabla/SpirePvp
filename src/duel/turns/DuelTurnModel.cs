@@ -1,6 +1,9 @@
+using System;
+using System.Collections.Generic;
 using MegaCrit.Sts2.Core.Combat;
 using MegaCrit.Sts2.Core.Entities.Creatures;
 using MegaCrit.Sts2.Core.Models;
+using MegaCrit.Sts2.Core.Models.Potions;
 using MegaCrit.Sts2.Core.GameActions;
 using MegaCrit.Sts2.Core.Logging;
 using MegaCrit.Sts2.Core.Context;
@@ -248,7 +251,7 @@ public static class DuelTurnModel
             return false;
         }
 
-        if (!IsPlayerInitiated(action))
+        if (!IsDeferrable(action))
         {
             return false;
         }
@@ -275,6 +278,101 @@ public static class DuelTurnModel
             or DiscardPotionGameAction
             or EndPlayerTurnAction
             or UndoEndPlayerTurnAction;
+
+    /// <summary>
+    /// Whether a turn model may hold this action: raised by a player **and** worth ordering.
+    ///
+    /// **Two questions were being asked as one, and separating them is the point.**
+    /// <see cref="IsPlayerInitiated"/> answers *who raised it* and is still exactly right for that;
+    /// what a turn model actually needs is the narrower "should this wait its turn", and a Skill
+    /// Potion is unambiguously player-initiated while having nothing to wait for. Folding the potion
+    /// test into `IsPlayerInitiated` would have made that method's name a lie, which is the failure
+    /// this codebase keeps naming: ask the condition you mean, not one that correlates with it.
+    ///
+    /// **Both call sites take this one**, and that is deliberate rather than tidy.
+    /// `DuelLockInPatch.BeforeHandleRequestEnqueue` is where a *client's* actions arrive, and the
+    /// comment above it records the same predicate being given to one site and not the other four
+    /// separate times. A potion that resolves freely for the host and queues for the client would
+    /// be that bug a fifth time, and a standing advantage for whoever is hosting.
+    /// </summary>
+    internal static bool IsDeferrable(GameAction action) =>
+        IsPlayerInitiated(action) && !ResolvesFreely(action);
+
+    /// <summary>
+    /// Whether this action is one of the potions that has nothing to be ordered against.
+    ///
+    /// Lucas, 2026-08-14: *"Skill potions just feel funky. I think we're going to have to manually
+    /// discriminate on potions — which need to be actually queued (fire, poison, etc) vs which can
+    /// be used freely (skill potions, gambling potion, etc)."*
+    ///
+    /// **The rule underneath it.** A potion that does something to the *board* — damage, poison,
+    /// block, a power — is a play. It has to be ordered against the opponent's plays, and letting
+    /// it resolve on click would hand you a free action outside the interleave. A potion that only
+    /// changes *your own options* — adds a card to hand, upgrades one, swaps some — has nothing to
+    /// order against. Queueing it is all cost: it cannot interact with the opponent, and deferring
+    /// it means planning a round without knowing what it gave you, which is the dead-draw problem
+    /// the multi-batch turn exists to solve.
+    ///
+    /// **Resolving freely is the *vanilla* path, which is why this is a small change rather than a
+    /// risky one.** Deferral is the thing this mod added; taking a potion back out of it returns it
+    /// to the route the engine has always used. Ordering is unaffected either way — the host
+    /// assigns action order for both sims regardless of whether the click was held first — so
+    /// nothing here changes what either machine executes or in what sequence.
+    /// </summary>
+    private static bool ResolvesFreely(GameAction action)
+    {
+        if (action is not UsePotionAction use)
+        {
+            return false;
+        }
+
+        PotionModel? potion = use.Player?.GetPotionAtSlotIndex((int)use.PotionIndex);
+        return potion != null && FreeUsePotions.Contains(potion.GetType());
+    }
+
+    /// <summary>
+    /// The potions that only rearrange your own hand, and so never wait.
+    ///
+    /// **Everything not on this list queues.** The default is the conservative one on purpose: a
+    /// potion nobody has classified — including one a future game version adds — behaves like a
+    /// play, which is the safe way to be wrong. This is the same shape as the AoE fix's allow-list
+    /// and for the same reason.
+    ///
+    /// **By type, not by id string.** A renamed or deleted potion becomes a build error naming the
+    /// model, exactly as patch targets are `nameof` rather than strings, where an id list would
+    /// silently start queueing something it used to free.
+    ///
+    /// **The membership was read off the models rather than recalled.** Every potion's `OnUse` was
+    /// checked for which command families it touches: the thirteen below reach only `CardCmd`,
+    /// `CardSelectCmd` and `CardPileCmd`, and every other potion reaches at least one of
+    /// `CreatureCmd`, `PowerCmd`, `PlayerCmd`, `OrbCmd` or `PotionCmd` — or does its work through
+    /// some other route entirely, which is itself a reason to leave it queued.
+    ///
+    /// **`TargetType` is not the question, though it looks like it.** Fire Potion is `AnyEnemy` and
+    /// Skill Potion is `AnyPlayer`, which suggests the split is free — but Block Potion, Dexterity
+    /// Potion and Duplicator are all `AnyPlayer` and all change the board. What separates them is
+    /// what the effect *touches*, not what it targets.
+    ///
+    /// Several of these draw or generate cards and so consume a shared run RNG stream. That was
+    /// considered and is not a reason to queue them: both sims execute the same host-ordered action
+    /// stream, so the draws land in the same order whether or not the click was held.
+    /// </summary>
+    private static readonly HashSet<Type> FreeUsePotions = new()
+    {
+        typeof(AttackPotion),            // adds an attack to your hand
+        typeof(SkillPotion),             // adds a skill to your hand
+        typeof(PowerPotion),             // adds a power to your hand
+        typeof(ColorlessPotion),         // adds a colorless card to your hand
+        typeof(CosmicConcoction),        // generates upgraded colorless cards into your hand
+        typeof(CunningPotion),           // upgrades cards in your hand
+        typeof(BlessingOfTheForge),      // upgrades your whole hand
+        typeof(GamblersBrew),            // discard any number, draw that many
+        typeof(GlowwaterPotion),         // exhausts your hand and redraws
+        typeof(Ashwater),                // exhausts cards you pick out of your hand
+        typeof(LiquidMemories),          // returns a card from the discard pile to your hand
+        typeof(DropletOfPrecognition),   // pulls a card out of your draw pile
+        typeof(TouchOfInsanity),         // makes one card in your hand free this combat
+    };
 
     private static IDuelTurnModel Build(IRunState? runState)
     {

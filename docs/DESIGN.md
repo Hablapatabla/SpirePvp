@@ -962,8 +962,15 @@ added.** A player who wants a different draft changes the seed, which is what th
    enough to keep it. A dead relic is a bad pick; a missing good relic is a worse pool. The list is
    of hooks, not models, so a relic added by a game update is kept by default rather than silently
    dropped.
-3. **The map screen is behind the draft**, reachable if the overlay is ever dismissed. It should not
-   be interactable in a draft run.
+3. ~~**The map screen is behind the draft**, reachable if the overlay is ever dismissed.~~
+   **Done — `DuelMapLockPatch`, confirmed in play 2026-08-17**, and the confirmation is the
+   interesting part. The patch logged nothing at all on the first attempt, which reads identically
+   to a guard that is not applying; a button that does nothing and a guard that refuses it are
+   indistinguishable from outside. It now traces every player-initiated open, and a later run caught
+   `top-bar open reached NMapScreen.Open` immediately followed by `refused to open (duel=True
+   draft=True topBar=True)` — the button reaching the guard and being stopped by it. The run's own
+   start-up open is refused too (`draft=True topBar=False`), which is what makes a draft load
+   straight into the campfire backdrop rather than flashing the map.
 
 ### The original open questions, kept for the reasoning
 
