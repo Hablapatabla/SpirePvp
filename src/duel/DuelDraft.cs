@@ -1407,16 +1407,29 @@ public static class DuelDraft
 
         // The relic pool arrives when the round changes, so it is adopted whenever it is new rather
         // than only once — unlike the cards, which exist from the first broadcast.
+        // **Each pool gets its own guard, and putting the potions inside the relics' one was a
+        // hang.** The guard exists to preserve *identity*: `SubmitRelicPick` resolves a click by
+        // `IndexOf`, so rebuilding the models on every broadcast would detach the row from the pool.
+        // Count-equality is the cheap stand-in for "same pool".
+        //
+        // Nesting the potion load inside the relic test meant it only ran when the relic count
+        // changed — and at the relics-to-potions handover it does not: the host keeps all eight
+        // relics in the message. Measured 2026-08-19: the client took `stage = 2` with a potion
+        // pool attached, read neither, and sat on an empty pool with no screen. `IsDrafting` is
+        // `CurrentPoolSize > 0`, so an empty pool is indistinguishable from "no draft running".
         if (_relicPool.Count != (message.relicPool?.Count ?? 0))
         {
-            _potionPool = (message.potionPool ?? new List<SerializablePotion>())
-                .Select(PotionModel.FromSerializable)
-                .ToList();
-
             _relicPool = (message.relicPool ?? new List<SerializableRelic>())
                 .Select(RelicModel.FromSerializable)
                 .Where(r => r != null)
                 .ToList()!;
+        }
+
+        if (_potionPool.Count != (message.potionPool?.Count ?? 0))
+        {
+            _potionPool = (message.potionPool ?? new List<SerializablePotion>())
+                .Select(PotionModel.FromSerializable)
+                .ToList();
         }
 
         if (_pool.Count == 0)

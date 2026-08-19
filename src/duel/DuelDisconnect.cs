@@ -297,15 +297,23 @@ public static class DuelDisconnect
             return false;
         }
 
-        // A draft is a live match too, but it runs in phase `Inactive` — there is no draft phase in
-        // the enum — so the phase test alone lets a mid-draft opponent drop fall through. Measured
-        // 2026-08-18: the client dropped mid-draft, this returned false, nothing was decided, and
-        // the host was left on a frozen draft whose only exit was Give Up — scored as the *host*
-        // resigning (a loss) for a match the opponent abandoned. `IsDraftRun` is true for the whole
-        // draft-format match; the guards above already exclude the lobby (no PvP run) and a
-        // finished match (`IsGameOver`), so this only ever adds the live draft.
-        return DuelSession.Phase is DuelPhase.RaceActive or DuelPhase.DuelActive
-               || DuelDraft.IsDraftRun;
+        // **Ask whether the match is live, not which part of it we are in.** This used to list the
+        // routes — `RaceActive or DuelActive`, later `|| IsDraftRun` — and listing routes is how it
+        // went wrong twice. A draft runs in phase `Inactive` (there is no draft phase in the enum),
+        // so the original test let a mid-draft drop fall through: measured 2026-08-18, nothing was
+        // decided, and the host was left on a frozen draft whose only exit was Give Up, scored as
+        // the *host* resigning for a match the opponent had abandoned.
+        //
+        // Adding `IsDraftRun` fixed that one route and left the shape wrong. Every sliver a match
+        // passes through that is neither phase is still a live match somebody can drop out of — the
+        // gap between run launch and `ActivateRace`, the deck review, the walk to the arena — and
+        // each would have to be remembered separately.
+        //
+        // The three guards above already establish the condition that matters: a PvP run exists, it
+        // is not abandoned, and it is not over. All that is left to exclude is a match already
+        // decided, which is `Complete`. That is the whole question, and it is format-agnostic —
+        // race, draft and anything added later are covered without naming any of them.
+        return DuelSession.Phase != DuelPhase.Complete;
     }
 
     /// <summary>
