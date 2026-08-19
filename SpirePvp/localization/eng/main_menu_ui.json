@@ -16,5 +16,6 @@
   "SPIREPVP_LOBBY.title": "Duel",
   "DUEL_MP.LOCKED.description": "This mod did not fully load, so it cannot run a fair match. If the game has just updated, rebuild SpirePvp.",
   "SPIREPVP_TIMEOUT.title": "Opponent disconnected",
-  "SPIREPVP_TIMEOUT.description": "The match is yours in {Seconds}..."
+  "SPIREPVP_TIMEOUT.description": "The match is decided in {Seconds}...",
+  "SPIREPVP_TIMEOUT.waitLonger": "Wait one more minute"
 }

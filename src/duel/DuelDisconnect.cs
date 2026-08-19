@@ -1,5 +1,7 @@
+using System;
 using System.Linq;
 using Godot;
+using MegaCrit.Sts2.Core.Assets;
 using MegaCrit.Sts2.Core.Combat;
 using MegaCrit.Sts2.Core.Context;
 using MegaCrit.Sts2.Core.Entities.Multiplayer;
@@ -76,11 +78,51 @@ public static class DuelDisconnect
     /// </summary>
     private const ulong SilenceBeforeNoticeMs = 5_000;
 
+    /// <summary>
+    /// Where the curtain's strings live.
+    ///
+    /// `main_menu_ui` because `LocManager` merges a mod's tables only into tables vanilla already
+    /// has, by filename — a new `spirepvp.json` would never be read — and this is the table the
+    /// overlay's own `TIMEOUT_OVERLAY.*` keys are in.
+    /// </summary>
+    private const string Table = "main_menu_ui";
+
     /// <summary>Set once we have declared, so a silent peer is not re-declared every frame.</summary>
     private static bool _declared;
 
+    /// <summary>
+    /// What one press of "wait longer" buys.
+    ///
+    /// A minute, which is the number the 2026-08-12 design named before the button was dropped.
+    /// Repeatable, and deliberately uncapped: the only player who can press it is the one still
+    /// here, and pressing it cannot change the result — it only delays it — so there is nothing to
+    /// game. Once native reconnect lands this is the window a returning player is racing.
+    /// </summary>
+    public const ulong ExtendWindowMs = 60_000;
+
     /// <summary>Whether we currently have the timeout curtain up, so it is lowered exactly once.</summary>
     private static bool _showingNotice;
+
+    /// <summary>
+    /// The "wait longer" panel, parented into the timeout overlay while a wait is running.
+    ///
+    /// Held because the overlay is a **permanent node on `NGame`** and this is not: a panel left
+    /// behind would still be sitting inside vanilla's curtain in the next match, which is the
+    /// static-state-outliving-a-run trap this project keeps paying for. Freed in
+    /// <see cref="ClearWait"/> with everything else.
+    /// </summary>
+    private static NVerticalPopup? _extendPrompt;
+
+    /// <summary>
+    /// Set once building the prompt has failed, so it is not attempted again this wait.
+    ///
+    /// **Without this the failure path logs once per frame.** `ShowNotice` runs every tick, so a
+    /// missing scene would retry and warn at frame rate — the same shape as the arena's missing
+    /// room icon, which was assumed to be one line per run and was 19 per client per session
+    /// because `AssetCache` never caches a failed load. Cleared with the wait, so a later match
+    /// gets a fresh attempt.
+    /// </summary>
+    private static bool _extendPromptFailed;
 
     /// <summary>When the match forfeits, in `Time.GetTicksMsec()`. Null while nobody is missing.</summary>
     private static ulong? _forfeitAtMs;
@@ -457,6 +499,94 @@ public static class DuelDisconnect
     }
 
     /// <summary>
+    /// Buys another minute. The deadline is the only state, so extending is moving one number.
+    /// </summary>
+    private static void OnWaitLongerPressed(NButton _)
+    {
+        if (_forfeitAtMs == null)
+        {
+            return;
+        }
+
+        _forfeitAtMs += ExtendWindowMs;
+
+        ulong now = Time.GetTicksMsec();
+        ulong left = _forfeitAtMs.Value > now ? _forfeitAtMs.Value - now : 0;
+        Log.Warn($"[SpirePvp] wait extended by {ExtendWindowMs / 1000}s — {left / 1000}s to the result");
+    }
+
+    /// <summary>
+    /// Puts the "wait longer" panel inside the curtain, once per wait.
+    ///
+    /// **Parented into the overlay rather than shown as a modal, and that is the whole design.**
+    /// A popup was the obvious surface and was abandoned on 2026-08-12 for a reason that still
+    /// holds: `NMultiplayerTimeoutOverlay` and `NModalContainer` are both plain `Control`s and the
+    /// overlay draws on top, so a modal would sit *behind* the curtain. Vanilla also drives that
+    /// overlay itself on a client from its own three-second test, so it can be raised over us
+    /// whether or not we ask for it. Making the panel a *child* of the overlay sidesteps the draw
+    /// order entirely — it is inside the thing that was covering it.
+    ///
+    /// A `MouseFilter.Ignore` on the overlay root does not block it: the filter is per-control, so
+    /// a `Stop` child inside an ignoring parent still takes the click.
+    ///
+    /// **`NVerticalPopup` directly, and the button is wired by hand rather than through
+    /// `InitYesButton`.** Two reasons, both read off the decompile rather than guessed:
+    ///
+    /// 1. `InitYesButton` connects a second handler to the same signal — `Close`, which is
+    ///    `NModalContainer.Instance.Clear()`. This panel is *not* in the modal container, so that
+    ///    call would leave our panel untouched and wipe whatever legitimately *was* in the
+    ///    container, and NRE outright if nothing has built one yet.
+    /// 2. The button is meant to be pressable more than once. Anything that tears the panel down
+    ///    on the first press defeats the point.
+    ///
+    /// `SetText` is called first on purpose: it is what runs `EnsureNodesAreSet`, and
+    /// `HideNoButton` does not, so touching the buttons before it would read a null.
+    ///
+    /// **A failure here falls back to the plain countdown rather than taking the wait down with
+    /// it.** The prompt is a convenience; the deadline is the mechanism, and a missing scene must
+    /// not cost anyone a match. Same for the label: a stale `.pck` gets an honest English string
+    /// instead of a rendered `!!key!!`, which is the degradation `DuelResultQuotes` already
+    /// established.
+    /// </summary>
+    private static void EnsureExtendPrompt(NMultiplayerTimeoutOverlay overlay)
+    {
+        if (_extendPrompt.IsValid() || _extendPromptFailed)
+        {
+            return;
+        }
+
+        try
+        {
+            PackedScene scene = PreloadManager.Cache.GetScene(SceneHelper.GetScenePath("ui/vertical_popup"));
+            NVerticalPopup popup = scene.Instantiate<NVerticalPopup>(PackedScene.GenEditState.Disabled);
+
+            // Anchors *and* offsets: anchoring alone keeps the scene's own offsets, which would
+            // hang the panel off the corner of a full-screen parent it was never laid out for.
+            popup.SetAnchorsAndOffsetsPreset(Control.LayoutPreset.FullRect);
+            overlay.AddChild(popup);
+
+            popup.SetText(string.Empty, string.Empty);
+            popup.HideNoButton();
+
+            LocString label = new LocString(Table, "SPIREPVP_TIMEOUT.waitLonger");
+            popup.YesButton.IsYes = true;
+            popup.YesButton.SetText(label.Exists() ? label.GetFormattedText() : "Wait one more minute");
+            popup.YesButton.Connect(NClickableControl.SignalName.Released,
+                                    Callable.From<NButton>(OnWaitLongerPressed));
+
+            _extendPrompt = popup;
+            Log.Warn("[SpirePvp] wait-longer prompt built inside the timeout curtain");
+        }
+        catch (Exception e)
+        {
+            _extendPrompt = null;
+            _extendPromptFailed = true;
+            Log.Warn("[SpirePvp] could not build the wait-longer prompt, falling back to the plain "
+                     + $"countdown: {e.Message}");
+        }
+    }
+
+    /// <summary>
     /// Says what happened, and counts down to the result.
     ///
     /// **No buttons, so vanilla's timeout overlay is the right surface again.** It was abandoned
@@ -478,21 +608,38 @@ public static class DuelDisconnect
             return;
         }
 
-        LocString description = new LocString("main_menu_ui", "SPIREPVP_TIMEOUT.description");
+        LocString title = new LocString(Table, "SPIREPVP_TIMEOUT.title");
+        LocString description = new LocString(Table, "SPIREPVP_TIMEOUT.description");
         description.Add("Seconds", ((remainingMs + 999) / 1000).ToString());
 
-        overlay!.GetNodeOrNull<MegaLabel>("%Title")
-                ?.SetTextAutoSize(new LocString("main_menu_ui", "SPIREPVP_TIMEOUT.title")
-                                  .GetFormattedText());
-        overlay.GetNodeOrNull<MegaRichTextLabel>("%Description")
-               ?.SetTextAutoSize(description.GetFormattedText());
-        overlay.Visible = true;
+        overlay!.Visible = true;
+        EnsureExtendPrompt(overlay);
+
+        if (_extendPrompt.IsValid())
+        {
+            // **The panel owns the words when it is up.** Leaving the overlay's own labels set
+            // would print the same countdown twice, once behind the panel and once on it, which
+            // is worse than either surface alone.
+            SetOverlayText(overlay, string.Empty, string.Empty);
+            _extendPrompt!.SetText(title.GetFormattedText(), description.GetFormattedText());
+        }
+        else
+        {
+            SetOverlayText(overlay, title.GetFormattedText(), description.GetFormattedText());
+        }
 
         if (!_showingNotice)
         {
             _showingNotice = true;
-            Log.Warn($"[SpirePvp] opponent gone — awarding the match in {ForfeitWindowMs / 1000}s");
+            Log.Warn($"[SpirePvp] opponent gone — deciding the match in {ForfeitWindowMs / 1000}s");
         }
+    }
+
+    /// <summary>Writes both of the overlay's labels, or neither if the scene has moved.</summary>
+    private static void SetOverlayText(NMultiplayerTimeoutOverlay overlay, string title, string body)
+    {
+        overlay.GetNodeOrNull<MegaLabel>("%Title")?.SetTextAutoSize(title);
+        overlay.GetNodeOrNull<MegaRichTextLabel>("%Description")?.SetTextAutoSize(body);
     }
 
     /// <summary>
@@ -515,10 +662,25 @@ public static class DuelDisconnect
 
         _showingNotice = false;
 
+        if (_extendPrompt.IsValid())
+        {
+            _extendPrompt!.QueueFreeSafely();
+        }
+
+        _extendPrompt = null;
+        _extendPromptFailed = false;
+
         NMultiplayerTimeoutOverlay? overlay = NGame.Instance?.TimeoutOverlay;
         if (overlay.IsValid())
         {
             overlay!.Visible = false;
+
+            // **Hand the curtain back the way we found it, which it never used to be.**
+            // `ShowNotice` overwrites `%Title` and `%Description`, and nothing put them back — so
+            // vanilla's own three-second unresponsive curtain would spend the rest of the session
+            // reading "Opponent disconnected / the match is decided in 0...", about a peer that had
+            // merely hitched. `Relocalize` is vanilla's own restore and re-reads its own keys.
+            overlay.Relocalize();
         }
 
         Log.Warn($"[SpirePvp] disconnect notice cleared — {why}");

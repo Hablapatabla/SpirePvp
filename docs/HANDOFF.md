@@ -1000,32 +1000,77 @@ draw reason within days of the warning being written. A *loss* by disconnect fel
 does it automatically; until then the screen shows the honest fallback sentence and the log says
 `drawDisconnect fallback — no loc entries, so the .pck is stale`, which is the designed degradation.
 
-#### NOT BUILT, and Lucas asked for it: the "wait longer" button
+#### BUILT 2026-08-18, UNPLAYED: the "wait longer" button
 
-Asked for 2026-08-18 as *"the same dc handling that we had built in the act 1 race format, with the
-about 30 second timeout and the button to extend it"*. **The 30 seconds existed and is restored; the
-button never shipped.** It is described in `DuelDisconnect`'s own doc comment as part of the design
-that was reconsidered on 2026-08-12, and `git log -S` finds no implementation of it at any commit —
-so the memory is of the design, not of code that regressed.
+Asked for as *"the same dc handling that we had built in the act 1 race format, with the about 30
+second timeout and the button to extend it"*. **The 30 seconds existed once and is restored; the
+button never shipped at all** — it is described in `DuelDisconnect`'s own doc comment as part of the
+2026-08-12 design that got reconsidered, and `git log -S` finds no implementation at any commit. So
+the memory was of the design, not of code that regressed. It is built now.
 
-The surface is the whole of the work, and it is a real decision rather than a detail:
+One press buys **60 more seconds**, and it is repeatable and uncapped on purpose: the only player who
+can press it is the one still there, and pressing it cannot change the result — only delay it — so
+there is nothing to game. Once native reconnect lands, this is the window a returning player races.
 
-- `NMultiplayerTimeoutOverlay` is the current curtain and was chosen **because** there is nothing to
-  click — it is full-screen, non-interactive, already familiar to players, and a permanent node on
-  `NGame` so there is nothing to build or free. Its scene holds `%Icon`, `%Title` and `%Description`
-  and no button.
-- `NGenericPopup` is the mod's existing interactive surface (`DuelDrawPrompt` uses it in-match and it
-  works), but it was abandoned here for a reason that still holds: **the overlay draws on top of
-  `NModalContainer`**, and vanilla drives that overlay itself on a client from its own 3s test, so it
-  will cover our popup whether or not we raise it.
+**The panel is a child of the timeout overlay, and that is the design rather than an implementation
+detail.** A popup was the obvious surface and was abandoned on 2026-08-12 for a reason that still
+holds: `NMultiplayerTimeoutOverlay` and `NModalContainer` are both plain `Control`s and the overlay
+draws on top, so a modal would sit *behind* the curtain — and vanilla drives that overlay itself on a
+client from its own three-second test, so it can be raised over us whether or not we ask. Parenting
+the panel *into* the overlay sidesteps the draw order completely: it is inside the thing that was
+covering it. A `MouseFilter.Ignore` on the overlay root does not block the click, because the filter
+is per-control and a `Stop` child inside an ignoring parent still takes it.
 
-**Recommended: instantiate a vanilla button as a child of the overlay** rather than fight the draw
-order. `DuelHostMenuPatch` already establishes the pattern for cloning a vanilla button and rewiring
-`NClickableControl.Released`, so this ships no assets and needs no `.pck` change. The alternative —
-suppressing vanilla's overlay and driving a popup with a live-updating countdown body — is more code
-and more patches for the same result. **Do not half-build it**: `docs/DRAFT_LOBBY.md` records what
-three partial attempts at one control cost, and a 30s window with no button is strictly better than
-the 5s window it replaced, so there is no pressure to rush this one.
+**Three traps in `NVerticalPopup`, all read off the decompile rather than found in play:**
+
+- **`InitYesButton` connects a second handler you did not ask for** — `Close`, which is
+  `NModalContainer.Instance.Clear()`. This panel is not in the modal container, so that call would
+  leave it untouched and wipe whatever legitimately *was* in the container, and NRE outright if
+  nothing had built one. The button is wired by hand instead: `YesButton.SetText` plus a single
+  `Released` connection.
+- **`HideNoButton` does not call `EnsureNodesAreSet`, and `SetText` does.** Touching the buttons
+  before the first `SetText` reads a null.
+- **The failure path had to be latched.** `ShowNotice` runs every tick, so a scene that fails to
+  load would retry and warn at frame rate — the same shape as the arena's missing room icon, which
+  was assumed to be one line per run and was 19 per client per session because `AssetCache` never
+  caches a failed load. `_extendPromptFailed` holds it for the rest of the wait.
+
+**A latent bug fixed on the way past.** `ShowNotice` overwrites the overlay's `%Title` and
+`%Description`, and nothing ever put them back — so after any disconnect notice cleared, vanilla's
+own three-second unresponsive curtain spent the rest of the session reading "Opponent disconnected /
+The match is decided in 0..." about a peer that had merely hitched. `ClearWait` now calls
+`overlay.Relocalize()`, which is vanilla's own restore and re-reads its own keys.
+
+`SPIREPVP_TIMEOUT.description` also changed, because it was no longer true: "The match is yours in
+{Seconds}..." is wrong now that an accidental drop is settled on HP or drawn. It reads "The match is
+decided in {Seconds}..." and the button falls back to a plain English label if the key is missing.
+
+**The `.pck` is regenerated and committed** (2026-08-18) — verified to contain
+`SPIREPVP_TIMEOUT.waitLonger`, `drawDisconnect` and `lostDisconnect`, where the previous pack
+contained none of them.
+
+#### What to try, all of it solo on two local clients
+
+None of this needs a second person. `host.ps1 -Custom`, then `client.ps1`.
+
+**1. The disconnect rework.** ENet reports no hard drop, so closing the client's window is measured
+as heartbeat silence — which is the route that runs the countdown, and the one the dev rig has
+always used.
+
+| What | How you know |
+|---|---|
+| The 30s window | Curtain at 5s of silence, countdown from 25 |
+| **The button** | "Wait one more minute" inside the curtain. Press it — the countdown jumps by 60. Press it twice |
+| Decided on HP in the duel | Get into the arena, `damage <amount> <index>` so one side is clearly ahead, close the *losing* client. Expect `decided on HP at the drop: me N, them M` and one VICTORY |
+| Drawn outside the duel | Close a client mid-draft. Expect `no duel in progress, so there is no agreed board to read` and a **draw** |
+| The curtain is handed back | After a decided match, start another and let a client hitch. Vanilla's own curtain must read *its* words, not ours |
+
+**2. The seeded draft.** Type a seed into the lobby rather than letting it generate. Play a draft,
+note the pool, then run the same seed and character again. `draft: card pool — …`,
+`draft: relic pool by rarity — …` and `N picks first` must all be identical, and all three must
+change when you change one character of the seed.
+
+Confirm `92 patch classes applied cleanly (128 methods)` on both — none of this adds a patch class.
 
 ### 2026-08-18: the draft is seeded (UNPLAYED)
 
