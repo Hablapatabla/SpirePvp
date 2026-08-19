@@ -1203,7 +1203,12 @@ project already had was *read the logs yourself rather than asking for symptoms*
 say, and now does: **when a fix is aimed at a mechanism nobody has observed, that is a guess even
 when the reasoning is sound.** The instrumentation cost one round trip and answered it outright.
 
-#### NEXT, and scoped but NOT built: the draft clock needs its own values
+#### ~~NEXT, and scoped but NOT built~~ — BUILT. The draft clock has its own values
+
+**Stale heading, corrected 2026-08-18.** `DraftClockTwenty / Thirty / Sixty / None` exist in
+`DuelModifiers.cs`, are registered in `DuelModifierRegistrationPatch`, and the 2026-08-18 Steam logs
+show `MODIFIER.DRAFT_CLOCK_NONE` riding on the run. The scope below is kept because the reasoning
+about *why* a second group was needed is still the reasoning the code follows.
 
 Asked for 2026-08-14: *"an act 1 race taking 10 minutes is normal. The clock for draft should be
 like 20 seconds."* Right — the heading now retitles to **Draft clock**, but the chips underneath are
