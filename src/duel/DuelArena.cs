@@ -249,7 +249,26 @@ public static class DuelArena
             // still race-shaped work — it tears down a combat the opponent was never in — and
             // it is also the last thing that could touch a synchronizer counter, so EndRace's
             // reset lands on quiesced state.
-            await runManager.ExitCurrentRooms();
+            // **Wrapped, because everything after `FadeOut` is behind a black screen.** A throw
+            // anywhere in here does not fail loudly — it kills the task, leaves the fade down and
+            // strands both players: the thrower on black forever, and the peer one step later
+            // waiting for a pre-combat sync that never starts. Measured 2026-08-18, from a single
+            // NRE inside vanilla's own reward teardown.
+            //
+            // Continuing is the better failure. What `ExitCurrentRooms` does here is tear down a
+            // room the duel is leaving anyway, so a partial teardown costs some bookkeeping; a
+            // swallowed match costs the match. The exception is logged whole, so it stays as
+            // findable as it was when it was fatal.
+            try
+            {
+                await runManager.ExitCurrentRooms();
+            }
+            catch (Exception e)
+            {
+                Log.Error("[SpirePvp] duel: exiting the previous room threw — entering the arena "
+                          + $"anyway rather than stranding both players on a black screen: {e}");
+            }
+
             RaceCoordinator.EndRace();
 
             // A draft skips the race, so EndRace() above early-returned and never ran the

@@ -4,6 +4,7 @@ using MegaCrit.Sts2.Core.Context;
 using MegaCrit.Sts2.Core.Entities.Cards;
 using MegaCrit.Sts2.Core.Entities.Creatures;
 using MegaCrit.Sts2.Core.Hooks;
+using MegaCrit.Sts2.Core.Logging;
 
 namespace SpirePvp.Duel.Patches;
 
@@ -51,6 +52,23 @@ public static class DuelStatsTrackingPatch
     {
         public static void Prefix(Creature? dealer, DamageResult results, Creature target)
         {
+            // **Every hit, named, because "it did nothing" is not answerable from a log that never
+            // records damage.** Reported 2026-08-18: a Fire Potion queued behind other plays looked
+            // like it resolved and did nothing at all. The action log proves the potion *executed*
+            // — `began executing`, `using potion FIRE_POTION (targeting ...)`, `finished execution`
+            // — and then stops being useful, because the engine logs no damage anywhere and the
+            // only surviving number is the result screen's total (`81 dmg` that game). So the
+            // question "did those four damage land" had no answer in a 1.5MB log.
+            //
+            // Above the filters on purpose: the three below are about what belongs on a *result
+            // screen*, and a hit that is excluded from the score is exactly the kind this needs to
+            // see. A handful of lines per turn in a duel.
+            if (DuelSession.IsDuelActive && results != null)
+            {
+                Log.Info($"[SpirePvp] damage: {dealer?.LogName ?? "(nobody)"} -> "
+                         + $"{target?.LogName ?? "(nobody)"} for {results.TotalDamage}");
+            }
+
             // `dealer.Player` deliberately, not the pet-aware test used on the target below: a
             // summon's damage is left uncredited to either player rather than credited to its
             // owner. That is symmetric — it holds on both clients for both duelists — so the

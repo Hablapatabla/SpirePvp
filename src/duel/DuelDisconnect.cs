@@ -94,12 +94,24 @@ public static class DuelDisconnect
     /// <summary>
     /// What one press of "wait longer" buys.
     ///
-    /// A minute, which is the number the 2026-08-12 design named before the button was dropped.
-    /// Repeatable, and deliberately uncapped: the only player who can press it is the one still
-    /// here, and pressing it cannot change the result — it only delays it — so there is nothing to
+    /// **Thirty seconds, matching the wait itself** — set 2026-08-18 after pressing it. A minute
+    /// was the number the 2026-08-12 design named, and in the hand it is far longer than anyone
+    /// wants to sit through: the button is for "give them a moment", not "leave it running".
+    /// Pressing again is free.
+    ///
+    /// Repeatable and deliberately uncapped: the only player who can press it is the one still
+    /// here, and pressing it cannot change the result — only delay it — so there is nothing to
     /// game. Once native reconnect lands this is the window a returning player is racing.
     /// </summary>
-    public const ulong ExtendWindowMs = 60_000;
+    public const ulong ExtendWindowMs = 30_000;
+
+    /// <summary>
+    /// What the wait-longer button is tinted to — a muted amber over the popup's green.
+    ///
+    /// Multiplicative, so the channels are read as "keep the red, hold the green, drop the blue".
+    /// Eyeball it rather than trusting the numbers; the intent is "this is not a quit button".
+    /// </summary>
+    private static readonly Color WaitLongerTint = new Color(1.45f, 1.05f, 0.55f);
 
     /// <summary>Whether we currently have the timeout curtain up, so it is lowered exactly once.</summary>
     private static bool _showingNotice;
@@ -547,10 +559,16 @@ public static class DuelDisconnect
     /// centres itself from its own anchors, and the overlay is a full-screen `Control` exactly like
     /// the container. Adding the child and touching nothing gets the same normal-sized popup.
     ///
-    /// **The red button is `NoButton`, and that is not a styling flag.** `IsYes` only rebinds the
-    /// hotkey and the controller glyph; the colours live in the two separate nodes in
-    /// `vertical_popup.tscn` — `YesButton` green, `NoButton` red. Asked for red, so the yes button
-    /// is hidden and the no button carries the action.
+    /// **Tinted rather than red, because red reads as "quit".** The colours are not a flag —
+    /// `IsYes` only rebinds the hotkey and the controller glyph — they are the two separate nodes
+    /// in `vertical_popup.tscn`, `YesButton` green and `NoButton` red. The first build used
+    /// `NoButton` and Lucas read it as Give Up on sight, which is exactly the wrong thing for the
+    /// one control here that *avoids* ending the match. So it is the yes button, modulated to a
+    /// muted amber: not the alarm red of a destructive action, and not the confirm green of
+    /// accepting a result either, since waiting is neither.
+    ///
+    /// Modulate multiplies, so this can only pull the button's own green *towards* amber — it
+    /// cannot desaturate the red one, which is the other reason the tint had to move to this node.
     ///
     /// `SetText` is called first on purpose: it is what runs `EnsureNodesAreSet`, and
     /// `HideNoButton` does not, so touching the buttons before it would read a null.
@@ -577,12 +595,13 @@ public static class DuelDisconnect
             popup.SetText(string.Empty, string.Empty);
 
             LocString label = new LocString(Table, "SPIREPVP_TIMEOUT.waitLonger");
-            popup.YesButton.Visible = false;
-            popup.NoButton.Visible = true;
-            popup.NoButton.IsYes = false;
-            popup.NoButton.SetText(label.Exists() ? label.GetFormattedText() : "Wait longer");
-            popup.NoButton.Connect(NClickableControl.SignalName.Released,
-                                   Callable.From<NButton>(OnWaitLongerPressed));
+            popup.HideNoButton();
+            popup.YesButton.Visible = true;
+            popup.YesButton.IsYes = true;
+            popup.YesButton.Modulate = WaitLongerTint;
+            popup.YesButton.SetText(label.Exists() ? label.GetFormattedText() : "Wait longer...");
+            popup.YesButton.Connect(NClickableControl.SignalName.Released,
+                                    Callable.From<NButton>(OnWaitLongerPressed));
 
             _extendPrompt = popup;
             Log.Warn("[SpirePvp] wait-longer prompt built inside the timeout curtain");

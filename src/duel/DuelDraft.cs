@@ -10,6 +10,7 @@ using MegaCrit.Sts2.Core.Entities.Players;
 using MegaCrit.Sts2.Core.Entities.Relics;
 using MegaCrit.Sts2.Core.Helpers;
 using MegaCrit.Sts2.Core.Localization;
+using MegaCrit.Sts2.Core.Map;
 using MegaCrit.Sts2.Core.Logging;
 using MegaCrit.Sts2.Core.Models;
 using MegaCrit.Sts2.Core.Models.RelicPools;
@@ -20,6 +21,7 @@ using MegaCrit.Sts2.Core.Nodes.Screens;
 using MegaCrit.Sts2.Core.Nodes.Screens.Map;
 using MegaCrit.Sts2.Core.Nodes.Screens.Overlays;
 using MegaCrit.Sts2.Core.Random;
+using MegaCrit.Sts2.Core.Rooms;
 using MegaCrit.Sts2.Core.Runs;
 using MegaCrit.Sts2.Core.CardSelection;
 using MegaCrit.Sts2.Core.Saves.Runs;
@@ -128,6 +130,22 @@ public static class DuelDraft
 
     /// <summary>Set whenever the state changed, so the next tick rebuilds the screen for it.</summary>
     private static bool _screenDirty;
+
+    /// <summary>
+    /// True while a drafted relic's on-pickup effect is on screen, so the draft stays out of its way.
+    ///
+    /// **The draft screen is rebuilt every tick, which is what buried these effects.** KALEIDOSCOPE
+    /// offers two card rewards from `AfterObtained` and `NRewardsScreen.ShowScreen` genuinely puts
+    /// them up — then the next `EnsureScreen` slammed the relic grid back on top, the rewards were
+    /// never taken, and they sat pending until the arena tried to skip them (see
+    /// <see cref="EnsureMapPointHistory"/> for what that used to cost).
+    ///
+    /// So the tick yields instead. The clock is deliberately *not* paused while this is up: Lucas
+    /// asked for the choice to come out of the picker's own draft clock, which is what happens if
+    /// nothing touches it — the same reason a long think about which relic to take is already
+    /// charged to you.
+    /// </summary>
+    private static bool _resolvingPickup;
 
     /// <summary>
     /// How many of our own picks in the running round have already been applied. See ApplyOwnPicks.
@@ -262,6 +280,10 @@ public static class DuelDraft
     /// </summary>
     public static void Begin(RunState runState)
     {
+        // **Before the host check, because both peers reach this method** — the client falls out
+        // one line down, and it needs the history entry every bit as much as the host does.
+        EnsureMapPointHistory(runState);
+
         if (RunManager.Instance?.NetService.Type != NetGameType.Host)
         {
             Log.Warn("[SpirePvp] draft: waiting for the host's pool");
@@ -346,6 +368,101 @@ public static class DuelDraft
         _awaitingAck = true;
         Broadcast();
         ApplyStateLocally();
+    }
+
+    /// <summary>
+    /// Takes the relic, and lets an on-pickup effect finish before the draft draws over it.
+    ///
+    /// **`HasUponPickupEffect` is the model's own answer**, so this is not a list of relic names to
+    /// keep up to date — the same instinct as filtering dead relics by the hooks they override and
+    /// reading `Rarity == Shop` rather than deducing a shop relic from behaviour. KALEIDOSCOPE and
+    /// BIIIG_HUG both declare it; anything a game update adds declares it too.
+    ///
+    /// **Awaited rather than fired and forgotten, which is the whole fix.** The old line was
+    /// `TaskHelper.RunSafely(RelicCmd.Obtain(...))` and the draft moved straight on to the next
+    /// pick, so a relic that wanted to ask the player something asked into a screen nobody could
+    /// see. Holding <see cref="_resolvingPickup"/> across the await keeps `EnsureScreen` off it.
+    ///
+    /// The flag is cleared in a `finally`: a pickup effect that throws must not leave the draft
+    /// permanently refusing to draw its own screen, which would be a worse failure than the one
+    /// this replaces.
+    /// </summary>
+    private static async Task ObtainAndResolve(RelicModel relic, Player owner)
+    {
+        bool waits = relic.HasUponPickupEffect;
+        if (waits)
+        {
+            _resolvingPickup = true;
+            CloseScreen();
+            Log.Warn($"[SpirePvp] draft: {relic.Id.Entry} has an on-pickup effect — holding the "
+                     + "draft while it resolves (your clock keeps running)");
+        }
+
+        try
+        {
+            await RelicCmd.Obtain(relic, owner);
+            Log.Info($"[SpirePvp] draft: {relic.Id.Entry} obtained");
+        }
+        catch (Exception e)
+        {
+            Log.Error($"[SpirePvp] draft: {relic.Id.Entry} threw while being obtained: {e}");
+        }
+        finally
+        {
+            if (waits)
+            {
+                _resolvingPickup = false;
+                _screenDirty = true;
+                Log.Warn($"[SpirePvp] draft: {relic.Id.Entry} resolved — the draft has the screen back");
+            }
+        }
+    }
+
+    /// <summary>
+    /// Gives a draft run the map-point history entry that the engine assumes every run already has.
+    ///
+    /// **A draft never walks a map point, and vanilla does not expect that.** Neow is skipped and
+    /// the draft goes up over the starting room, so `MapPointHistory` stays empty for the whole
+    /// draft and `RunState.CurrentMapPointHistoryEntry` — `MapPointHistory.LastOrDefault()?
+    /// .LastOrDefault()` — is null. A race is never in this state, because reaching the arena means
+    /// walking an act's worth of points first.
+    ///
+    /// **Measured 2026-08-18, and it was a hard black screen with no way out.** Drafting
+    /// KALEIDOSCOPE ran its `AfterObtained`, which offers two `CardReward`s. Nobody could take them
+    /// — the draft screen sits on top — so they were still pending at arena entry, where
+    /// `ExitCurrentRooms` skips any open set:
+    ///
+    ///     [RewardsSetSynchronizer] Skipping remaining rewards for local player 1
+    ///     System.NullReferenceException
+    ///        at CardReward.OnSkipped()          ← Player.RunState.CurrentMapPointHistoryEntry
+    ///        at RewardsSetSynchronizer.SkipRewardsSet
+    ///        at RunManager.ExitCurrentRooms()
+    ///        at SpirePvp.Duel.DuelArena.EnterRoom
+    ///
+    /// `OnSkipped` dereferences it without a guard, the throw killed `EnterRoom` *after* its
+    /// `FadeOut`, and the host sat on black forever. The client hung too, one step further on,
+    /// waiting for a pre-combat sync the host never started.
+    ///
+    /// **Seeded here rather than guarded at the crash site**, because the null is a property of
+    /// the run and not of that one caller: `CardReward.Reroll` reads it the same way, and so does
+    /// anything else vanilla runs during a draft. One entry at the start makes the run look like
+    /// every other run to all of them.
+    ///
+    /// `MapPointType.RestSite` because that is what a draft *is* from the run history's point of
+    /// view — no combat, and the campfire is literally the backdrop it draws. The entry's
+    /// constructor fills in per-player stats from the collection it is handed, so both duelists
+    /// have a `GetEntry` row; called after the players exist, which at `Begin` they do.
+    /// </summary>
+    private static void EnsureMapPointHistory(RunState runState)
+    {
+        if (runState.CurrentMapPointHistoryEntry != null)
+        {
+            return;
+        }
+
+        runState.AppendToMapPointHistory(MapPointType.RestSite, RoomType.RestSite, null);
+        Log.Warn("[SpirePvp] draft: seeded a map point history entry — a draft walks no map point, "
+                 + "and vanilla's reward teardown dereferences the current one without a guard");
     }
 
     /// <summary>
@@ -847,6 +964,13 @@ public static class DuelDraft
     private static void EnsureScreen()
     {
         if (!IsDrafting)
+        {
+            return;
+        }
+
+        // A drafted relic's own screen is up. Rebuilding ours over it is exactly what stopped these
+        // effects working, so the draft waits its turn — see `_resolvingPickup`.
+        if (_resolvingPickup)
         {
             return;
         }
@@ -1590,8 +1714,7 @@ public static class DuelDraft
                 // with an on-pickup effect actually applies it. Reaching past it to the internal add
                 // is the same shortcut that made draft cards render as True Grit.
                 RelicModel relic = _relicPool[index];
-                TaskHelper.RunSafely(RelicCmd.Obtain(relic, me));
-                Log.Info($"[SpirePvp] draft: {relic.Id.Entry} obtained");
+                TaskHelper.RunSafely(ObtainAndResolve(relic, me));
                 continue;
             }
 

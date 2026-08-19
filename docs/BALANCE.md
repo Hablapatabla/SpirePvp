@@ -33,25 +33,64 @@ not balance.
 Seeded from questions already raised; add to it as more surface. Each carries enough to be picked
 up cold, and a pointer to where the reasoning already lives.
 
-1. **Which potions are instant vs must be queued, in turn-based.** Recorded as HANDOFF item "Not
-   every potion should be queued — needs Lucas's classification." A turn-based round is planned
-   privately and resolved together, so a potion that reads the board at *use* time behaves
-   differently from one that just adds a card or block. The classification is a content call, not a
-   code one — the queue mechanism works; what is missing is the per-potion decision of which side of
-   it each potion sits on. Applies to draft mode too, where potions are drafted deliberately rather
-   than found.
+1. ~~**Which potions are instant vs must be queued, in turn-based.**~~ **BUILT 2026-08-18, and
+   the classification turned out not to be a content call after all.** The rule that decides it is
+   structural: a potion that touches the *board* is a play and has to be ordered against the
+   opponent's; a potion that only changes your own hand has nothing to order against. That question
+   is answerable off the models — every potion's `OnUse` was read, and the nineteen that reach only
+   `CardCmd` / `CardSelectCmd` / `CardPileCmd` / `CardFactory` resolve on click while everything
+   else queues. See `DuelTurnModel.FreeUsePotions`.
 
-2. **Choice-on-obtain relics (BIIIG_HUG and its kind).** A relic whose `AfterObtained` gathers a
-   player choice (BIIIG_HUG removes cards; bottle / transform / remove relics are the same shape)
-   currently does nothing in a draft — the choice is fired fire-and-forget under the draft screen,
-   never presents, and the effect no-ops. The counter-reset shipped 2026-08-18 makes this *safe*
-   (no divergence), so they are dead picks rather than broken matches. The balance decision:
-   **make them work** (defer the effect to draft completion and resolve it locally — moderate, with
-   real UX/timing questions) **or cut them** (filter from the draft pool — clean for a competitive
-   draft, since a "remove 4 cards" relic mid-draft is odd anyway). Left as a safe dead pick until
-   this pass. See the 2026-08-18 divergence write-up in HANDOFF for the full mechanism.
+   **What is left for this pass is the exceptions, not the rule.** Two are already known:
+   `DistilledChaos` is hand-only by call family and excluded by hand because `AutoPlayFromDrawPile`
+   plays your cards at the opponent, and anything with a similar gap wants catching by eye. If a
+   potion feels wrong on the side the rule put it on, that is the balance judgement — the mechanism
+   is a one-line list edit.
 
-3. **What to cut from 1v1.** Vanilla content assumes a co-op or solo run against monsters; a duel
+2. ~~**Choice-on-obtain relics (BIIIG_HUG and its kind).**~~ **DECIDED and BUILT 2026-08-18
+   (Lucas: "ideally let's make it so cards with choices like kaleidoscope or biiig hug work").**
+   Of the two options this item offered — make them work, or cut them from the pool — the first
+   was taken. `DuelDraft.ObtainAndResolve` awaits `RelicCmd.Obtain` instead of firing it and
+   forgetting it, and holds the draft's own screen down for the duration, keyed on the model's own
+   `HasUponPickupEffect` rather than a list of relic names.
+
+   Two things that stay decided rather than open:
+
+   - **The choice comes out of the picker's own draft clock.** Asked for explicitly. It is also
+     what happens if nothing touches the clock, so the implementation is the absence of a pause.
+   - **It resolves at pick time, not deferred to the end of the round.** Lucas offered end-of-round
+     as an easier fallback; awaiting in place turned out to be the smaller change, since deferring
+     would have meant re-showing a reward set that vanilla had already parked.
+
+   **What this pass still owns is the content question**, which is untouched: whether a
+   "remove 4 cards" or "pick 1 of 3 off-class cards" relic is a *good* thing to offer in a
+   competitive draft at all. It works now; whether it belongs is still a judgement call, and it
+   overlaps with item 3.
+
+   Worth knowing for that judgement: KALEIDOSCOPE's `AfterObtained` was also what produced the
+   2026-08-18 black screen. It offers two `CardReward`s, nobody could take them under the draft
+   screen, and the pending set NRE'd at arena entry because a draft has no map-point history entry.
+   Both halves are fixed and neither is a reason to keep or cut the relic — see HANDOFF.
+
+3. **Should a disconnect simply be a loss?** Raised 2026-08-18 on seeing the HP rule work:
+   *"realistically maybe the right choice in the future is that a disconnect is a loss rather than
+   deferring to hp/score."*
+
+   What ships today is the evidence rule: an accidental drop is decided on HP if it happened in the
+   duel (both machines provably agree there, so both reach the same answer with nothing on the
+   wire), and drawn anywhere else. It exists because **a partition is symmetric** — the first real
+   Steam session had both ends independently declare the link dead — so "whoever remains wins"
+   handed the match to *both* players.
+
+   "The dropper loses" is a cleaner competitive rule and is the one most games use. It is a
+   *balance* decision rather than a correctness one, and it is not free: neither side can tell "they
+   crashed" from "my own link died", so on a true partition both would conclude they had lost, which
+   is the mirror of the bug just fixed rather than an improvement on it. Making it work needs
+   something the current design does not have — a third party, a rejoin window that expires, or a
+   post-hoc reconcile when the two clients next meet. **Decide it against native reconnect**, which
+   is the milestone that changes the answer.
+
+4. **What to cut from 1v1.** Vanilla content assumes a co-op or solo run against monsters; a duel
    is neither. Some relics, potions and cards are pointless, degenerate, or unfun across the table.
    The dead-in-a-duel *reflex* is already handled by hook (`DuelDraft.IsDeadInADuel`); this is the
    *judgement* layer on top — the things that technically function but should not be offered because
