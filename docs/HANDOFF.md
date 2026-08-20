@@ -1,4 +1,4 @@
-# Handoff — state of the mod as of 2026-08-14
+# Handoff — state of the mod as of 2026-08-19
 
 Written for someone (human or agent) picking this up cold, on any OS. Built against **Slay the
 Spire 2 v0.111.0** (`41cef1ea`), on two local clients connected over ENet. Most of the reasoning
@@ -19,10 +19,11 @@ Both formats then share everything: two turn models (paced real-time, batched tu
 clocks, checksums, the arena, the result screen, badges, stats, rematch, resignation, agreed draws
 and disconnect handling.
 
-**Patch count: 94 classes / 129 methods** (`DuelDraftPotionScreenPatch` added 2026-08-19) (`DuelReturnToLobbyPatch` added 2026-08-18; 92/128 was read out of a live log before it). Read out of `logs/host.20260818T114613.log`, not
-restated — this file said 89 and `CLAUDE.md` said 93, and both were wrong in different directions.
-Confirm `N patch classes applied cleanly` on every launch — if it says `PATCH FAILED`, duelling
-refuses to start and in-game results mean nothing.
+**Patch count: 94 classes / 129 methods.** Confirm `N patch classes applied cleanly` on every
+launch — if it says `PATCH FAILED`, duelling refuses to start and in-game results mean nothing.
+Read the number out of a live log rather than restating it: this file has said 89 and `CLAUDE.md`
+93 while the log said 92, and a count that disagrees with what you just wrote leaves you guessing
+which half is missing.
 
 ## Read `docs/DRAFT_LOBBY.md` before touching the draft lobby
 
@@ -889,7 +890,103 @@ Keep that split if you extend this.
 
 ## Immediate next step
 
-### START HERE — 2026-08-18: the first Steam session, read back from both logs
+### START HERE — 2026-08-19, handing off to the MacBook
+
+Picked up on Windows over 2026-08-18/19 and handed to the Mac mid-stream. Everything below is
+committed and pushed to `origin/master`; `git pull` on the Mac is the whole of getting current.
+**Build first, then read the one open bug** — it is the only thing in the way.
+
+**Patch count is 94 classes / 129 methods.** Confirm that line before trusting anything in a session.
+
+#### The one thing that is broken, and it is instrumented rather than diagnosed
+
+**Card energy costs displayed wrong in a duel** (reported 2026-08-19, unexplained). On turn two:
+Bash showed 1, Flame Barrier 1, Dark Embrace 3, Brand 1 — against canonical 2, 2, 2 and 0. Some up,
+some down, so not an off-by-one. Lucas: *"they corrected once something was actually queued"*, which
+is the signature of a stale label rather than a wrong cost.
+
+**What has already been ruled out, so do not re-check it:** no cost-touching relic was drafted that
+match (`BeatingRemnant`, `NutritiousOyster`, `RunicPyramid`, `VexingPuzzlebox` all leave `EnergyCost`
+alone), only `ATTACK_POTION` and `FRUIT_JUICE` were procured so nothing Snecko-shaped ran, and no
+power was up. **Bludgeon staying in hand is `RunicPyramid.ShouldFlush` working**, not part of this.
+
+So nothing that should move those numbers was in play, and two opposite explanations remain:
+
+| If the log says | Then |
+|---|---|
+| `BASH=1(canonical 2)  <-- DIFFERS` | The *model's* cost is genuinely wrong and something applies a modifier nobody has found. Hunt the modifier |
+| every card agrees, but the screen disagreed | Only the label is stale. The fault is entirely in the repaint — `LockInPlanView.RefreshPlannedCosts` and the 2026-08-13 energy-display work below |
+
+`DuelTurnModel.LogHandCosts` now prints both numbers for every card in hand at turn start. **One
+duel answers it.** Do not fix this before reading that line; the two causes need opposite changes,
+and this project has twice paid for fixing a mechanism nobody had observed.
+
+Not known whether it predates the potion round — worth asking Lucas whether he had seen correct
+costs in a duel since that landed, which would narrow it a lot.
+
+#### Built on 2026-08-18/19 and PLAYED — do not re-litigate these
+
+- **The draft is seeded.** Same seed + same characters ⇒ same cards, same relics, same first pick.
+  Confirmed by replaying a seed. A rematch is a rematch, deliberately: same pool, same first pick.
+- **Return to lobby**, both directions, in **both formats**. Match → lobby → match → lobby → rematch
+  all clean, settings carried across.
+- **The potion round** — 4 in the pool, 2 each, in the relic screen itself.
+- **Opponent potions on the deck review**, a row above their relics.
+- **Choice-on-obtain relics work** (Kaleidoscope, Tri-Boomerang) — the draft holds its screen while
+  the effect resolves, and your own draft clock keeps running, as asked.
+- **Hand-only potions resolve on click**; board potions still queue.
+
+#### Built and NOT yet played
+
+- **The disconnect rework.** An accidental drop is decided on HP if it happened in the duel and
+  drawn anywhere else; deliberate departures still award the win outright. 30s window, **Wait
+  longer…** (amber, +30s a press) and **End now** (red, left). Only the mid-duel HP case has been
+  seen; the draw-outside-the-duel case has not.
+- **`ShouldDecide` now asks `Phase != Complete`** rather than listing race/duel/draft routes. The
+  deck-review window it opened up *has* been seen working.
+
+#### Mac specifics
+
+`docs/MAC_SETUP.md` is the setup. No pwsh: `./scripts/host.sh --custom` and `./scripts/client.sh`.
+**The `--custom` flag is not optional** — a run launched without it cannot configure a match, and
+the only sign is `--fastmp=host_standard` on the log's args line.
+
+The decompile lives outside the repo and is **not** committed; regenerate per README if
+`D:\modding\sts2\decompiled` has no Mac equivalent yet. Game is **v0.111.0**; check
+`release_info.json` and re-decompile if Steam moved it.
+
+The `.pck` is committed and current. `host.sh` re-exports when anything under `SpirePvp/` is newer —
+and note that **only the host re-exports**, so a broken loc table crashes the host while the client
+runs on the older pack. That asymmetry is a diagnosis, not a second bug; it happened on 2026-08-19
+from one trailing comma.
+
+#### What is left before the balance pass
+
+**Two things.** The **pre-duel rest site** (approved, designed, re-scoped 2026-08-13, never built)
+and **native reconnect**. Everything else that used to be on this list turned out to be built
+already — the draft clock, return to lobby, the potion-queue split and M8.5 slice 3 were each found
+still marked "NOT built" and each was corrected on 2026-08-19. **Check the code before rebuilding
+anything this document claims is missing.**
+
+`docs/BALANCE.md` has six items now, four of them diagnosed rather than merely named: the
+`SetupForPlayer` relics (DustyTome / ArchaicTooth / TouchOfOrobas, which no-op safely), Fur Coat,
+whether a disconnect should simply be a loss, and Tri-Boomerang's mid-draft enchant.
+
+#### Two engine facts learned here that will matter again
+
+- **Nothing pumps the socket between a run and a lobby.** `INetGameService.Update()` has exactly two
+  callers — `NRun.cs:201` and `NCustomRunScreen.cs:568` — so in the gap the connection is open and
+  completely unread. Anything that outlives a run has to pump it itself.
+- **`NGame.ReturnToMainMenu` calls `RunManager.CleanUp` a second time**, on every menu transition
+  after a run. `CleanUp` no-ops on the second call, but a prefix on it does not unless it asks the
+  same `State == null` question — which is now what `DuelRunCleanupPatch` does.
+
+And one UI rule, learned three times in two days: **a node must be in the tree before it is filled.**
+`NPotionHolder.AddPotion` writes `_emptyIcon`, which `_Ready` assigns. `AddChildSafely` is not
+enough — it defers unless the parent `IsNodeReady()`. Use plain `AddChild` on a parent already in
+the tree.
+
+### 2026-08-18: the first Steam session, read back from both logs
 
 Lucas and a friend played two Draft matches over Steam. **Both ended wrong, in two unrelated
 ways, and a third session had already shipped fixes for them before these logs were read
@@ -1318,7 +1415,7 @@ disconnect test so far has gone through `DuelDisconnect`'s 30-second silence mea
 transport does report drops.** So a Steam session is the first time the announced-disconnect path runs
 for real, and it is worth deliberately having someone quit mid-duel to see it.
 
-### START HERE — 2026-08-14, second session
+### 2026-08-14, second session
 
 **The game moved to v0.111.0 underneath the project** (`41cef1ea`, released 2026-08-13), exactly the
 trap this document warns about — the previous session's work was all done against v0.110.1. Handled
