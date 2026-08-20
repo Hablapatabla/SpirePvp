@@ -80,6 +80,10 @@ internal static class LockInPlanView
 
         // Nothing else will ask the hand to re-evaluate what you can now afford.
         RefreshPlannedCosts();
+
+        // After the repaint, so the line records what the player is looking at now rather than what
+        // they were looking at a moment ago. See DuelTurnModel.LogHandCostsAfterFirstPlan.
+        DuelTurnModel.LogHandCostsAfterFirstPlan();
     }
 
     /// <summary>
@@ -162,6 +166,7 @@ internal static class LockInPlanView
         NPotionHolder? holder = HolderFor(action.PotionIndex);
         holder?.DisableUntilPotionRemoved();
         RefreshPlannedCosts();
+        DuelTurnModel.LogHandCostsAfterFirstPlan();
     }
 
     /// <summary>

@@ -1,5 +1,9 @@
 using System;
 using System.Collections.Generic;
+using Godot;
+using MegaCrit.Sts2.addons.mega_text;
+using MegaCrit.Sts2.Core.Nodes.Cards;
+using MegaCrit.Sts2.Core.Nodes.Combat;
 using MegaCrit.Sts2.Core.Combat;
 using MegaCrit.Sts2.Core.Entities.Cards;
 using MegaCrit.Sts2.Core.Entities.Creatures;
@@ -32,6 +36,8 @@ namespace SpirePvp.Duel.Turns;
 public static class DuelTurnModel
 {
     private static IDuelTurnModel? _current;
+
+    private static bool _handCostsLoggedThisTurn;
 
     /// <summary>The model for the run in progress, built on first use and released with the run.</summary>
     public static IDuelTurnModel Current
@@ -117,11 +123,18 @@ public static class DuelTurnModel
         // models clear their in-flight lists at a turn boundary, so this belongs with them.
         LockInPlanView.RestorePlannedPotions();
 
+        // Sampled either side of the repaint, and the pair is the point. The turn-start refresh
+        // below repaints every holder, so a label logged only after it has been corrected by the
+        // very call being investigated — "before" is what the player would have been looking at if
+        // nothing had asked, and "after" is whether asking fixed it.
+        _handCostsLoggedThisTurn = false;
+        LogHandCosts(state, "before turn-start repaint");
+
         // The reservation is cleared at a turn boundary, so the costs and the orb have to be
         // asked again or they keep showing last turn's commitments.
         LockInPlanView.RefreshPlannedCosts();
         LogPowers(state);
-        LogHandCosts(state);
+        LogHandCosts(state, "after turn-start repaint");
 
         // **Only in the duel.** This is armed for the whole run, and `CombatManager.TurnStarted`
         // fires for every combat in the *race* too — so an ordinary Act 1 fight was drawing "You
@@ -152,7 +165,8 @@ public static class DuelTurnModel
     /// "audit `AfterSideTurnStart` powers when one shows up" since poison needed its own patch.
     /// </summary>
     /// <summary>
-    /// What every card in the local hand costs at turn start, canonical and modified.
+    /// What every card in the local hand costs, every way the engine can be asked, beside what the
+    /// card is actually showing.
     ///
     /// **Because "the numbers on my cards were wrong" has two completely different causes and the
     /// screen cannot tell them apart.** Reported 2026-08-19: on turn two, Bash read 1 (canonical 2),
@@ -161,13 +175,54 @@ public static class DuelTurnModel
     /// label rather than a wrong cost. But nothing in that match randomises costs: no cost-touching
     /// relic was drafted, no Snecko-shaped potion was drunk, and no power was up.
     ///
-    /// So either the model's cost really is wrong, in which case `modified` differs from
-    /// `canonical` here and something is applying a modifier nobody has found yet — or the model is
-    /// right and only the label is stale, in which case these agree and the fault is entirely in the
-    /// repaint. One line per card at turn start settles which, and this project has now paid twice
-    /// for guessing at a mechanism nobody had observed.
+    /// **The first version of this logged `GetWithModifiers(CostModifiers.None)` and called it
+    /// "modified", which cannot see the thing it was written to find.** `None` is `0`, so
+    /// `CardEnergyCost.GetWithModifiers` skips both the local-modifier loop and
+    /// `Hook.ModifyEnergyCostInCombat` and hands back `_base` — it differs from `Canonical` only on
+    /// a *permanent* change like an upgrade. A card whose cost is being pushed around by a local or
+    /// global modifier would have logged `None == Canonical`, no `DIFFERS`, and sent the next
+    /// session to the repaint on the strength of an acquittal the line was never able to give.
+    ///
+    /// So all four are logged, and `shown` is read straight off the label
+    /// `NCard.UpdateEnergyCostVisuals` writes — which is `GetWithModifiers(All).ToString()`, so it
+    /// is the same number by construction and a disagreement is a stale paint with nothing left to
+    /// interpret. That splits the two causes cleanly:
+    ///
+    /// - `LABEL` — the model is right and the screen is behind it. The fault is the repaint.
+    /// - `LOCAL` / `GLOBAL` — the cost really is modified, and which flag it is names the family:
+    ///   local modifiers live on the card, global ones come out of the combat hook, which in a duel
+    ///   runs over *both* duelists' listeners.
+    /// - `BASE` — a permanent change, i.e. an upgrade. Expected, not a fault.
+    ///
+    /// Logged at turn start and again on the turn's first plan, because "they corrected once
+    /// something was actually queued" is a claim about the difference between those two moments.
     /// </summary>
-    private static void LogHandCosts(CombatState state)
+    /// <summary>
+    /// The same line again, once, after the turn's first plan is filed.
+    ///
+    /// **The report to be checked is a claim about a *change*** — "they corrected once something was
+    /// actually queued" — and a single sample at turn start cannot see a correction. Once per turn
+    /// rather than per plan: the question is whether the numbers move when planning starts, not what
+    /// they read after each card.
+    /// </summary>
+    public static void LogHandCostsAfterFirstPlan()
+    {
+        if (_handCostsLoggedThisTurn)
+        {
+            return;
+        }
+
+        CombatState? state = CombatManager.Instance?.DebugOnlyGetState();
+        if (state == null)
+        {
+            return;
+        }
+
+        _handCostsLoggedThisTurn = true;
+        LogHandCosts(state, "after first plan");
+    }
+
+    private static void LogHandCosts(CombatState state, string when)
     {
         Player? me = LocalContext.GetMe(state);
         if (me == null)
@@ -175,15 +230,49 @@ public static class DuelTurnModel
             return;
         }
 
+        NPlayerHand? hand = NPlayerHand.Instance;
         List<string> costs = new List<string>();
         foreach (CardModel card in PileType.Hand.GetPile(me).Cards)
         {
             try
             {
-                int modified = card.EnergyCost.GetWithModifiers(CostModifiers.None);
+                int all = card.EnergyCost.GetWithModifiers(CostModifiers.All);
+                int local = card.EnergyCost.GetWithModifiers(CostModifiers.Local);
+                int global = card.EnergyCost.GetWithModifiers(CostModifiers.Global);
+                int bas = card.EnergyCost.GetWithModifiers(CostModifiers.None);
                 int canonical = card.EnergyCost.Canonical;
-                string flag = modified == canonical ? "" : "  <-- DIFFERS";
-                costs.Add($"{card.Id.Entry}={modified}(canonical {canonical}){flag}");
+
+                // What the player is actually looking at. `NCard.UpdateEnergyCostVisuals` writes
+                // `GetWithModifiers(All).ToString()` into this label, so the two disagreeing is the
+                // whole of "the label is stale" and needs no interpretation.
+                NCard? node = hand?.GetCard(card);
+                MegaLabel? label = node == null || !GodotObject.IsInstanceValid(node) ? null : node._energyLabel;
+                string shown = label == null || !GodotObject.IsInstanceValid(label) ? "?" : label.Text;
+
+                // An X-cost card is drawn as "X" rather than as a number, so comparing the label
+                // against `all` would flag every one of them. `?` is the same story from the other
+                // side — vanilla writes it for a card it is not showing, and this logs a missing
+                // node the same way.
+                List<string> flags = new List<string>();
+                if (shown != "?" && !card.EnergyCost.CostsX && shown != all.ToString())
+                {
+                    flags.Add("LABEL");
+                }
+
+                if (all != bas)
+                {
+                    flags.Add(local != bas ? "LOCAL" : "GLOBAL");
+                }
+
+                if (bas != canonical)
+                {
+                    flags.Add("BASE");
+                }
+
+                string flag = flags.Count == 0 ? "" : "  <-- " + string.Join("+", flags);
+                costs.Add(
+                    $"{card.Id.Entry} shown={shown} all={all} local={local} global={global} " +
+                    $"base={bas} canonical={canonical}{flag}");
             }
             catch (Exception e)
             {
@@ -191,10 +280,18 @@ public static class DuelTurnModel
             }
         }
 
-        if (costs.Count > 0)
-        {
-            Log.Info($"[SpirePvp] hand costs at turn start — {string.Join(", ", costs)}");
-        }
+        // **Energy on the same line, because a question about costs is usually a question about
+        // what you could afford.** Asked 2026-08-20 — "energy refilled after locking in on turn 1" —
+        // and the honest answer was that nothing in any log records energy, so a relic granting it
+        // once and a relic granting it three times read identically. The turn number rides along for
+        // the same reason: several of the relics that grant energy do it only on turn one, so
+        // "which turn does this client think it is" is half of every such question.
+        int energy = me.PlayerCombatState?.Energy ?? -1;
+        int turn = me.PlayerCombatState?.TurnNumber ?? -1;
+
+        Log.Info(costs.Count > 0
+            ? $"[SpirePvp] hand costs {when} — turn {turn}, {energy} energy — {string.Join(" | ", costs)}"
+            : $"[SpirePvp] hand costs {when} — turn {turn}, {energy} energy — hand is empty");
     }
 
     private static void LogPowers(CombatState state)
