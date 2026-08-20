@@ -55,9 +55,30 @@ public static class SpirePvpInit
 
         foreach (Type type in Assembly.GetExecutingAssembly().GetTypes())
         {
+            // **Not every type is a patch class, and handing Harmony one that is not can throw.**
+            // `CreateClassProcessor` was called on everything in the assembly on the assumption that
+            // it no-ops for plain classes. It mostly does — until a class holds something Harmony
+            // recognises without a target to bind it to, which produces `Patching exception in
+            // method null`, counts as a failure, and disables duelling for a class that never
+            // wanted patching. `DuelThirdPartyGuard` is exactly that: it patches manually, at
+            // runtime, against an assembly that may not exist.
+            //
+            // Asking whether the type carries a Harmony attribute *anywhere* — class or method —
+            // before involving Harmony at all leaves every real patch class on the same path it was
+            // on, and takes the rest off it. The counts are unchanged, because a plain class
+            // contributed nothing to them before either.
+            bool isPatchClass =
+                type.GetCustomAttributes(typeof(HarmonyPatch), inherit: false).Length > 0
+                || type.GetMethods(BindingFlags.Static | BindingFlags.Public | BindingFlags.NonPublic)
+                       .Any(m => m.GetCustomAttributes(typeof(HarmonyPatch), inherit: false).Length > 0);
+
+            if (!isPatchClass)
+            {
+                continue;
+            }
+
             try
             {
-                // No-ops for types without Harmony attributes.
                 if (harmony.CreateClassProcessor(type).Patch()?.Count > 0)
                 {
                     applied++;
