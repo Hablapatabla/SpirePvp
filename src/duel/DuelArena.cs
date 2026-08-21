@@ -2,6 +2,7 @@ using MegaCrit.Sts2.Core.Combat;
 using MegaCrit.Sts2.Core.Commands;
 using MegaCrit.Sts2.Core.Context;
 using MegaCrit.Sts2.Core.Entities.Creatures;
+using MegaCrit.Sts2.Core.Entities.Multiplayer;
 using MegaCrit.Sts2.Core.Entities.Players;
 using MegaCrit.Sts2.Core.Helpers;
 using MegaCrit.Sts2.Core.Logging;
@@ -67,7 +68,7 @@ public static class DuelArena
         _entered = false;
     }
 
-    public static bool Enter()
+    public static bool Enter(NetFullCombatState? resume = null)
     {
         RunManager? runManager = RunManager.Instance;
         RunState? runState = runManager?.DebugOnlyGetState();
@@ -96,7 +97,7 @@ public static class DuelArena
 
         // Veto first, then enter. See the ordering note above.
         DuelSession.ActivateDuel(0);
-        TaskHelper.RunSafely(EnterRoom(runManager, room));
+        TaskHelper.RunSafely(EnterRoom(runManager, room, resume));
 
         Log.Warn("[SpirePvp] entering duel arena");
         return true;
@@ -233,7 +234,7 @@ public static class DuelArena
     /// The through-line: this arena is the first room the mod enters that was not reached through
     /// a map point, and every one of these is something the map path does for you.
     /// </summary>
-    private static async Task EnterRoom(RunManager runManager, CombatRoom room)
+    private static async Task EnterRoom(RunManager runManager, CombatRoom room, NetFullCombatState? resume)
     {
         // Tells the net layer we are loading, so a slow sync does not raise a spurious
         // "waiting for connection from host" overlay. Every vanilla entry point does this.
@@ -285,11 +286,30 @@ public static class DuelArena
 
             // Bracketed by logs on purpose: a sync that never completes is a silent wait on the
             // map, which looks nothing like a sync problem from the outside.
-            Log.Warn("[SpirePvp] duel: waiting for pre-combat state sync");
-            runManager.CombatStateSynchronizer.StartSync();
-            runManager.ClearScreens();
-            await runManager.CombatStateSynchronizer.WaitForSync();
-            Log.Warn("[SpirePvp] duel: state sync complete");
+            // **A rejoin has nothing to sync with.** The pre-combat sync is a handshake: both
+            // peers broadcast and both wait for the other. The host is already *in* the arena and
+            // will never enter it again, so a returning client that called `StartSync` would wait
+            // for a partner that has no reason to answer — which is exactly what the first rejoin
+            // test did, parking the client on "Waiting to receive all sync messages from all
+            // clients" forever.
+            //
+            // The snapshot replaces it, and is strictly better here: the sync exchanges *player*
+            // state before a combat starts, while `GetRejoinMessage` ships the whole live combat —
+            // creatures, powers, piles, energy, turn number and the synchronizer counters. It is
+            // the same information the sync would have produced plus the part the sync cannot carry.
+            if (resume == null)
+            {
+                Log.Warn("[SpirePvp] duel: waiting for pre-combat state sync");
+                runManager.CombatStateSynchronizer.StartSync();
+                runManager.ClearScreens();
+                await runManager.CombatStateSynchronizer.WaitForSync();
+                Log.Warn("[SpirePvp] duel: state sync complete");
+            }
+            else
+            {
+                Log.Warn("[SpirePvp] duel: resuming from the host's snapshot — no sync handshake");
+                runManager.ClearScreens();
+            }
 
             // **The post-sync reconcile is gone, and removing it is the fix for a desync it caused.**
             //
@@ -333,6 +353,15 @@ public static class DuelArena
                 DuelSession.Reset();
                 await runManager.FadeIn();
                 return;
+            }
+
+            // **Before anything reads the combat.** The layout, the initiative arrow and the duel
+            // flag all inspect state below, and on a rejoin the room was built fresh — so until the
+            // snapshot lands, every one of them is looking at turn one of a combat that is actually
+            // several turns old.
+            if (resume != null)
+            {
+                DuelRejoinCombatState.Apply(resume, state, runManager);
             }
 
             // Now that both players exist in the combat, record the opponent and fix the layout.

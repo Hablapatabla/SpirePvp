@@ -119,6 +119,41 @@ public class DuelConsoleCmd : AbstractConsoleCmd
                     : "Auto-draft off.");
         }
 
+        // **A rejoin from the console before it is a rejoin from a menu**, because the interesting
+        // half is the restore and the menu is a button on top of it. `duel rejoin` dials the host
+        // this client last joined and takes the run it sends back.
+        //
+        // Fire-and-forget rather than awaited: a console command answers synchronously and the
+        // rejoin is a whole network round trip plus a scene load. The result lands in the log, which
+        // is where the diagnosis for this lives anyway.
+        if (mode == "rejoin")
+        {
+            if (RunManager.Instance?.State != null)
+            {
+                return new CmdResult(success: false,
+                    "Already in a run — leave to the main menu first, then rejoin.");
+            }
+
+            // **An address can be given, and on a restarted client it has to be.** The remembered
+            // one is static mod state and dies with the process, which is the very case a reconnect
+            // serves. With no argument this falls back to the dev rig's host, which is what a local
+            // two-client test wants and what a killed client comes back knowing nothing about.
+            string ip = args.Length > 1 ? args[1] : "127.0.0.1";
+            ushort port = 33771;
+            if (args.Length > 2 && !ushort.TryParse(args[2], out port))
+            {
+                return new CmdResult(success: false, $"'{args[2]}' is not a port.");
+            }
+
+            if (args.Length > 1 || !DuelRejoin.IsOffered)
+            {
+                DuelRejoin.UseAddress(ip, port);
+            }
+
+            TaskHelper.RunSafely(DuelRejoin.Attempt());
+            return new CmdResult(success: true, $"Rejoining {ip}:{port} — watch the log.");
+        }
+
         if (mode == "start")
         {
             return StartDuelRoom();
@@ -132,7 +167,7 @@ public class DuelConsoleCmd : AbstractConsoleCmd
         if (mode != "on")
         {
             return new CmdResult(success: false,
-                "Invalid argument '" + args[0] + "'. Use 'start', 'now', 'hud', 'on' or 'off'.");
+                "Invalid argument '" + args[0] + "'. Use 'start', 'now', 'hud', 'rejoin', 'on' or 'off'.");
         }
 
         if (!CombatManager.Instance.IsInProgress)

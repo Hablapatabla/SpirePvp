@@ -188,6 +188,13 @@ public static class DuelMatch
         DuelSession.Reset();
         DuelClockService.Reset();
         DuelArena.Reset();
+
+        // Mod state is static and the run it belongs to is not. A snapshot left here would make the
+        // *next* match believe it was a restore, skip its own draft and walk into an arena with a
+        // dead match's combat in hand.
+        DuelRejoin.ClearResume();
+        Patches.DuelDisplayExceptionGuardPatch.Reset();
+        DuelThirdPartyGuard.Reset();
         RaceCoordinator.Reset();
         DuelDisconnect.Reset();
         DuelFlag.Disarm();
@@ -252,11 +259,24 @@ public static class DuelMatch
         //
         // The arena node is still installed below: nobody walks to it, but `DuelArena` moves both
         // clients to its coord, so it has to be a real map point with a real coord to move to.
-        if (!IsDraftMatch(runState))
+        // **Not on a restored run.** A rejoin lands in the duel, which is after the race by
+        // definition, so starting one here would arm the race phase underneath a duel already in
+        // progress — the mod's riskiest phase, running at the one moment nothing expects it. The
+        // arena node below is still installed, because `DuelArena` moves to its coord and needs a
+        // real map point to move to.
+        if (!IsDraftMatch(runState) && !DuelRejoin.IsRestoring)
         {
             DuelSession.ActivateRace();
             RaceCoordinator.BeginRace();
         }
+
+        // **Third-party containment, applied here rather than at mod init, because at mod init the
+        // third party does not exist yet.** Mods load in sequence and SpirePvp's assembly is loaded
+        // first — MintySpire2's came ninety lines later in the same log — so `AccessTools.TypeByName`
+        // ran before the type it was looking for had been introduced, found nothing, and silently
+        // did nothing. The first PvP run is the earliest moment every mod is guaranteed present, and
+        // it is also the earliest moment the guard could matter.
+        DuelThirdPartyGuard.ApplyOnce();
 
         // Bank sizes only — the clocks cannot start yet, see OnRunLaunched.
         DuelClockService.Configure(RaceClockMinutes(runState), DuelClockMinutes(runState));

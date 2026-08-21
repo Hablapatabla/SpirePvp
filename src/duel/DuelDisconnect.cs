@@ -325,6 +325,38 @@ public static class DuelDisconnect
     ///
     /// An *accidental* drop is not this. See <see cref="DecideAfterSilence"/>.
     /// </summary>
+    /// <summary>
+    /// The peer is back on a new connection — stand the countdown down.
+    ///
+    /// **This is a different event from "the opponent is talking again", and only one of them used
+    /// to exist.** That one is heartbeat silence ending on the *same* link, which is the blip case.
+    /// A true rejoin arrives as a fresh connection the host accepts in
+    /// `RunLobby.HandleClientRejoinRequestMessage`, and nothing in the mod was listening for it — so
+    /// a returning player would have raced a countdown that had no way of hearing them arrive, and
+    /// lost a match they had just successfully rejoined.
+    ///
+    /// Guarded on nothing: clearing a wait that is not running is what <see cref="ClearWait"/> already
+    /// does safely, and asking "were we waiting" here would be asking a second question when the one
+    /// that matters — is the peer present — has just been answered.
+    /// </summary>
+    /// <summary>
+    /// Whether a peer is currently being waited on — the window is open and undecided.
+    ///
+    /// **Read by the ENet transport patch, and it is the condition that makes evicting a peer slot
+    /// safe.** Vanilla refuses a second connection carrying an id it already holds, which is right
+    /// during a healthy match and wrong for a rejoin, because ENet never reported the drop so the
+    /// stale slot is still occupied. Asking *this* rather than "does the id collide" is the
+    /// difference between letting a returning duelist back in and letting a stranger take over a
+    /// live seat.
+    /// </summary>
+    public static bool IsWaitingForPeer => _connectionLostAtMs != null || _forfeitAtMs != null;
+
+    public static void NotePeerRejoined(ulong playerId)
+    {
+        _lastClientDropReason = null;
+        ClearWait($"player {playerId} rejoined");
+    }
+
     public static void Declare(string why)
     {
         _declared = true;

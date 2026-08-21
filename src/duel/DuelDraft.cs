@@ -329,6 +329,17 @@ public static class DuelDraft
     /// </summary>
     public static void Begin(RunState runState)
     {
+        // **A restored run is mid-match, and the draft is long over.** The mod re-arms on a rejoin
+        // through the same `AfterRunLoaded` path a fresh run uses, so without this the returning
+        // client sets about drafting again and parks on "waiting for the host's pool" — a pool the
+        // host has no reason to send twice. Measured on the first successful rejoin, which produced
+        // an empty arena for exactly this reason.
+        if (DuelRejoin.IsRestoring)
+        {
+            Log.Warn("[SpirePvp] draft: skipped — this run is being restored, not started");
+            return;
+        }
+
         // **Before the host check, because both peers reach this method** — the client falls out
         // one line down, and it needs the history entry every bit as much as the host does.
         EnsureMapPointHistory(runState);
