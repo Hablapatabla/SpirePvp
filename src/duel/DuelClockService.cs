@@ -346,6 +346,32 @@ public static class DuelClockService
         // Starting together and never pausing is what keeps the two values identical, which
         // is what "global timer" means here. Spending it is not a duel cost — the duel gets a
         // bank of its own — but running it out is still a loss.
+        // DRAFT — alternating picks, so it is a real chess clock and the race rule below is wrong
+        // for it. Reported 2026-08-20: *"both clocks were just continuously counting down as
+        // opposed to chess-clock like behavior in which your clock stops counting while the
+        // opponent is thinking."*
+        //
+        // **A draft is not a small race, it is the opposite of one.** The race branch below runs
+        // both banks together because the two players are in separate combats and never wait on
+        // each other — nobody is idle, so charging both is measuring something real. In a draft the
+        // picks alternate: exactly one player is deciding and the other can do nothing but watch.
+        // Charging the watcher bills them for the opponent's thinking, which is the precise thing a
+        // chess clock exists to prevent, and over a 15-card draft it is most of the bank.
+        //
+        // The same shape as the deck-review branch below, and for the same reason: whoever is not
+        // on the move is not spending. Between rounds — cards done, relics not yet dealt — nobody
+        // may pick and both stop, which is right: that gap is the mod dealing, not either player
+        // deliberating.
+        if (DuelDraft.IsDraftRun && !DuelSession.IsDuelActive)
+        {
+            bool localOnTheMove = DuelDraft.LocalMayPick;
+            bool opponentOnTheMove = DuelDraft.IsDrafting && !localOnTheMove;
+
+            ApplyReadyState(_local, !localOnTheMove);
+            ApplyReadyState(_opponent, !opponentOnTheMove);
+            return;
+        }
+
         if (!DuelSession.IsDuelActive)
         {
             _local.Start();
