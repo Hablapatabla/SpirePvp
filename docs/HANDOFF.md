@@ -1,4 +1,4 @@
-# Handoff — state of the mod as of 2026-08-19
+# Handoff — state of the mod as of 2026-08-20
 
 Written for someone (human or agent) picking this up cold, on any OS. Built against **Slay the
 Spire 2 v0.111.0** (`41cef1ea`), on two local clients connected over ENet. Most of the reasoning
@@ -19,7 +19,7 @@ Both formats then share everything: two turn models (paced real-time, batched tu
 clocks, checksums, the arena, the result screen, badges, stats, rematch, resignation, agreed draws
 and disconnect handling.
 
-**Patch count: 94 classes / 129 methods.** Confirm `N patch classes applied cleanly` on every
+**Patch count: 98 classes / 137 methods.** Confirm `N patch classes applied cleanly` on every
 launch — if it says `PATCH FAILED`, duelling refuses to start and in-game results mean nothing.
 Read the number out of a live log rather than restating it: this file has said 89 and `CLAUDE.md`
 93 while the log said 92, and a count that disagrees with what you just wrote leaves you guessing
@@ -890,7 +890,129 @@ Keep that split if you extend this.
 
 ## Immediate next step
 
-### START HERE — 2026-08-19, handing off to the MacBook
+### START HERE — 2026-08-20, handing back to the Windows PC
+
+A Mac session. Everything below is committed and pushed to `origin/master`; `git pull` is the whole
+of getting current. **Patch count is 98 classes / 137 methods.** Confirm that line before trusting
+anything.
+
+#### Read this first: the dev environment now loads Workshop mods, and that changed what we see
+
+`mods_STEAMTEST/` beside `mods/` is read recursively by `ModManager` and tagged
+`ModSource.SteamWorkshop` — **before** the `SteamInitializer.Initialized` check, so it works with
+`--force-steam=off` and the ENet two-client setup untouched. Copying the Workshop content in makes
+the dev rig load BaseLib, MintySpire2, RegentFX and RitsuLib alongside us (`Loaded 5 mods`).
+
+**Do this on the PC too.** It found a match-voiding bug within one duel, and it is the only way to
+see the class of fault below.
+
+    cp -R <steam>/steamapps/workshop/content/2868840/* <game>/mods_STEAMTEST/
+
+It is a *copy*, so it goes stale when Steam updates those mods. Re-copy after a Workshop update.
+
+#### The finding that matters most, because it will recur
+
+**A third-party display mod desynced two matches, and the shape is general.** MintySpire2 walks
+`CombatState.HittableEnemies` and dereferences `.Monster`. In a duel that getter is the opposing
+*player* — `DuelAoeTargetingPatch` resolves it that way and that is the whole AoE fix — so it NREs.
+The throw escapes into the simulation through a **creature setter**, kills the in-flight
+`PlayCardAction`, and fires a different number of times on each peer, so the two sims stop at
+different points inside the same card. Two dumps, two differing lines, both times.
+
+Minty's assumption is correct for vanilla. **We changed what a getter the whole game reads means**,
+so this is ours to contain, and any mod touching health bars or damage previews can hit it.
+
+`DuelThirdPartyGuard` contains it at Minty's own two methods, reflectively and tolerant of absence.
+Guarding *vanilla* entry points was tried first and was the wrong altitude **twice** — the fault is
+reached through `set_CurrentHp`, through `set_Block`, and through `InvokeDiedEvent`, and the third
+touches no `NHealthBar` method at all. Every creature setter that raises a display event is another
+road; guard the destination.
+
+Three traps worth keeping from building it:
+
+- **Harmony recognises `Prefix`/`Postfix`/`Finalizer`/`Transpiler` by *name*, attribute or not.** A
+  method called `Finalizer` in a class with no `[HarmonyPatch]` is a patch with no target:
+  `PATCH FAILED ... Patching exception in method null`, and duelling disabled.
+- **`SpirePvpInit` used to hand every type in the assembly to `CreateClassProcessor`.** It now asks
+  for a Harmony attribute first, so a manual-patch class cannot fail the health gate. Counts
+  unchanged.
+- **Mods load in sequence and ours loads first.** `AccessTools.TypeByName` at mod init ran ninety
+  log lines before Minty's assembly existed and silently found nothing. The guard applies at first
+  PvP run instead.
+
+#### Native reconnect — built, partly played
+
+Vanilla's rejoin is half-built and **the missing half is the client**. The handshake works end to
+end; `NJoinFriendScreen` just discards the answer. `DuelRejoin` is the consumer it never grew, and
+drives `JoinFlow` itself rather than patching an `async Task`.
+
+**Played and working:** dial, host accepts, whole run ships, client rebuilds and enters it, mod
+re-arms, host's disconnect countdown stands down.
+
+**The re-arm is free** — against what `docs/PLAYTEST_LIST.md` scoped as the hard part.
+`InitializeSavedRun` calls `OnRunLoaded` on every modifier → `AfterRunLoaded` → `DuelMatch
+.OnRunCreated`. Restore through the engine's saved-run path and it happens by itself; hand-roll the
+three initialise calls and it silently does not.
+
+**NOT played: the combat restore.** `DuelRejoinCombatState` writes the host's snapshot onto the
+rebuilt arena — HP, block, powers, energy, turn number, phase, all four piles, and the choice-id
+counters that decide the first checksum. None of it has run in a real match. **This is the next
+task.** Test with `./scripts/drop-client.sh`, relaunch the client, then `duel rejoin` at the menu.
+
+Two things learned the hard way:
+
+- **ENet rejects the rejoin below the game layer.** ENet never reports a hard drop, so the host
+  still holds the dead peer and the returning client collides with its own corpse (`IdCollision`);
+  `RunLobby`'s gate never runs. `DuelRejoinPeerSlotPatch` frees the seat, but only when a handshake
+  actually arrives — evicting on suspicion breaks the brief-stall case that heals itself — and
+  without notifying the game layer, whose belief that the player still exists is the very gate the
+  rejoin needs next.
+- **A restored run re-arms as a *new match*** and started a draft for a run already mid-duel. Now
+  skipped, along with the race start, and the resume goes through `DuelArena.Enter` carrying the
+  snapshot rather than a second copy of a sequence that has already lost six steps to omission.
+
+Scope decided 2026-08-20 (Lucas): **duel-phase only.** In the arena the sims are coupled and
+checksummed so the host's copy of you is correct by construction; in a race they are decoupled and a
+restore would hand you back roughly your Neow state. Recovering a *race* drop needs the client's own
+state broadcast to the host, which puts hidden deck information on the opponent's machine before the
+deck review — a separate decision, not a smaller version of this one.
+
+#### Also fixed on 2026-08-20
+
+- **The draft clock is a chess clock now.** It was running both banks continuously because a draft
+  fell through the branch written for the *race*, whose reasoning ("a global countdown, not a chess
+  clock") is right for a race and backwards for a draft: picks alternate, so one player can only
+  watch. Only the picker's bank runs; between rounds both stop.
+- **`stop.sh` escalates to SIGKILL.** SIGTERM alone hung the client and it had to be force-quit.
+- **The cost instrumentation was rewritten because it could not answer its own question.** It logged
+  `CostModifiers.None` and called it "modified" — `None` is `0`, so it skips the local loop *and*
+  `Hook.ModifyEnergyCostInCombat` and returns `_base`. A local or global modifier would have logged
+  no difference at all. It now logs all four, plus the label `NCard` actually shows, plus turn and
+  energy.
+
+#### Still open
+
+- **Empty Cage hangs the draft.** The on-pickup gate fires correctly; the card-removal screen opens
+  *underneath* the held draft screen, so clicks never land and it cancels with a
+  `TaskCanceledException`. Same fault this file records for KALEIDOSCOPE — fixed there for
+  `CardReward`s, never for card-*selection* screens. Needs a screen-ordering decision.
+- **The energy-cost report is unreproduced.** 82 readings across two peers, 16 cards, zero flags,
+  in the same Draft + lock-in format it was reported in — including Bash and Dark Embrace, two of
+  the four named cards, both correct. Not closed; the trigger was simply absent.
+- **A separate energy question, now instrumented rather than answered:** "energy refilled after
+  locking in on turn 1". Very Hot Cocoa grants 4 on turn 1 and is the likely answer, but it fires at
+  *turn start* and the report is about after a lock-in — and a lock-in turn holds several
+  plan→resolve exchanges. The hand-costs line now carries turn number and energy, so a repeat says
+  whether it fired once or three times.
+
+#### Corrections to this document, found by reading the code
+
+- **The pre-duel rest is built.** This file's "two things left" counted it as never built.
+  `DuelArenaRest.HealLocalDuelist` is wired at `DuelRendezvous.cs:128`; what is unbuilt is the rest
+  *room* with the Smith option, and the file's own note says the heal "is what was asked for".
+- **`docs/DESIGN.md` §7b item 1 still lists the potion round as unbuilt.** It shipped 2026-08-19.
+
+### 2026-08-19, handing off to the MacBook — superseded, kept for the reasoning
 
 Picked up on Windows over 2026-08-18/19 and handed to the Mac mid-stream. Everything below is
 committed and pushed to `origin/master`; `git pull` on the Mac is the whole of getting current.
